@@ -10,9 +10,7 @@ namespace AMMS.Shared.DTOs.Productions
     public class CreateTaskQrRequest
     {
         public int task_id { get; set; }
-        [DefaultValue(10)]
-        public int ttl_minutes { get; set; }
-        [DefaultValue(null)]
+        public int ttl_minutes { get; set; } = 60;
         public int? qty_good { get; set; }
     }
 
