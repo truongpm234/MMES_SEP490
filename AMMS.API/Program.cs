@@ -176,7 +176,6 @@ builder.Services.AddScoped<IProductTypeProcessRepository, ProductTypeProcessRepo
 builder.Services.AddScoped<ITaskRepository, TaskRepository>();
 builder.Services.AddScoped<ITaskLogRepository, TaskLogRepository>();
 builder.Services.AddScoped<IMaterialPerUnitService, MaterialPerUnitService>();
-builder.Services.AddScoped<IProductTypeProcessSeedService, ProductTypeProcessSeedService>();
 builder.Services.AddScoped<IProductionSchedulingService, ProductionSchedulingService>();
 builder.Services.AddScoped<ITaskQrTokenService, TaskQrTokenService>();
 builder.Services.AddScoped<ITaskScanService, TaskScanService>();
@@ -194,9 +193,18 @@ builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<JWTService>();
 builder.Services.AddScoped<GoogleAuthService>();
 builder.Services.AddScoped<ISmsOtpService, TwilioSmsOtpService>();
+builder.Services.AddScoped<IEstimateBaseConfigService, EstimateBaseConfigService>();
+builder.Services.AddScoped<IMissingMaterialService, MissingMaterialService>();
+builder.Services.AddScoped<IMissingMaterialRepository, MissingMaterialRepository>();
+//builder.Services.AddScoped<IOrderCompletionEstimatorService, OrderCompletionEstimatorService>();
+//builder.Services.AddScoped<IOrderEstimateQueryRepository, OrderEstimateQueryRepository>();
+//builder.Services.AddScoped<IPlanRepository, PlanRepository>();
+//builder.Services.AddScoped<IMachineQueryRepository, MachineQueryRepository>();
+//builder.Services.AddScoped<IRoutingRepository, RoutingRepository>();
 
 
-// Logging
+
+
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Logging.SetMinimumLevel(LogLevel.Information);

@@ -21,7 +21,6 @@ public partial class AppDbContext : DbContext
 
     public virtual DbSet<bom> boms { get; set; }
 
-
     public virtual DbSet<delivery> deliveries { get; set; }
 
     public virtual DbSet<material> materials { get; set; }
@@ -72,6 +71,8 @@ public partial class AppDbContext : DbContext
 
     public virtual DbSet<missing_material> missing_materials { get; set; } = null!;
 
+    public virtual DbSet<estimate_config> estimate_config { get; set; } = null!;
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<bom>(entity =>
@@ -118,7 +119,7 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.name).HasMaxLength(150);
             entity.Property(e => e.stock_qty).HasPrecision(10, 2).HasDefaultValueSql("0");
             entity.Property(e => e.unit).HasMaxLength(20);
-            entity.Property(e => e.main_material_type).HasMaxLength(50);
+            entity.Property(e => e.type).HasMaxLength(50);
         });
 
         modelBuilder.Entity<machine>(entity =>
@@ -384,7 +385,7 @@ public partial class AppDbContext : DbContext
 
             entity.Property(e => e.contact_person).HasMaxLength(100);
             entity.Property(e => e.email).HasMaxLength(100);
-            entity.Property(e => e.main_material_type).HasMaxLength(50);
+            entity.Property(e => e.type).HasMaxLength(50);
             entity.Property(e => e.name).HasMaxLength(150);
             entity.Property(e => e.phone).HasMaxLength(20);
             entity.Property(e => e.rating)
@@ -588,6 +589,15 @@ public partial class AppDbContext : DbContext
                   .HasForeignKey(e => e.product_type_id);
         });
 
+        modelBuilder.Entity<estimate_config>(e =>
+        {
+            e.HasKey(x => new { x.config_group, x.config_key });
+
+            e.Property(x => x.config_group).HasMaxLength(100);
+            e.Property(x => x.config_key).HasMaxLength(120);
+            e.Property(x => x.value_num).HasColumnType("numeric(18,6)");
+        });
+
         modelBuilder.Entity<missing_material>(entity =>
         {
             entity.ToTable("missing_materials", "AMMS_DB");
@@ -631,9 +641,8 @@ public partial class AppDbContext : DbContext
             entity.HasIndex(e => e.material_id).HasDatabaseName("ix_missing_materials_material_id");
             entity.HasIndex(e => e.request_date).HasDatabaseName("ix_missing_materials_request_date");
             entity.HasIndex(e => e.created_at).HasDatabaseName("ix_missing_materials_created_at");
-        });
+        });     
         OnModelCreatingPartial(modelBuilder);
     }
-
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder);
 }

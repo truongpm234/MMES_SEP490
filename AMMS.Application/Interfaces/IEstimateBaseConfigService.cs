@@ -3,11 +3,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using AMMS.Shared.DTOs.Estimates;
 
 namespace AMMS.Application.Interfaces
 {
-    public interface IProductTypeProcessSeedService
+    public interface IEstimateBaseConfigService
     {
-        Task SeedAsync();
+        Task<EstimateBaseConfigDto> GetAsync(CancellationToken ct = default);
     }
 }
