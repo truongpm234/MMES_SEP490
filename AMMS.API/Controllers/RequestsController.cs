@@ -451,9 +451,9 @@ namespace AMMS.API.Controllers
 
             await UpsertPaidPaymentRowAsync(orderRequestId, orderCode, amount, paymentLinkId, transactionId, rawJson, paymentRepo, ct);
 
-            // 3) nếu đã có order_id thì coi như done
-            if (req.order_id != null)
-                return (true, $"Already processed: order_id={req.order_id}");
+            //// 3) nếu đã có order_id thì coi như done
+            //if (req.order_id != null)
+            //    return (true, $"Already processed: order_id={req.order_id}");
 
             // 4) check quote expiry
             var est = await _db.cost_estimates.AsNoTracking()
@@ -470,43 +470,73 @@ namespace AMMS.API.Controllers
 
             var now = AppTime.NowVnUnspecified();
 
-            // 5) mark accepted
-            await _dealService.MarkAcceptedAsync(orderRequestId);
+            int orderId;
 
-            // 6) convert (BOM, is_enough, link req.order_id) — cần row lock ở ConvertToOrderAsync (phần D)
-            var convert = await _service.ConvertToOrderAsync(orderRequestId);
-            if (!convert.Success || convert.OrderId == null)
-                return (false, "ConvertToOrder failed: " + convert.Message);
+            // Nếu chưa có order thì convert
+            if (req.order_id == null)
+            {
+                await _dealService.MarkAcceptedAsync(orderRequestId);
 
-            // 7) schedule production
-            var productTypeId = await _db.product_types.AsNoTracking()
-                .Where(x => x.code == req.product_type)
-                .Select(x => x.product_type_id)
+                var convert = await _service.ConvertToOrderAsync(orderRequestId);
+                if (!convert.Success || convert.OrderId == null)
+                    return (false, "ConvertToOrder failed: " + convert.Message);
+
+                orderId = convert.OrderId.Value;
+            }
+            else
+            {
+                orderId = req.order_id.Value;
+            }
+
+            // Ensure production + tasks
+            var prod = await _db.productions.AsNoTracking()
+                .Where(p => p.order_id == orderId && p.end_date == null)
+                .OrderByDescending(p => p.prod_id)
                 .FirstOrDefaultAsync(ct);
 
-            if (productTypeId <= 0)
-                return (false, "product_type invalid (cannot map product_type_id)");
-
-            var item = await _db.order_items.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.item_id == convert.OrderItemId, ct);
-
-            var prodId = await _schedulingService.ScheduleOrderAsync(
-                orderId: convert.OrderId.Value,
-                productTypeId: productTypeId,
-                productionProcessCsv: item?.production_process,
-                managerId: 3
-            );
-
-            try
+            var hasTasks = false;
+            if (prod != null)
             {
-                await _dealService.NotifyConsultantPaidAsync(orderRequestId, (decimal)amount, now);
-                await _dealService.NotifyCustomerPaidAsync(orderRequestId, (decimal)amount, now);
-            }
-            catch
-            {
+                hasTasks = await _db.tasks.AsNoTracking().AnyAsync(t => t.prod_id == prod.prod_id, ct);
             }
 
-            return (true, $"Processed OK: order_id={convert.OrderId}, prod_id={prodId}");
+            if (prod == null || !hasTasks)
+            {
+                var productTypeId = await _db.product_types
+                    .Where(x => x.code == req.product_type)
+                    .Select(x => x.product_type_id)
+                    .FirstOrDefaultAsync(ct);
+
+                if (productTypeId <= 0)
+                    return (false, "product_type invalid (cannot map product_type_id)");
+
+                // lấy production_process từ order_items nếu có
+                var item = await _db.order_items.AsNoTracking()
+                    .Where(x => x.order_id == orderId)
+                    .OrderBy(x => x.item_id)
+                    .FirstOrDefaultAsync(ct);
+
+                try
+                {
+                    var prodId = await _schedulingService.ScheduleOrderAsync(
+                    orderId: orderId,
+                    productTypeId: productTypeId,
+                    productionProcessCsv: item?.production_process,
+                    managerId: 3
+                );
+                }
+                catch (Exception ex) { return (false, "ScheduleOrder failed: " + ex.Message); }
+
+                try
+                {
+                    await _dealService.NotifyConsultantPaidAsync(orderRequestId, (decimal)amount, now);
+                    await _dealService.NotifyCustomerPaidAsync(orderRequestId, (decimal)amount, now);
+                }
+                catch
+                {
+                }
+            }
+            return (true, $"Already has production and tasks: order_id={orderId}, prod_id={prod?.prod_id}");
         }
         private async Task UpsertPaidPaymentRowAsync(
     int orderRequestId,

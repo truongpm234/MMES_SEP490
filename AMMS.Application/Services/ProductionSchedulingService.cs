@@ -108,7 +108,6 @@ namespace AMMS.Application.Services
                 if (steps == null || steps.Count == 0)
                     throw new Exception("No routing found");
 
-                // ✅ lọc theo CSV nếu có
                 if (selected.Count > 0)
                 {
                     steps = steps
@@ -186,13 +185,16 @@ namespace AMMS.Application.Services
                 await _taskRepo.AddRangeAsync(tasks);
                 await _taskRepo.SaveChangesAsync();
 
-                var firstTask = tasks.FirstOrDefault(t => t.seq_num == firstSeq);
-                if (firstTask != null && !string.IsNullOrWhiteSpace(firstTask.machine))
-                {
-                    await _machineRepo.AllocateAsync(firstTask.machine!, need: 1);
-                }
-
+                var firstTask = tasks.FirstOrDefault(t => t.seq_num == firstSeq);              
                 await tx.CommitAsync();
+                try
+                {
+                    if (firstTask != null && !string.IsNullOrWhiteSpace(firstTask.machine))
+                        await _machineRepo.AllocateAsync(firstTask.machine!, need: 1);
+                }
+                catch (Exception ex)
+                {
+                }
                 return prod.prod_id;
             });
         }
