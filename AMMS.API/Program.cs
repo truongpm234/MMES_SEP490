@@ -1,4 +1,5 @@
 ﻿using AMMS.Application.Extensions;
+using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
 using AMMS.Application.Services;
 using AMMS.Infrastructure.Configurations;
@@ -147,6 +148,9 @@ builder.Services.AddControllers().AddJsonOptions(o =>
 {
     o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.Never;
 });
+builder.Services.Configure<SchedulingOptions>(
+    builder.Configuration.GetSection("Scheduling"));
+builder.Services.AddSingleton<WorkCalendar>();
 
 // Services
 builder.Services.AddScoped<IUploadFileService, UploadFileService>();

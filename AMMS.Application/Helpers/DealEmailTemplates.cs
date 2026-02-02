@@ -14,6 +14,7 @@ namespace AMMS.Application.Helpers
             "RALO" => "Ra lô",
             "CAT" => "Cắt",
             "CAN_MANG" => "Cán",
+            "CAN" => "Cán",
             "BOI" => "Bồi",
             "PHU" => "Phủ",
             "DUT" => "Dứt",

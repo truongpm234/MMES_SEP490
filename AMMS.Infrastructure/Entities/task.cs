@@ -24,6 +24,10 @@ public partial class task
 
     public DateTime? end_time { get; set; }
 
+    public DateTime? planned_start_time { get; set; }
+
+    public DateTime? planned_end_time { get; set; }
+
     public int? process_id { get; set; }
 
     public virtual product_type_process? process { get; set; }

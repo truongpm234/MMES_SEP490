@@ -13,7 +13,7 @@ namespace AMMS.Shared.DTOs.Enums
         CAT,
         BOI,
         PHU,
-        CAN_MANG,
+        CAN,
         BE,
         DUT,
         DAN

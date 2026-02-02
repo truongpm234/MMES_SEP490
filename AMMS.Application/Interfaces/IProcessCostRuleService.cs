@@ -10,7 +10,7 @@ namespace AMMS.Application.Interfaces
 {
     public interface IProcessCostRuleService
     {
-        Task<(decimal unitPrice, string unit, string note)> GetRateAsync(ProcessType p, CancellationToken ct = default);
+        //Task<(decimal unitPrice, string unit, string note)> GetRateAsync(ProcessType p, CancellationToken ct = default);
         Task<List<process_cost_rule>> GetAllAsync();
     }
 

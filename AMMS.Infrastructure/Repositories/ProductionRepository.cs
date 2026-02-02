@@ -399,6 +399,8 @@ namespace AMMS.Infrastructure.Repositories
                     t.machine,
                     t.start_time,
                     t.end_time,
+                    t.planned_start_time,
+                    t.planned_end_time,  
                     t.process_id
                 })
                 .ToListAsync(ct);
@@ -519,7 +521,9 @@ namespace AMMS.Infrastructure.Repositories
                     last_scan_time = stageLogs.Count == 0 ? null : stageLogs.Max(x => x.log_time),
                     logs = stageLogs,
                     input_materials = io.inputs,
-                    output_product = io.output
+                    output_product = io.output,
+                    planned_start_time = task?.planned_start_time,
+                    planned_end_time = task?.planned_end_time
                 };
 
                 stages.Add(stage);
@@ -678,20 +682,19 @@ namespace AMMS.Infrastructure.Repositories
         }
 
         private static (List<StageMaterialDto> inputs, StageMaterialDto output, decimal nextOutputQty)
-    BuildStageIO(
-        string processCode,
-        string processName,
-        ProductionDetailDto detail,
-        decimal previousOutputQty,
-        int sheetsRequired,
-        int sheetsTotal,
-        int nUp,
-        int qtyGood,
-        int? numberOfPlates,
-        decimal estInkWeightKg)
+BuildStageIO(
+    string processCode,
+    string processName,
+    ProductionDetailDto detail,
+    decimal previousOutputQty,
+    int sheetsRequired,
+    int sheetsTotal,
+    int nUp,
+    int qtyGood,
+    int? numberOfPlates,
+    decimal estInkWeightKg)
         {
             var inputs = new List<StageMaterialDto>();
-
             var code = (processCode ?? "").Trim().ToUpperInvariant();
 
             string sizeSuffix =
@@ -699,146 +702,74 @@ namespace AMMS.Infrastructure.Repositories
                     ? $" ({detail.length_mm}×{detail.width_mm}×{detail.height_mm})mm"
                     : string.Empty;
 
-            decimal inputQty;
-            decimal outputQty;
-            decimal nextOutputQty;
+            var baseSheets = sheetsTotal > 0 ? sheetsTotal : (sheetsRequired > 0 ? sheetsRequired : (int)previousOutputQty);
+            if (baseSheets <= 0) baseSheets = 1;
 
-            // ========= 1) RALO =========
-            // - Thành phẩm: Khuôn ralo (mẫu chung)
-            // - Số lượng khuôn: lấy từ qty_good, nếu chưa scan thì mặc định 1
-            // - Số lượng cho công đoạn CẮT: sheets_total (tờ)
+            // ========= RALO =========
+            // Input: cuộn giấy ralo
+            // Output: số tờ
             if (code == "RALO" || code == "RA_LO")
             {
-                inputQty = 0;
-                outputQty = 1;
-
-                var output = new StageMaterialDto
-                {
-                    name = "Khuôn ralo",
-                    code = processCode,
-                    quantity = outputQty,
-                    unit = "bộ"
-                };
-
-                // công đoạn sau (Cắt) sẽ dùng số tờ cần cắt
-                nextOutputQty = sheetsTotal > 0 ? sheetsTotal : previousOutputQty;
-
-                return (inputs, output, nextOutputQty);
-            }
-
-            // ========= 2) CẮT =========
-            // - Input: Giấy đã ralo, số tờ = sheets_total
-            // - Output: Giấy đã cắt (L×W×H)mm, số tờ >= sheets_required (thường = sheets_total)
-            // - Công đoạn sau (In) chỉ dùng sheets_required tờ
-            if (code == "CAT")
-            {
-                inputQty = sheetsTotal > 0 ? sheetsTotal : previousOutputQty;
-
                 inputs.Add(new StageMaterialDto
                 {
-                    name = "Giấy đã ralo",
-                    quantity = inputQty,
-                    unit = "tờ"
+                    name = "Cuộn giấy ralo",
+                    code = "RALO",
+                    quantity = 1,
+                    unit = "cuộn"
                 });
 
-                outputQty = qtyGood > 0 ? qtyGood : inputQty;
-
-                if (sheetsRequired > 0 && outputQty < sheetsRequired)
-                    outputQty = sheetsRequired;
+                var outSheets = qtyGood > 0 ? qtyGood : baseSheets;
 
                 var output = new StageMaterialDto
                 {
-                    name = $"Giấy đã cắt{sizeSuffix}",
+                    name = $"Giấy đã ralo{sizeSuffix}",
                     code = processCode,
-                    quantity = outputQty,
+                    quantity = outSheets,
                     unit = "tờ"
                 };
 
-                nextOutputQty = sheetsRequired > 0 ? sheetsRequired : outputQty;
-
-                return (inputs, output, nextOutputQty);
+                return (inputs, output, outSheets);
             }
 
-            // ========= 3) IN =========
-            // - Input:
-            //     + Giấy đã cắt: sheets_required tờ
-            //     + Kẽm in: number_of_plates
-            //     + Mực các loại: est_ink_weight_kg (kg)
-            // - Output: Giấy đã in (L×W×H)mm
-            //   + quantity lấy từ qty_good nhưng không nhỏ hơn sheets_required
-            // - Công đoạn sau lấy số sp = outputQty * n_up
-            if (code == "IN")
-            {
-                inputQty = sheetsRequired > 0 ? sheetsRequired : previousOutputQty;
-
-                inputs.Add(new StageMaterialDto
-                {
-                    name = $"Giấy đã cắt{sizeSuffix}",
-                    quantity = inputQty,
-                    unit = "tờ"
-                });
-
-                if (numberOfPlates.HasValue && numberOfPlates.Value > 0)
-                {
-                    inputs.Add(new StageMaterialDto
-                    {
-                        name = "Kẽm in",
-                        quantity = numberOfPlates.Value,
-                        unit = "bản"
-                    });
-                }
-
-                if (estInkWeightKg > 0)
-                {
-                    inputs.Add(new StageMaterialDto
-                    {
-                        name = "Mực các loại",
-                        quantity = estInkWeightKg,
-                        unit = "kg"
-                    });
-                }
-
-                outputQty = qtyGood > 0 ? qtyGood : inputQty;
-
-                if (sheetsRequired > 0 && outputQty < sheetsRequired)
-                    outputQty = sheetsRequired;
-
-                var output = new StageMaterialDto
-                {
-                    name = $"Giấy đã in{sizeSuffix}",
-                    code = processCode,
-                    quantity = outputQty,
-                    unit = "tờ"
-                };
-
-                var up = nUp <= 0 ? 1 : nUp;
-                nextOutputQty = outputQty * up;
-
-                return (inputs, output, nextOutputQty);
-            }
-
-            inputQty = previousOutputQty;
+            // ========= Các công đoạn còn lại =========
+            // Input: bán thành phẩm tờ từ công đoạn trước
+            var inputSheets = previousOutputQty > 0 ? previousOutputQty : baseSheets;
 
             inputs.Add(new StageMaterialDto
             {
                 name = detail.product_name ?? "Bán thành phẩm",
-                quantity = inputQty,
+                quantity = inputSheets,
                 unit = "tờ"
             });
 
-            outputQty = qtyGood > 0 ? qtyGood : inputQty;
+            // IN: kẽm + mực
+            if (code == "IN")
+            {
+                if (numberOfPlates.HasValue && numberOfPlates.Value > 0)
+                {
+                    inputs.Add(new StageMaterialDto { name = "Kẽm in", quantity = numberOfPlates.Value, unit = "bản" });
+                }
+                if (estInkWeightKg > 0)
+                {
+                    inputs.Add(new StageMaterialDto { name = "Mực các loại", quantity = estInkWeightKg, unit = "kg" });
+                }
+            }
 
-            var defaultOutput = new StageMaterialDto
+            // Output luôn là tờ
+            var outQty = qtyGood > 0 ? qtyGood : inputSheets;
+            if (outQty <= 0) outQty = inputSheets;
+
+            var outputDefault = new StageMaterialDto
             {
                 name = $"{processName} {(detail.product_name ?? "")}".Trim(),
                 code = processCode,
-                quantity = outputQty,
+                quantity = outQty,
                 unit = "tờ"
             };
 
-            nextOutputQty = outputQty;
-            return (inputs, defaultOutput, nextOutputQty);
+            return (inputs, outputDefault, outQty);
         }
+
 
         static List<TaskLogDto> logsByTaskId(List<TaskLogDto> all, int taskId)
         {

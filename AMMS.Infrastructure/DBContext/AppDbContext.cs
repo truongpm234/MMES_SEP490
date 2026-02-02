@@ -412,6 +412,11 @@ public partial class AppDbContext : DbContext
             entity.HasOne(d => d.prod).WithMany(p => p.tasks)
                 .HasForeignKey(d => d.prod_id)
                 .HasConstraintName("tasks_prod_id_fkey");
+            entity.Property(x => x.planned_start_time).HasColumnName("planned_start_time");
+            entity.Property(x => x.planned_end_time).HasColumnName("planned_end_time");
+
+            entity.HasIndex(x => new { x.machine, x.planned_end_time })
+             .HasDatabaseName("ix_tasks_machine_planned_end");
         });
 
         modelBuilder.Entity<task_log>(entity =>

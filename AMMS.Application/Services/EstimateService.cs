@@ -184,7 +184,7 @@ namespace AMMS.Application.Services
                     var unit = (p.unit ?? "").Trim();
 
                     // ✅ Normalize IN/PHU/CAN từ m2 -> tờ
-                    if (pcode is "IN" or "PHU" or "CAN" or "CAN_MANG")
+                    if (pcode is "IN" or "PHU" or "CAN")
                     {
                         var qtySheets = (decimal)sheetsBase;
                         var unitPriceSheet = sheetsBase > 0 ? (totalCost / qtySheets) : 0m;
