@@ -468,7 +468,7 @@ namespace AMMS.Infrastructure.Repositories
 
             var stages = new List<ProductionStageDto>();
 
-            decimal previousOutputQty = dto.quantity;
+            StageOutputRef? prevOutput = null;
 
             foreach (var s in steps)
             {
@@ -494,7 +494,7 @@ namespace AMMS.Infrastructure.Repositories
                     processCode: pcode,
                     processName: s.process_name ?? "",
                     detail: dto,
-                    previousOutputQty: previousOutputQty,
+                    prevOutput: prevOutput,
                     sheetsRequired: sheetsRequired,
                     sheetsTotal: sheetsTotal,
                     nUp: nUp,
@@ -528,7 +528,7 @@ namespace AMMS.Infrastructure.Repositories
 
                 stages.Add(stage);
 
-                previousOutputQty = io.nextOutputQty;
+                prevOutput = io.nextOutput;
             }
 
             dto.stages = stages;
@@ -681,12 +681,11 @@ namespace AMMS.Infrastructure.Repositories
             return true;
         }
 
-        private static (List<StageMaterialDto> inputs, StageMaterialDto output, decimal nextOutputQty)
-BuildStageIO(
+        private static (List<StageMaterialDto> inputs, StageMaterialDto output, StageOutputRef nextOutput) BuildStageIO(
     string processCode,
     string processName,
     ProductionDetailDto detail,
-    decimal previousOutputQty,
+    StageOutputRef? prevOutput,          // ✅ NEW: output của công đoạn trước
     int sheetsRequired,
     int sheetsTotal,
     int nUp,
@@ -702,12 +701,11 @@ BuildStageIO(
                     ? $" ({detail.length_mm}×{detail.width_mm}×{detail.height_mm})mm"
                     : string.Empty;
 
-            var baseSheets = sheetsTotal > 0 ? sheetsTotal : (sheetsRequired > 0 ? sheetsRequired : (int)previousOutputQty);
+            // base qty fallback
+            var baseSheets = sheetsTotal > 0 ? sheetsTotal : (sheetsRequired > 0 ? sheetsRequired : detail.quantity);
             if (baseSheets <= 0) baseSheets = 1;
 
-            // ========= RALO =========
-            // Input: cuộn giấy ralo
-            // Output: số tờ
+            // ========= RALO (giữ như bạn đang ổn) =========
             if (code == "RALO" || code == "RA_LO")
             {
                 inputs.Add(new StageMaterialDto
@@ -728,48 +726,83 @@ BuildStageIO(
                     unit = "tờ"
                 };
 
-                return (inputs, output, outSheets);
+                var next = new StageOutputRef
+                {
+                    Name = output.name ?? "",
+                    Code = output.code,
+                    Unit = output.unit ?? "tờ",
+                    Quantity = outSheets
+                };
+
+                return (inputs, output, next);
             }
 
             // ========= Các công đoạn còn lại =========
-            // Input: bán thành phẩm tờ từ công đoạn trước
-            var inputSheets = previousOutputQty > 0 ? previousOutputQty : baseSheets;
+            // Input = output của công đoạn trước (nếu có), nếu chưa có thì fallback theo product
+            var inputName = prevOutput?.Name ?? (detail.product_name ?? "Bán thành phẩm");
+            var inputCode = prevOutput?.Code;
+            var inputUnit = prevOutput?.Unit ?? "tờ";
+
+            var inputQty = (qtyGood > 0)
+                ? (decimal)qtyGood
+                : (prevOutput?.Quantity > 0 ? prevOutput.Quantity : baseSheets);
+
+            if (inputQty <= 0) inputQty = baseSheets;
 
             inputs.Add(new StageMaterialDto
             {
-                name = detail.product_name ?? "Bán thành phẩm",
-                quantity = inputSheets,
-                unit = "tờ"
+                name = inputName,
+                code = inputCode,
+                quantity = inputQty,
+                unit = inputUnit
             });
 
-            // IN: kẽm + mực
+            // IN: thêm kẽm + mực
             if (code == "IN")
             {
-                if (numberOfPlates.HasValue && numberOfPlates.Value > 0)
+                if (numberOfPlates.GetValueOrDefault() > 0)
                 {
-                    inputs.Add(new StageMaterialDto { name = "Kẽm in", quantity = numberOfPlates.Value, unit = "bản" });
+                    inputs.Add(new StageMaterialDto
+                    {
+                        name = "Kẽm in",
+                        quantity = numberOfPlates!.Value,
+                        unit = "bản"
+                    });
                 }
+
                 if (estInkWeightKg > 0)
                 {
-                    inputs.Add(new StageMaterialDto { name = "Mực các loại", quantity = estInkWeightKg, unit = "kg" });
+                    inputs.Add(new StageMaterialDto
+                    {
+                        name = "Mực các loại",
+                        quantity = estInkWeightKg,
+                        unit = "kg"
+                    });
                 }
             }
 
-            // Output luôn là tờ
-            var outQty = qtyGood > 0 ? qtyGood : inputSheets;
-            if (outQty <= 0) outQty = inputSheets;
+            // ✅ Output name: "Thành phẩm " + processName
+            var outQty = qtyGood > 0 ? qtyGood : (int)Math.Round(inputQty);
+            if (outQty <= 0) outQty = (int)Math.Round(inputQty);
 
             var outputDefault = new StageMaterialDto
             {
-                name = $"{processName} {(detail.product_name ?? "")}".Trim(),
+                name = $"Thành phẩm {processName}".Trim(),
                 code = processCode,
                 quantity = outQty,
                 unit = "tờ"
             };
 
-            return (inputs, outputDefault, outQty);
-        }
+            var nextOutput = new StageOutputRef
+            {
+                Name = outputDefault.name ?? "",
+                Code = outputDefault.code,
+                Unit = outputDefault.unit ?? "tờ",
+                Quantity = outQty
+            };
 
+            return (inputs, outputDefault, nextOutput);
+        }
 
         static List<TaskLogDto> logsByTaskId(List<TaskLogDto> all, int taskId)
         {
