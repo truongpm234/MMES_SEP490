@@ -73,6 +73,8 @@ public partial class AppDbContext : DbContext
 
     public virtual DbSet<estimate_config> estimate_config { get; set; } = null!;
 
+    public virtual DbSet<product> products { get; set; } = null!;
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<bom>(entity =>
@@ -96,14 +98,12 @@ public partial class AppDbContext : DbContext
         modelBuilder.Entity<delivery>(entity =>
         {
             entity.HasKey(e => e.delivery_id).HasName("deliveries_pkey");
-
             entity.Property(e => e.carrier).HasMaxLength(100);
             entity.Property(e => e.ship_date).HasColumnType("timestamp without time zone");
             entity.Property(e => e.status)
                 .HasMaxLength(20)
                 .HasDefaultValueSql("'Ready'::character varying");
             entity.Property(e => e.tracking_code).HasMaxLength(50);
-
             entity.HasOne(d => d.order).WithMany(p => p.deliveries)
                 .HasForeignKey(d => d.order_id)
                 .HasConstraintName("deliveries_order_id_fkey");
@@ -641,7 +641,38 @@ public partial class AppDbContext : DbContext
             entity.HasIndex(e => e.material_id).HasDatabaseName("ix_missing_materials_material_id");
             entity.HasIndex(e => e.request_date).HasDatabaseName("ix_missing_materials_request_date");
             entity.HasIndex(e => e.created_at).HasDatabaseName("ix_missing_materials_created_at");
-        });     
+        });
+        modelBuilder.Entity<product>(entity =>
+        {
+            entity.ToTable("products", "AMMS_DB");
+            entity.HasKey(e => e.product_id).HasName("products_pkey");
+            entity.Property(e => e.product_id)
+                  .ValueGeneratedOnAdd();
+            entity.Property(e => e.product_type_id)
+                  .IsRequired();
+            entity.Property(e => e.code)
+                  .HasMaxLength(64);
+            entity.Property(e => e.name)
+                  .IsRequired()
+                  .HasMaxLength(255);
+            entity.Property(e => e.description)
+                  .HasColumnType("text");
+            entity.Property(e => e.is_active)
+                  .IsRequired()
+                  .HasDefaultValue(true);
+            entity.Property(e => e.created_at)
+                  .HasColumnType("timestamp without time zone")
+                  .HasDefaultValueSql("(NOW() AT TIME ZONE 'UTC')");
+
+            entity.Property(e => e.updated_at)
+                  .HasColumnType("timestamp without time zone");
+
+            entity.HasOne(d => d.product_type)
+                  .WithMany(p => p.products)
+                  .HasForeignKey(d => d.product_type_id)
+                  .OnDelete(DeleteBehavior.Restrict)
+                  .HasConstraintName("fk_products_product_type");
+        });
         OnModelCreatingPartial(modelBuilder);
     }
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder);

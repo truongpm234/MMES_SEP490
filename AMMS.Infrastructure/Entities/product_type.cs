@@ -24,4 +24,7 @@ public partial class product_type
     public virtual ICollection<production> productions { get; set; } = new List<production>();
 
     public virtual ICollection<product_template> product_type_design_profiles { get; set; } = new List<product_template>();
+
+    public virtual ICollection<product> products { get; set; } = new List<product>();
+
 }

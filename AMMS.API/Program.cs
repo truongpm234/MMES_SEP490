@@ -200,7 +200,8 @@ builder.Services.AddScoped<IMissingMaterialRepository, MissingMaterialRepository
 builder.Services.AddScoped<IOrderPlanningService, OrderPlanningService>();
 builder.Services.AddScoped<IOrderMaterialRepository, OrderMaterialRepository>();
 builder.Services.AddScoped<IOrderMaterialService, OrderMaterialService>();
-
+builder.Services.AddScoped<IProductRepository, ProductRepository>();
+builder.Services.AddScoped<IProductService, ProductService>();
 // Logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
