@@ -278,6 +278,6 @@ namespace AMMS.Application.Services
                 .Select(x => x.Trim().ToUpperInvariant())
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        }
+        }       
     }
 }

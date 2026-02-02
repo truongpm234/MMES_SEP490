@@ -397,24 +397,23 @@ public partial class AppDbContext : DbContext
         {
             entity.HasKey(e => e.task_id).HasName("tasks_pkey");
 
-            entity.Property(e => e.end_time).HasColumnType("timestamp without time zone");
             entity.Property(e => e.machine).HasMaxLength(50);
             entity.Property(e => e.name).HasMaxLength(100);
-            entity.Property(e => e.start_time).HasColumnType("timestamp without time zone");
             entity.Property(e => e.status)
                 .HasMaxLength(20)
-                .HasDefaultValueSql("'Unassigned'::character varying");
-         
+                .HasDefaultValueSql("'Unassigned'::character varying");        
             entity.HasOne(d => d.process).WithMany(p => p.tasks)
                 .HasForeignKey(d => d.process_id)
                 .HasConstraintName("tasks_process_id_fkey");
-
             entity.HasOne(d => d.prod).WithMany(p => p.tasks)
                 .HasForeignKey(d => d.prod_id)
                 .HasConstraintName("tasks_prod_id_fkey");
-            entity.Property(x => x.planned_start_time).HasColumnName("planned_start_time");
-            entity.Property(x => x.planned_end_time).HasColumnName("planned_end_time");
-
+            entity.Property(x => x.planned_start_time)
+                .HasColumnType("timestamp without time zone");
+            entity.Property(x => x.planned_end_time)
+                .HasColumnType("timestamp without time zone");
+            entity.Property(e => e.start_time).HasColumnType("timestamp without time zone");
+            entity.Property(e => e.end_time).HasColumnType("timestamp without time zone");
             entity.HasIndex(x => new { x.machine, x.planned_end_time })
              .HasDatabaseName("ix_tasks_machine_planned_end");
         });
