@@ -18,6 +18,8 @@ public partial class quote
 
     public DateTime created_at { get; set; } = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
 
+    public int estimate_id { get; set; }
+
     public virtual order_request? order_request { get; set; }
 
     public virtual user? consultant { get; set; }

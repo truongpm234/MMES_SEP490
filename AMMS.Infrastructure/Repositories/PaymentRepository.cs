@@ -52,15 +52,36 @@ namespace AMMS.Infrastructure.Repositories
             }
             else
             {
-                // update snapshot create-link nếu muốn refresh
                 existing.status = "PENDING";
                 existing.amount = p.amount;
                 existing.payos_payment_link_id = p.payos_payment_link_id;
                 existing.payos_raw = p.payos_raw;
                 existing.updated_at = p.updated_at;
+                if ((existing.estimate_id == null || existing.estimate_id <= 0) && p.estimate_id > 0)
+                {
+                    existing.estimate_id = p.estimate_id;
+                }
             }
         }
-
-
+        public async Task<payment?> GetLatestPendingByRequestIdAndEstimateIdAsync(int requestId, int estimateId, CancellationToken ct = default)
+        {
+            return await _db.payments
+                .AsNoTracking()
+                .Where(p =>
+                    p.order_request_id == requestId &&
+                    p.estimate_id == estimateId &&
+                    p.provider == "PAYOS" &&
+                    p.status == "PENDING")
+                .OrderByDescending(p => p.created_at)
+                .ThenByDescending(p => p.payment_id)
+                .FirstOrDefaultAsync(ct);
+        }
+        public Task<payment?> GetByOrderCodeAsync(long orderCode, CancellationToken ct = default)
+        {
+            return _db.payments.AsNoTracking()
+                .Where(p => p.provider == "PAYOS" && p.order_code == orderCode)
+                .OrderByDescending(p => p.payment_id)
+                .FirstOrDefaultAsync(ct);
+        }
     }
 }

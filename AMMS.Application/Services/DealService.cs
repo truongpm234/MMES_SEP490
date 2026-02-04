@@ -37,13 +37,28 @@ namespace AMMS.Application.Services
             _payment = payment;
         }
 
-        public async Task SendDealAndEmailAsync(int orderRequestId)
+        public async Task SendDealAndEmailAsync(int orderRequestId, int? estimateId = null)
         {
             var req = await _requestRepo.GetByIdAsync(orderRequestId)
                 ?? throw new Exception("Order request not found");
 
-            var est = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId)
-                ?? throw new Exception("Estimate not found");
+            cost_estimate est;
+            if (estimateId.HasValue && estimateId.Value > 0)
+            {
+                est = await _estimateRepo.GetByIdAsync(estimateId.Value)
+                    ?? throw new Exception("Estimate not found");
+
+                if (est.order_request_id != orderRequestId)
+                    throw new InvalidOperationException("Estimate does not belong to this order_request_id");
+            }
+            else
+            {
+                est = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId)
+                    ?? throw new Exception("Estimate not found");
+            }
+
+            if (!string.Equals(req.process_status?.Trim(), "Verified", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Request must be Verified by manager before sending deal");
 
             var deposit = est.deposit_amount;
 
@@ -53,6 +68,7 @@ namespace AMMS.Application.Services
             var quote = new quote
             {
                 order_request_id = orderRequestId,
+                estimate_id = est.estimate_id,
                 total_amount = est.final_total_cost,
                 status = "Sent",
                 created_at = AppTime.NowVnUnspecified()
@@ -67,7 +83,7 @@ namespace AMMS.Application.Services
             await _requestRepo.SaveChangesAsync();
 
             var baseUrlFe = _config["Deal:BaseUrlFe"]!;
-            var orderDetailUrl = $"{baseUrlFe}/checkout/{orderRequestId}";
+            var orderDetailUrl = $"{baseUrlFe}/checkout/{orderRequestId}?estimateId={est.estimate_id}&quoteId={quote.quote_id}";
             var consultantEmail = _config["Deal:ConsultantEmail"];
 
             var htmlCustomer = DealEmailTemplates.QuoteEmail(req, est, orderDetailUrl);
@@ -348,7 +364,10 @@ namespace AMMS.Application.Services
             cost_estimate? est = null;
             try
             {
-                est = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId);
+                if (req.accepted_estimate_id.HasValue)
+                    est = await _estimateRepo.GetByIdAsync(req.accepted_estimate_id.Value);
+                else
+                    est = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId);
             }
             catch { }
 
@@ -372,7 +391,10 @@ namespace AMMS.Application.Services
             cost_estimate? est = null;
             try
             {
-                est = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId);
+                if (req.accepted_estimate_id.HasValue)
+                    est = await _estimateRepo.GetByIdAsync(req.accepted_estimate_id.Value);
+                else
+                    est = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId);
             }
             catch { }
 
@@ -477,7 +499,7 @@ namespace AMMS.Application.Services
             );
         }
 
-        public async Task<PayOsResultDto> CreateOrReuseDepositLinkAsync(int requestId, CancellationToken ct = default)
+        public async Task<PayOsResultDto> CreateOrReuseDepositLinkAsync(int requestId, int estimateId, CancellationToken ct = default)
         {
             var req = await _requestRepo.GetByIdAsync(requestId)
                       ?? throw new InvalidOperationException("Request not found");
@@ -488,10 +510,13 @@ namespace AMMS.Application.Services
             if (string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Request has been Accepted. Cannot create payment link.");
 
-            var est = await _estimateRepo.GetByOrderRequestIdAsync(requestId)
-                      ?? throw new InvalidOperationException("Cost estimate not found");
+            var est = await _estimateRepo.GetByIdAsync(estimateId)
+          ?? throw new InvalidOperationException("Cost estimate not found");
 
-            var pending = await _payment.GetLatestPendingByRequestIdAsync(requestId, ct);
+            if (est.order_request_id != requestId)
+                throw new InvalidOperationException("Estimate does not belong to this request");
+
+            var pending = await _payment.GetLatestPendingByRequestIdAndEstimateIdAsync(requestId, estimateId, ct);
             if (pending != null && !string.IsNullOrWhiteSpace(pending.payos_raw))
                 return PayOsRawMapper.FromPayment(pending);
 
@@ -508,7 +533,7 @@ namespace AMMS.Application.Services
             {
                 int orderCode = checked(requestId * 10 + attempt);
                 var description = $"MES{orderCode}";
-                var returnUrl = $"{backendUrl}/api/requests/payos/return?request_id={requestId}&order_code={orderCode}";
+                var returnUrl = $"{backendUrl}/api/requests/payos/return?request_id={requestId}&order_code={orderCode}&estimate_id={estimateId}";
                 var cancelUrl = $"{feBase}/reject-deal/{requestId}?status=cancel";
 
                 try
@@ -536,7 +561,8 @@ namespace AMMS.Application.Services
                         payos_payment_link_id = payos.payment_link_id,
                         payos_raw = payos.raw_json,
                         created_at = now,
-                        updated_at = now
+                        updated_at = now,
+                        estimate_id = estimateId
                     }, ct);
 
                     await _payment.SaveChangesAsync(ct);

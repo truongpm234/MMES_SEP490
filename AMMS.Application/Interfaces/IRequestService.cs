@@ -33,5 +33,6 @@ namespace AMMS.Application.Interfaces
         Task<CreateRequestResponse> CreateRequestByConsultantAsync(CreateResquestConsultant req);
         Task<RequestDetailDto?> GetInformationRequestById(int requestId, CancellationToken ct = default);
         Task<RequestWithCostDto?> GetByIdWithCostAsync(int id);
+        Task UpdateApprovalAsync(RequestApprovalUpdateDto dto, CancellationToken ct = default);
     }
 }

@@ -65,7 +65,11 @@ public partial class order_request
 
     public bool? is_send_design { get; set; }
 
+    public string? note { get; set; }
+
     public string? reason { get; set; }
+
+    public int? accepted_estimate_id { get; set; }
 
     public virtual quote? quote { get; set; }
 

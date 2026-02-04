@@ -15,6 +15,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task<cost_estimate?> GetByOrderRequestIdAsync(int orderRequestId);
         Task<cost_estimate?> GetByIdAsync(int id);
         Task UpdateAsync(cost_estimate entity);
+        Task<order_request?> GetOrderRequestTrackingAsync(int orderRequestId, CancellationToken ct = default);
         Task<DepositByRequestResponse?> GetDepositByRequestIdAsync(int requestId, CancellationToken ct = default);
         Task<bool> OrderRequestExistsAsync(int order_request_id);
     }

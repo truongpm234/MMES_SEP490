@@ -24,14 +24,20 @@ namespace AMMS.Infrastructure.Repositories
         {
             await _db.SaveChangesAsync();
         }
+        public Task<order_request?> GetOrderRequestTrackingAsync(int orderRequestId, CancellationToken ct = default)
+        {
+            return _db.order_requests
+                .AsTracking()
+                .FirstOrDefaultAsync(x => x.order_request_id == orderRequestId, ct);
+        }
 
         public async Task<cost_estimate?> GetByOrderRequestIdAsync(int orderRequestId)
         {
             return await _db.cost_estimates
+                .Include(x => x.order_request)
                 .Include(x => x.process_costs)
-                .Where(x => x.order_request_id == orderRequestId)
                 .OrderByDescending(x => x.estimate_id)
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(x => x.order_request_id == orderRequestId);
         }
 
         public async Task<cost_estimate?> GetByIdAsync(int id)

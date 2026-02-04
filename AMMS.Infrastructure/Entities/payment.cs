@@ -28,6 +28,7 @@ namespace AMMS.Infrastructure.Entities
 
         public string? payos_transaction_id { get; set; }
 
+        public int? estimate_id { get; set; }
 
         [Column(TypeName = "jsonb")]
         public string? payos_raw { get; set; }

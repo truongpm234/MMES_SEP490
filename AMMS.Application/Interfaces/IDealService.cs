@@ -10,7 +10,7 @@ namespace AMMS.Application.Interfaces
 {
     public interface IDealService
     {
-        Task SendDealAndEmailAsync(int orderRequestId);
+        Task SendDealAndEmailAsync(int orderRequestId, int? estimateId = null);
         Task RejectDealAsync(int orderRequestId, string reason);
         Task<string> AcceptAndCreatePayOsLinkAsync(int orderRequestId);
         Task SendConsultantStatusEmailAsync(order_request req, cost_estimate? est, string statusText, decimal? paidAmount = null, DateTime? paidAt = null);
@@ -18,6 +18,6 @@ namespace AMMS.Application.Interfaces
         Task NotifyCustomerPaidAsync(int orderRequestId, decimal paidAmount, DateTime paidAt);
         Task MarkAcceptedAsync(int orderRequestId);
         Task<PayOsDepositInfoDto> PrepareDepositPaymentAsync(int orderRequestId, CancellationToken ct = default);
-        Task<PayOsResultDto> CreateOrReuseDepositLinkAsync(int requestId, CancellationToken ct = default);
+        Task<PayOsResultDto> CreateOrReuseDepositLinkAsync(int requestId, int estimateId, CancellationToken ct = default);
     }
 }

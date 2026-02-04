@@ -23,5 +23,13 @@
         public string? detail_address { get; set; }
 
         public bool is_send_design { get; set; }
+
+        public int? product_length_mm { get; set; }
+
+        public int? product_width_mm { get; set; }
+
+        public int? product_height_mm { get; set; }
+
+        public string? paper_name { get; set; }
     }
 }
