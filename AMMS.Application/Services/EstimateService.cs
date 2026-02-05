@@ -56,7 +56,7 @@ namespace AMMS.Application.Services
             return await _estimateRepo.OrderRequestExistsAsync(orderRequestId);
         }
 
-        public async Task SaveFeCostEstimateAsync(CostEstimateInsertRequest req, CancellationToken ct = default)
+        public async Task<int> SaveFeCostEstimateAsync(CostEstimateInsertRequest req, CancellationToken ct = default)
         {
             if (req.order_request_id <= 0)
                 throw new ArgumentException("order_request_id must be > 0");
@@ -209,6 +209,8 @@ namespace AMMS.Application.Services
 
             await _estimateRepo.AddAsync(entity);
             await _estimateRepo.SaveChangesAsync();
+
+            return entity.estimate_id;
         }
 
         public static DateTime ToUnspecified(DateTime dt)

@@ -67,9 +67,9 @@ namespace AMMS.API.Controllers
             if (!exists)
                 return NotFound(new { message = $"Order request with id {req.order_request_id} not found" });
 
-            await _service.SaveFeCostEstimateAsync(req, ct);
+            var estimateId = await _service.SaveFeCostEstimateAsync(req, ct);
 
-            return NoContent();
+            return Ok(new { estimate_id = estimateId });
         }
     }
 }

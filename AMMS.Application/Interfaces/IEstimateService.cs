@@ -17,6 +17,6 @@ namespace AMMS.Application.Interfaces
         Task<cost_estimate?> GetEstimateByOrderRequestIdAsync(int orderRequestId);
         Task<DepositByRequestResponse?> GetDepositByRequestIdAsync(int requestId, CancellationToken ct = default);
         Task<bool> OrderRequestExistsAsync(int order_request_id);
-        Task SaveFeCostEstimateAsync(CostEstimateInsertRequest req, CancellationToken ct = default);
+        Task<int> SaveFeCostEstimateAsync(CostEstimateInsertRequest req, CancellationToken ct = default);
     }
 }
