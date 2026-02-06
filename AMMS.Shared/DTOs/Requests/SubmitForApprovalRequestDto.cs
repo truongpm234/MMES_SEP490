@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace AMMS.Shared.DTOs.Email
+namespace AMMS.Shared.DTOs.Requests
 {
-    public class SendDealEmailRequest
+    public class SubmitForApprovalRequestDto
     {
         public int request_id { get; set; }
     }

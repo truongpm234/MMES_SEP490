@@ -220,5 +220,10 @@ namespace AMMS.Application.Services
 
             return DateTime.SpecifyKind(dt, DateTimeKind.Unspecified);
         }
+
+        public async Task<List<RequestEstimateDto>> GetAllEstimatesFlatByRequestIdAsync(int requestId, CancellationToken ct = default)
+        {
+            return await _estimateRepo.GetAllEstimatesFlatByRequestIdAsync(requestId, ct);
+        }
     }
 }

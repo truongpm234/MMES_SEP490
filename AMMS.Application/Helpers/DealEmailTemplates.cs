@@ -252,11 +252,7 @@ namespace AMMS.Application.Helpers
 </html>";
         }
 
-        public static string AcceptCustomerEmail(
-    order_request req,
-    order order,
-    cost_estimate est,
-    string trackingUrl)
+        public static string AcceptCustomerEmail(order_request req, order order, cost_estimate est, string trackingUrl)
         {
             return $@"
 <div style='font-family:Arial,Helvetica,sans-serif;max-width:720px;margin:24px auto;line-height:1.6'>

@@ -71,5 +71,16 @@ namespace AMMS.API.Controllers
 
             return Ok(new { estimate_id = estimateId });
         }
+
+        [HttpGet("get-all-deal-by-{request_id:int}")]
+        public async Task<IActionResult> GetAllEstimatesFlat([FromRoute] int request_id, CancellationToken ct)
+        {
+            var list = await _service.GetAllEstimatesFlatByRequestIdAsync(request_id, ct);
+
+            if (list.Count == 0)
+                return NotFound(new { message = "Order request not found OR no estimates for this request" });
+
+            return Ok(list);
+        }
     }
 }

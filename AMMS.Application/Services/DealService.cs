@@ -42,65 +42,70 @@ namespace AMMS.Application.Services
             var req = await _requestRepo.GetByIdAsync(orderRequestId)
                 ?? throw new Exception("Order request not found");
 
-            cost_estimate est;
-            if (estimateId.HasValue && estimateId.Value > 0)
-            {
-                est = await _estimateRepo.GetByIdAsync(estimateId.Value)
-                    ?? throw new Exception("Estimate not found");
-
-                if (est.order_request_id != orderRequestId)
-                    throw new InvalidOperationException("Estimate does not belong to this order_request_id");
-            }
-            else
-            {
-                est = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId)
-                    ?? throw new Exception("Estimate not found");
-            }
-
             if (!string.Equals(req.process_status?.Trim(), "Verified", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Request must be Verified by manager before sending deal");
-
-            var deposit = est.deposit_amount;
 
             if (string.IsNullOrWhiteSpace(req.customer_email))
                 throw new Exception("Customer email missing");
 
-            var quote = new quote
+            List<cost_estimate> estimates;
+
+            if (estimateId.HasValue && estimateId.Value > 0)
             {
-                order_request_id = orderRequestId,
-                estimate_id = est.estimate_id,
-                total_amount = est.final_total_cost,
-                status = "Sent",
-                created_at = AppTime.NowVnUnspecified()
-            };
+                var one = await _estimateRepo.GetByIdAsync(estimateId.Value)
+                    ?? throw new Exception("Estimate not found");
 
-            await _quoteRepo.AddAsync(quote);
-            await _quoteRepo.SaveChangesAsync();
+                if (one.order_request_id != orderRequestId)
+                    throw new InvalidOperationException("Estimate does not belong to this order_request_id");
 
-            req.quote_id = quote.quote_id;
-            req.process_status = "Waiting";
-
-            await _requestRepo.SaveChangesAsync();
+                estimates = new List<cost_estimate> { one };
+            }
+            else
+            {
+                estimates = await _estimateRepo.GetAllByOrderRequestIdAsync(orderRequestId);
+                if (estimates.Count == 0)
+                    throw new Exception("No estimates found for this request");
+            }
 
             var baseUrlFe = _config["Deal:BaseUrlFe"]!;
-            var orderDetailUrl = $"{baseUrlFe}/checkout/{orderRequestId}?estimateId={est.estimate_id}&quoteId={quote.quote_id}";
             var consultantEmail = _config["Deal:ConsultantEmail"];
 
-            var htmlCustomer = DealEmailTemplates.QuoteEmail(req, est, orderDetailUrl);
-            Console.WriteLine($"order_request_date = {req.order_request_date?.ToString("O") ?? "NULL"}");
-            await _emailService.SendAsync(req.customer_email, $"Báo giá đơn hàng in ấn #{req.order_request_id:D6}", htmlCustomer);
+            int? lastQuoteId = null;
 
-            if (!string.IsNullOrWhiteSpace(consultantEmail))
+            foreach (var est in estimates)
             {
-                var htmlConsultant = DealEmailTemplates.QuoteEmail(req, est, null);
+                var quote = new quote
+                {
+                    order_request_id = orderRequestId,
+                    estimate_id = est.estimate_id,
+                    total_amount = est.final_total_cost,
+                    status = "Sent",
+                    created_at = AppTime.NowVnUnspecified()
+                };
 
-                Console.WriteLine($"Sending Copy to Consultant: {consultantEmail}");
-                await _emailService.SendAsync(
-                    consultantEmail,
-                    $"[COPY] Đã gửi báo giá #{req.order_request_id:D6} cho khách",
-                    htmlConsultant
-                );
+                await _quoteRepo.AddAsync(quote);
+                await _quoteRepo.SaveChangesAsync();
+
+                lastQuoteId = quote.quote_id;
+
+                var orderDetailUrl = $"{baseUrlFe}/checkout/{orderRequestId}?estimateId={est.estimate_id}&quoteId={quote.quote_id}";
+
+                var htmlCustomer = DealEmailTemplates.QuoteEmail(req, est, orderDetailUrl);
+
+                var subjectCustomer = $"Báo giá đơn hàng in ấn #{req.order_request_id:D6} (E{est.estimate_id})";
+                await _emailService.SendAsync(req.customer_email, subjectCustomer, htmlCustomer);
+
+                // copy consultant
+                if (!string.IsNullOrWhiteSpace(consultantEmail))
+                {
+                    var htmlConsultant = DealEmailTemplates.QuoteEmail(req, est, null);
+                    var subjectConsultant = $"[COPY] Đã gửi báo giá #{req.order_request_id:D6} (E{est.estimate_id})";
+                    await _emailService.SendAsync(consultantEmail, subjectConsultant, htmlConsultant);
+                }
             }
+
+            req.process_status = "Waiting";
+            await _requestRepo.SaveChangesAsync();
         }
 
         public async Task<string> AcceptAndCreatePayOsLinkAsync(int orderRequestId)
@@ -499,7 +504,7 @@ namespace AMMS.Application.Services
             );
         }
 
-        public async Task<PayOsResultDto> CreateOrReuseDepositLinkAsync(int requestId, int estimateId, CancellationToken ct = default)
+        public async Task<PayOsResultDto> CreateOrReuseDepositLinkAsync(int requestId, int estimateId, int? quoteId, CancellationToken ct = default)
         {
             var req = await _requestRepo.GetByIdAsync(requestId)
                       ?? throw new InvalidOperationException("Request not found");
@@ -533,7 +538,10 @@ namespace AMMS.Application.Services
             {
                 int orderCode = checked(requestId * 10 + attempt);
                 var description = $"MES{orderCode}";
-                var returnUrl = $"{backendUrl}/api/requests/payos/return?request_id={requestId}&order_code={orderCode}&estimate_id={estimateId}";
+                var returnUrl =
+                            $"{backendUrl}/api/requests/payos/return" +
+                            $"?request_id={requestId}&order_code={orderCode}&estimate_id={estimateId}" +
+                            (quoteId.HasValue && quoteId.Value > 0 ? $"&quote_id={quoteId.Value}" : ""); 
                 var cancelUrl = $"{feBase}/reject-deal/{requestId}?status=cancel";
 
                 try
@@ -562,7 +570,8 @@ namespace AMMS.Application.Services
                         payos_raw = payos.raw_json,
                         created_at = now,
                         updated_at = now,
-                        estimate_id = estimateId
+                        estimate_id = estimateId,
+                        quote_id = (quoteId.HasValue && quoteId.Value > 0) ? quoteId.Value : null
                     }, ct);
 
                     await _payment.SaveChangesAsync(ct);

@@ -598,11 +598,6 @@ namespace AMMS.Application.Services
             if (st is not ("Processing" or "Verified" or "Declined"))
                 throw new ArgumentException("status must be Processing | Verified | Declined");
 
-            // Rule:
-            // - Tư vấn viên gửi duyệt: Processing
-            // - Manager duyệt: Verified
-            // - Manager từ chối: Declined
-            // Không cho Verified/Declined nếu chưa Processing
             if ((st == "Verified" || st == "Declined") && !string.Equals(req.process_status, "Processing", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("Request must be Processing before manager decision");
@@ -613,6 +608,30 @@ namespace AMMS.Application.Services
             if (dto.note != null)
                 req.note = dto.note;
 
+            await _requestRepo.SaveChangesAsync();
+        }
+
+        public async Task SubmitEstimateForApprovalAsync(int requestId)
+        {
+            if (requestId <= 0)
+                throw new ArgumentException("request_id is required");
+
+            var req = await _requestRepo.GetByIdAsync(requestId);
+            if (req == null)
+                throw new InvalidOperationException("Order request not found");
+
+            var st = (req.process_status ?? "").Trim();
+            if (st.Equals("Accepted", StringComparison.OrdinalIgnoreCase) ||
+                st.Equals("Rejected", StringComparison.OrdinalIgnoreCase) ||
+                st.Equals("Cancel", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Cannot submit when process_status = {req.process_status}");
+            }
+
+            if (st.Equals("Processing", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            req.process_status = "Processing";
             await _requestRepo.SaveChangesAsync();
         }
 

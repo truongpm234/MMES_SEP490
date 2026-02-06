@@ -112,8 +112,8 @@ namespace AMMS.API.Controllers
         {
             try
             {
-                await _dealService.SendDealAndEmailAsync(req.request_id, req.estimate_id);
-                return Ok(new { message = "Sent deal email", request_id = req.request_id, estimate_id = req.estimate_id });
+                await _dealService.SendDealAndEmailAsync(req.request_id);
+                return Ok(new { message = "Sent deal email", request_id = req.request_id});
             }
             catch (Exception ex)
             {
@@ -124,8 +124,7 @@ namespace AMMS.API.Controllers
                 {
                     message = "Send email failed",
                     detail = ex.Message,
-                    request_id = req.request_id,
-                    estimate_id = req.estimate_id
+                    request_id = req.request_id
                 });
             }
         }
@@ -238,7 +237,7 @@ namespace AMMS.API.Controllers
 
 
         [HttpGet("payos/return")]
-        public async Task<IActionResult> PayOsReturn([FromQuery] int request_id, [FromQuery] long order_code, [FromQuery] int? estimate_id, [FromQuery] string? status, [FromQuery] long? orderCode,
+        public async Task<IActionResult> PayOsReturn([FromQuery] int request_id, [FromQuery] long order_code, [FromQuery] int? estimate_id, [FromQuery] int? quote_id, [FromQuery] string? status, [FromQuery] long? orderCode,
     [FromServices] IPaymentRepository paymentRepo,
     CancellationToken ct)
         {
@@ -292,7 +291,7 @@ namespace AMMS.API.Controllers
                         }
                     }
 
-                    await ProcessPaidAsync(request_id, oc, amount, paymentLinkId, transactionId, rawJson, estimate_id, paymentRepo, ct);
+                    await ProcessPaidAsync(request_id, oc, amount, paymentLinkId, transactionId, rawJson, estimate_id, quote_id, paymentRepo, ct);
                 }
 
                 return Redirect($"{fe}/request-detail/{request_id}?payos={(isPaid ? "paid" : "pending")}&orderCode={oc}");
@@ -378,6 +377,7 @@ namespace AMMS.API.Controllers
                     transactionId,
                     raw.ToString(),
                     estimateIdFromQuery: null,
+                    quoteIdFromQuery: null,
                     paymentRepo,
                     ct);
 
@@ -445,23 +445,23 @@ namespace AMMS.API.Controllers
     string? transactionId,
     string rawJson,
     int? estimateIdFromQuery,
+    int? quoteIdFromQuery,
     IPaymentRepository paymentRepo,
     CancellationToken ct)
         {
             // 1) load request
             var req = await _db.order_requests
-                .AsTracking()
                 .FirstOrDefaultAsync(x => x.order_request_id == orderRequestId, ct);
 
             if (req == null)
                 return (false, $"order_request_id={orderRequestId} not found");
 
-            await UpsertPaidPaymentRowAsync(orderRequestId, orderCode, amount, paymentLinkId, transactionId, rawJson, estimateIdFromQuery, paymentRepo, ct);
+            await UpsertPaidPaymentRowAsync(orderRequestId, orderCode, amount, paymentLinkId, transactionId, rawJson, estimateIdFromQuery, quoteIdFromQuery, paymentRepo, ct);
 
             if (req.order_id != null)
                 return (true, $"Already processed: order_id={req.order_id}");
 
-            var paidPayment = await _db.payments.AsNoTracking()
+            var paidPayment = await _db.payments
                                        .Where(p => p.provider == "PAYOS" && p.order_code == orderCode)
                                        .OrderByDescending(p => p.payment_id)
                                        .FirstOrDefaultAsync(ct);
@@ -469,16 +469,17 @@ namespace AMMS.API.Controllers
                 return (false, "Payment row not found");
 
             var resolvedEstimateId =
-    (paidPayment.estimate_id.HasValue && paidPayment.estimate_id.Value > 0)
-        ? paidPayment.estimate_id.Value
-        : (estimateIdFromQuery.HasValue && estimateIdFromQuery.Value > 0
-            ? estimateIdFromQuery.Value
-            : 0);
+        (paidPayment.estimate_id.HasValue && paidPayment.estimate_id.Value > 0) ? paidPayment.estimate_id.Value :
+        (estimateIdFromQuery.HasValue && estimateIdFromQuery.Value > 0) ? estimateIdFromQuery.Value : 0;
 
             if (resolvedEstimateId <= 0)
                 return (false, "Cannot resolve estimate_id for this payment/order_code");
 
-            var est = await _db.cost_estimates.AsNoTracking()
+            var resolvedQuoteId =
+        (quoteIdFromQuery.HasValue && quoteIdFromQuery.Value > 0) ? quoteIdFromQuery.Value :
+        (paidPayment.quote_id.HasValue && paidPayment.quote_id.Value > 0) ? paidPayment.quote_id.Value : 0;
+
+            var est = await _db.cost_estimates
     .FirstOrDefaultAsync(x => x.estimate_id == resolvedEstimateId
                               && x.order_request_id == orderRequestId, ct);
 
@@ -495,10 +496,16 @@ namespace AMMS.API.Controllers
             if (AppTime.NowVnUnspecified() > expiredAt.ToUniversalTime())
                 return (false, $"Quote expired at {expiredAt:o}, ignore payment.");
 
-            var now = AppTime.NowVnUnspecified();
+            if (resolvedQuoteId > 0)
+                req.quote_id = resolvedQuoteId;
+
+            if (resolvedQuoteId > 0)
+            {
+                var q = await _db.quotes.AsTracking().FirstOrDefaultAsync(x => x.quote_id == resolvedQuoteId, ct);
+                if (q != null) q.status = "Accepted";
+            }
 
             int orderId;
-
             if (req.order_id == null)
             {
                 await _dealService.MarkAcceptedAsync(orderRequestId);
@@ -514,7 +521,14 @@ namespace AMMS.API.Controllers
                 orderId = req.order_id.Value;
             }
 
-            // Ensure production + tasks
+            req.quote_id = resolvedQuoteId > 0 ? resolvedQuoteId : req.quote_id;
+
+            if (resolvedQuoteId > 0)
+            {
+                var q = await _db.quotes.FirstOrDefaultAsync(x => x.quote_id == resolvedQuoteId, ct);
+                if (q != null) q.status = "Accepted";
+            }
+
             var prod = await _db.productions.AsNoTracking()
                 .Where(p => p.order_id == orderId && p.end_date == null)
                 .OrderByDescending(p => p.prod_id)
@@ -525,6 +539,8 @@ namespace AMMS.API.Controllers
             {
                 hasTasks = await _db.tasks.AsNoTracking().AnyAsync(t => t.prod_id == prod.prod_id, ct);
             }
+
+            var now = AppTime.NowVnUnspecified();
 
             if (prod == null || !hasTasks)
             {
@@ -571,14 +587,13 @@ namespace AMMS.API.Controllers
     string? transactionId,
     string rawJson,
     int? estimateIdFromQuery,
+    int? quoteIdFromQuery,
     IPaymentRepository paymentRepo,
     CancellationToken ct)
         {
             var now = AppTime.NowVnUnspecified();
 
-            var existing = await _db.payments
-                .AsTracking()
-                .FirstOrDefaultAsync(p => p.provider == "PAYOS" && p.order_code == orderCode, ct);
+            var existing = await _db.payments.FirstOrDefaultAsync(p => p.provider == "PAYOS" && p.order_code == orderCode, ct);
 
             if (existing != null)
             {
@@ -590,12 +605,16 @@ namespace AMMS.API.Controllers
                 existing.payos_payment_link_id ??= paymentLinkId;
                 existing.payos_transaction_id ??= transactionId;
 
-                if (!string.IsNullOrWhiteSpace(rawJson))
-                    existing.payos_raw = rawJson;
+                if (!string.IsNullOrWhiteSpace(rawJson)) existing.payos_raw = rawJson;
 
                 if ((existing.estimate_id == null || existing.estimate_id <= 0) && estimateIdFromQuery.HasValue && estimateIdFromQuery.Value > 0)
                 {
                     existing.estimate_id = estimateIdFromQuery.Value;
+                }
+
+                if ((existing.quote_id == null || existing.quote_id <= 0) && quoteIdFromQuery.HasValue && quoteIdFromQuery.Value > 0)
+                {
+                    existing.quote_id = quoteIdFromQuery.Value;
                 }
 
                 existing.updated_at = AppTime.NowVnUnspecified();
@@ -613,9 +632,8 @@ namespace AMMS.API.Controllers
                 amount = (decimal)amount,
                 currency = "VND",
                 status = "PAID",
-                estimate_id = (estimateIdFromQuery.HasValue && estimateIdFromQuery.Value > 0)
-            ? estimateIdFromQuery.Value
-            : (int?)null,
+                estimate_id = (estimateIdFromQuery.HasValue && estimateIdFromQuery.Value > 0) ? estimateIdFromQuery.Value : (int?)null,
+                quote_id = (quoteIdFromQuery.HasValue && quoteIdFromQuery.Value > 0) ? quoteIdFromQuery.Value : (int?)null,
                 paid_at = now,
                 payos_payment_link_id = paymentLinkId,
                 payos_transaction_id = transactionId,
@@ -629,7 +647,7 @@ namespace AMMS.API.Controllers
 
 
         [HttpGet("payos-deposit/{request_id:int}")]
-        public async Task<IActionResult> GetPayOsDeposit([FromRoute] int request_id, [FromQuery] int estimate_id, CancellationToken ct)
+        public async Task<IActionResult> GetPayOsDeposit([FromRoute] int request_id, [FromQuery] int? quote_id, [FromQuery] int estimate_id, CancellationToken ct)
         {
             try
             {
@@ -649,15 +667,15 @@ namespace AMMS.API.Controllers
                     });
                 }
 
-                var est = await _db.cost_estimates.AsNoTracking()
-                    .FirstOrDefaultAsync(x => x.estimate_id == estimate_id && x.order_request_id == request_id, ct);
+                var est = await _db.cost_estimates.FirstOrDefaultAsync(x => x.estimate_id == estimate_id && x.order_request_id == request_id, ct);
                 if (est == null) return BadRequest(new { message = "Cost estimate not found" });
 
                 var expiredAt = est.created_at.AddHours(24);
+
                 if (AppTime.NowVnUnspecified() > expiredAt.ToUniversalTime())
                     return BadRequest(new { message = "Quote expired" });
 
-                var dto = await _dealService.CreateOrReuseDepositLinkAsync(request_id, estimate_id, ct);
+                var dto = await _dealService.CreateOrReuseDepositLinkAsync(request_id, estimate_id, quote_id, ct);
 
                 dto.expired_at = expiredAt;
 
@@ -679,5 +697,25 @@ namespace AMMS.API.Controllers
                 return NotFound(new { message = "Order request not found" });
             return Ok(result);
         }
+
+        [HttpPut("submit-estimate-for-approval")]
+        public async Task<IActionResult> SubmitEstimateForApproval([FromBody] SubmitForApprovalRequestDto dto)
+        {
+            try
+            {
+                await _service.SubmitEstimateForApprovalAsync(dto.request_id);
+                return Ok(new
+                {
+                    message = "Submitted for approval",
+                    request_id = dto.request_id,
+                    new_status = "Processing"
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
     }
 }

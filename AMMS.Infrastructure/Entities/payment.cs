@@ -37,6 +37,8 @@ namespace AMMS.Infrastructure.Entities
 
         public DateTime updated_at { get; set; }
 
+        public int? quote_id { get; set; }
+
         public virtual order_request order_request { get; set; } = null!;
     }
 }
