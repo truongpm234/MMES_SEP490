@@ -1,4 +1,6 @@
-﻿using AMMS.Application.Extensions;
+﻿using AMMS.API;
+using AMMS.API.Hubs;
+using AMMS.Application.Extensions;
 using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
 using AMMS.Application.Services;
@@ -45,21 +47,25 @@ builder.Services.AddControllers()
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddMemoryCache();
-//builder.Services.AddSwaggerGen();
+builder.Services.AddSignalR();
+var feOrigins = new[]
+{
+    "http://localhost:3000",
+    "http://192.168.2.220:3000",
+    "https://sep490-fe.vercel.app"
+};
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll",
-        builder =>
-        {
-            builder.AllowAnyOrigin()
-                   .AllowAnyMethod()
-                   .AllowAnyHeader();
-        });
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.WithOrigins(feOrigins)
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials();
+    });
 });
 
-
-//jwt for swagger
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -81,6 +87,22 @@ builder.Services.AddAuthentication(options =>
         ),
 
         ClockSkew = TimeSpan.Zero
+    };
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            var accessToken = context.Request.Query["access_token"];
+            var path = context.HttpContext.Request.Path;
+
+            if (!string.IsNullOrEmpty(accessToken) &&
+                path.StartsWithSegments("/hubs/realtime"))
+            {
+                context.Token = accessToken;
+            }
+
+            return Task.CompletedTask;
+        }
     };
 });
 builder.Services.AddAuthorization(options =>
@@ -148,6 +170,12 @@ builder.Services.AddControllers().AddJsonOptions(o =>
 {
     o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.Never;
 });
+builder.Services.ConfigureApplicationCookie(options =>
+{
+    options.Cookie.SameSite = SameSiteMode.None;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.HttpOnly = true;
+});
 builder.Services.Configure<SchedulingOptions>(
     builder.Configuration.GetSection("Scheduling"));
 builder.Services.AddSingleton<WorkCalendar>();
@@ -195,6 +223,7 @@ builder.Services.AddScoped<IProductTemplateRepository, ProductTemplateRepository
 builder.Services.AddScoped<IProductTemplateService, ProductTemplateService>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<ScanService>();
 builder.Services.AddScoped<JWTService>();
 builder.Services.AddScoped<GoogleAuthService>();
 builder.Services.AddScoped<ISmsOtpService, TwilioSmsOtpService>();
@@ -223,8 +252,14 @@ app.UseSwaggerUI(c =>
 });
 
 app.UseHttpsRedirection();
+app.UseRouting();
+
 app.UseCors("AllowAll");
+
 app.UseAuthentication();
 app.UseAuthorization();
+
 app.MapControllers();
+app.MapHub<RealtimeHub>("/hubs/realtime");
+
 app.Run();
