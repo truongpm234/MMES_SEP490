@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.SignalR;
 
 namespace AMMS.API.Hubs
 {
-    [Authorize]
+    [Authorize] 
     public class RealtimeHub : Hub
     {
         public Task JoinProd(int prodId)
