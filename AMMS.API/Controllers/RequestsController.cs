@@ -103,8 +103,49 @@ namespace AMMS.API.Controllers
         [HttpPut("approval")]
         public async Task<IActionResult> Approval([FromBody] RequestApprovalUpdateDto dto, CancellationToken ct)
         {
-            await _service.UpdateApprovalAsync(dto, ct);
-            return Ok(new { message = "Updated approval", status = dto.status, request_id = dto.request_id });
+            try
+            {
+                if (dto == null)
+                    return BadRequest(new { message = "Request body is required" });
+
+                if (dto.request_id <= 0)
+                    return BadRequest(new { message = "request_id must be greater than 0" });
+
+                if (string.IsNullOrWhiteSpace(dto.status))
+                    return BadRequest(new { message = "status is required" });
+
+                var validStatuses = new[] { "Verified", "Declined"};
+                if (!validStatuses.Contains(dto.status, StringComparer.OrdinalIgnoreCase))
+                    return BadRequest(new
+                    {
+                        message = $"Invalid status. Allowed values: {string.Join(", ", validStatuses)}"
+                    });
+
+                await _service.UpdateApprovalAsync(dto, ct);
+
+                return Ok(new
+                {
+                    message = "Updated approval",
+                    status = dto.status,
+                    request_id = dto.request_id
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "An unexpected error occurred",
+                    detail = ex.Message
+                });
+            }
         }
 
         [HttpPost("send-deal")]

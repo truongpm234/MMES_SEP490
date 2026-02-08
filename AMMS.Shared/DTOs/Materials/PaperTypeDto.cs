@@ -5,5 +5,6 @@
         public string Code { get; set; } = null!;
         public string Name { get; set; } = null!;
         public decimal? StockQty { get; set; }
+        public decimal? Price { get; set;} = null!;
     }
 }

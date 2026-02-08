@@ -13,5 +13,6 @@ namespace AMMS.Application.Interfaces
         Task<PagedResultLite<MaterialShortageDto>> GetShortageForAllOrdersPagedAsync(
             int page, int pageSize, CancellationToken ct = default);
         Task<List<material>> GetMaterialByTypeSongAsync();
+        Task<MaterialTypeGlueDto> GetAllGlueTypeAsync();
     }
 }

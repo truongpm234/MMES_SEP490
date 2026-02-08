@@ -55,5 +55,12 @@ namespace AMMS.API.Controllers
             var materials = await _materialService.GetMaterialByTypeSongAsync();
             return Ok(materials);
         }
+
+        [HttpGet("get-all-glue-type")]
+        public async Task<IActionResult> GetAllGlueTypeAsync()
+        {
+            var glue = await _materialService.GetAllGlueTypeAsync();
+            return Ok(glue);
+        }
     }
 }
