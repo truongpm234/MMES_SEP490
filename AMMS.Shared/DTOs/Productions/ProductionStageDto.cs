@@ -23,6 +23,8 @@ namespace AMMS.Shared.DTOs.Productions
         public string? assigned_to_name { get; set; }
         public DateTime? start_time { get; set; }
         public DateTime? end_time { get; set; }
+        public DateTime? planned_start_time { get; set; }
+        public DateTime? planned_end_time { get; set; }
 
         // Sản lượng/hao phí từ logs
         public int qty_good { get; set; }

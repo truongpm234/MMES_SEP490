@@ -21,21 +21,35 @@ namespace AMMS.Application.Services
         {
             return _paymentRepository.GetPaidByProviderOrderCodeAsync(provider, orderCode, ct);
         }
+
         public Task<payment?> GetLatestByRequestIdAsync(int orderRequestId, CancellationToken ct = default)
         {
             return _paymentRepository.GetLatestByRequestIdAsync(orderRequestId, ct);
         }
+
         public async Task<payment?> GetLatestPendingByRequestIdAsync(int requestId, CancellationToken ct)
         {
             return await _paymentRepository.GetLatestPendingByRequestIdAsync(requestId, ct);
         }
+
         public async Task UpsertPendingAsync(payment p, CancellationToken ct)
         {
             await _paymentRepository.UpsertPendingAsync(p, ct);
         }
-         public Task<int> SaveChangesAsync(CancellationToken ct = default)
+
+        public Task<int> SaveChangesAsync(CancellationToken ct = default)
         {
             return _paymentRepository.SaveChangesAsync(ct);
+        }
+
+        public async Task<payment?> GetLatestPendingByRequestIdAndEstimateIdAsync(int requestId, int estimateId, CancellationToken ct = default)
+        {
+            return await _paymentRepository.GetLatestPendingByRequestIdAndEstimateIdAsync(requestId, estimateId, ct);
+        }
+
+        public async Task<payment?> GetByOrderCodeAsync(long orderCode, CancellationToken ct = default)
+        {
+            return await _paymentRepository.GetByOrderCodeAsync(orderCode, ct);
         }
     }
 }

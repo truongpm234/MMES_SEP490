@@ -56,33 +56,31 @@ namespace AMMS.Application.Services
             return await _estimateRepo.OrderRequestExistsAsync(orderRequestId);
         }
 
-        public async Task SaveFeCostEstimateAsync(CostEstimateInsertRequest req, CancellationToken ct = default)
+        public async Task<int> SaveFeCostEstimateAsync(CostEstimateInsertRequest req, CancellationToken ct = default)
         {
             if (req.order_request_id <= 0)
                 throw new ArgumentException("order_request_id must be > 0");
 
-            var entity = await _estimateRepo.GetByOrderRequestIdAsync(req.order_request_id);
+            var orderReq = await _estimateRepo.GetOrderRequestTrackingAsync(req.order_request_id, ct);
+            if (orderReq == null)
+                throw new Exception("Order request not found");
 
-            bool isNew = false;
             var now = AppTime.NowVnUnspecified();
 
-            if (entity == null)
+            var entity = new cost_estimate
             {
-                isNew = true;
-                entity = new cost_estimate
-                {
-                    order_request_id = req.order_request_id,
-                    created_at = ToUnspecified(req.created_at ?? now),
-                };
+                order_request_id = req.order_request_id,
+                created_at = ToUnspecified(req.created_at ?? now),
 
-                await _estimateRepo.AddAsync(entity);
-            }
+                estimated_finish_date = ToUnspecified(req.estimated_finish_date ?? now),
+                desired_delivery_date = ToUnspecified(req.desired_delivery_date ?? (orderReq.delivery_date ?? now)),
+            };
 
+            // helper
             static void SetIfHasValue<T>(T? value, Action<T> setter) where T : struct
             {
                 if (value.HasValue) setter(value.Value);
             }
-
             static void SetIfNotNull(string? value, Action<string> setter)
             {
                 if (value != null) setter(value);
@@ -132,18 +130,6 @@ namespace AMMS.Application.Services
             SetIfHasValue(req.discount_amount, v => entity.discount_amount = v);
             SetIfHasValue(req.final_total_cost, v => entity.final_total_cost = v);
 
-            // ----- DATES -----
-            if (req.estimated_finish_date.HasValue)
-                entity.estimated_finish_date = ToUnspecified(req.estimated_finish_date.Value);
-
-            if (req.desired_delivery_date.HasValue)
-                entity.desired_delivery_date = ToUnspecified(req.desired_delivery_date.Value);
-
-            if (req.created_at.HasValue)
-                entity.created_at = ToUnspecified(req.created_at.Value);
-            else if (isNew)
-                entity.created_at = ToUnspecified(now);
-
             // ----- SHEETS / AREA -----
             SetIfHasValue(req.sheets_required, v => entity.sheets_required = v);
             SetIfHasValue(req.sheets_waste, v => entity.sheets_waste = v);
@@ -155,35 +141,89 @@ namespace AMMS.Application.Services
             SetIfHasValue(req.design_cost, v => entity.design_cost = v);
             SetIfNotNull(req.cost_note, v => entity.cost_note = v);
 
-            // ----- PROCESS COSTS -----
+            SetIfHasValue(req.bleed_mm, v => orderReq.bleed_mm = v);
+            SetIfHasValue(req.glue_tab_mm, v => orderReq.glue_tab_mm = v);
+            if (req.is_one_side_box.HasValue) orderReq.is_one_side_box = req.is_one_side_box.Value;
+            SetIfHasValue(req.print_height_mm, v => orderReq.print_height_mm = v);
+            SetIfHasValue(req.print_width_mm, v => orderReq.print_width_mm = v);
+
             if (req.process_costs != null)
             {
-                entity.process_costs.Clear();
+                int sheetsBase = entity.sheets_required > 0
+                    ? entity.sheets_required
+                    : (entity.sheets_total > 0 ? entity.sheets_total : 1);
+
+                decimal totalArea = entity.total_area_m2 > 0 ? entity.total_area_m2 : 0m;
 
                 foreach (var p in req.process_costs)
                 {
+                    var pcode = (p.process_code ?? "").Trim().ToUpperInvariant();
+                    decimal qty = p.quantity ?? 0m;
+                    decimal unitPrice = p.unit_price ?? 0m;
+
+                    decimal totalCost = (p.total_cost.HasValue && p.total_cost.Value > 0)
+                        ? p.total_cost.Value
+                        : (qty * unitPrice);
+
+                    var unit = (p.unit ?? "").Trim();
+
+                    if (pcode is "IN" or "PHU" or "CAN")
+                    {
+                        var qtySheets = (decimal)sheetsBase;
+                        var unitPriceSheet = sheetsBase > 0 ? (totalCost / qtySheets) : 0m;
+
+                        if (totalCost <= 0 && unitPrice > 0 && totalArea > 0)
+                        {
+                            totalCost = unitPrice * totalArea;
+                            unitPriceSheet = sheetsBase > 0 ? (totalCost / qtySheets) : 0m;
+                        }
+
+                        entity.process_costs.Add(new cost_estimate_process
+                        {
+                            process_code = p.process_code,
+                            process_name = p.process_name ?? p.process_code,
+                            quantity = qtySheets,
+                            unit = "tờ",
+                            unit_price = unitPriceSheet,
+                            total_cost = totalCost,
+                            note = p.note,
+                            created_at = AppTime.NowVnUnspecified()
+                        });
+
+                        continue;
+                    }
+
                     entity.process_costs.Add(new cost_estimate_process
                     {
                         process_code = p.process_code,
                         process_name = p.process_name ?? p.process_code,
-                        quantity = p.quantity ?? 0m,
-                        unit = p.unit ?? "",
-                        unit_price = p.unit_price ?? 0m,
-                        total_cost = p.total_cost ?? 0m,
+                        quantity = qty,
+                        unit = string.IsNullOrWhiteSpace(unit) ? "" : unit,
+                        unit_price = unitPrice,
+                        total_cost = totalCost,
                         note = p.note,
                         created_at = AppTime.NowVnUnspecified()
                     });
                 }
             }
 
+            await _estimateRepo.AddAsync(entity);
             await _estimateRepo.SaveChangesAsync();
+
+            return entity.estimate_id;
         }
+
         public static DateTime ToUnspecified(DateTime dt)
         {
             if (dt.Kind == DateTimeKind.Unspecified)
                 return dt;
 
             return DateTime.SpecifyKind(dt, DateTimeKind.Unspecified);
+        }
+
+        public async Task<List<RequestEstimateDto>> GetAllEstimatesFlatByRequestIdAsync(int requestId, CancellationToken ct = default)
+        {
+            return await _estimateRepo.GetAllEstimatesFlatByRequestIdAsync(requestId, ct);
         }
     }
 }

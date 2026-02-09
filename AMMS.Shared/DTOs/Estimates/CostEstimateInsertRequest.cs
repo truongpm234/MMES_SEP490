@@ -69,6 +69,11 @@ namespace AMMS.Shared.DTOs.Estimates
         // ----- Thiết kế -----
         public decimal? design_cost { get; set; }
         public string? cost_note { get; set; }
+        public int? bleed_mm { get; set; }
+        public int? glue_tab_mm { get; set; }
+        public bool? is_one_side_box { get; set; }
+        public int? print_height_mm { get; set; }
+        public int? print_width_mm { get; set; }
 
         // ----- Chi tiết công đoạn (cost_estimate_process) -----
         public List<CostEstimateProcessDto>? process_costs { get; set; }

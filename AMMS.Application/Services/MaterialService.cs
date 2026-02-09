@@ -42,7 +42,10 @@ namespace AMMS.Application.Services
         {
             return await _materialRepository.GetMaterialByTypeSongAsync();
         }
-
+        public async Task<MaterialTypeGlueDto> GetAllGlueTypeAsync()
+        {
+            return await _materialRepository.GetAllGlueTypeAsync();
+        }
         public Task<PagedResultLite<MaterialShortageDto>> GetShortageForAllOrdersPagedAsync(
             int page, int pageSize, CancellationToken ct = default) =>
             _materialRepository.GetShortageForAllOrdersPagedAsync(page, pageSize, ct);

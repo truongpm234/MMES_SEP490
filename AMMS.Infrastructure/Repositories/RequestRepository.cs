@@ -23,6 +23,7 @@ namespace AMMS.Infrastructure.Repositories
             return await _db.order_requests
                 .FirstOrDefaultAsync(x => x.order_request_id == id);
         }
+
         public async Task<RequestWithCostDto?> GetByIdWithCostAsync(int id)
         {
             var query = from r in _db.order_requests.AsNoTracking()

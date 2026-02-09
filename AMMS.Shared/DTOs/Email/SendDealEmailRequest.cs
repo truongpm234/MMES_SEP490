@@ -8,6 +8,6 @@ namespace AMMS.Shared.DTOs.Email
 {
     public class SendDealEmailRequest
     {
-        public int RequestId { get; set; }
+        public int request_id { get; set; }
     }
 }

@@ -3,6 +3,7 @@ using AMMS.Application.Interfaces;
 using AMMS.Application.Services;
 using AMMS.Shared.DTOs.Estimates;
 using AMMS.Shared.DTOs.Estimates.AMMS.Shared.DTOs.Estimates;
+using AMMS.Shared.DTOs.Planning;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,11 +15,21 @@ namespace AMMS.API.Controllers
     {
         private readonly IEstimateService _service;
         private readonly IEstimateBaseConfigService _baseConfig;
+        private readonly IOrderPlanningService _planning;
 
-        public EstimatesController(IEstimateService service, IEstimateBaseConfigService baseConfig)
+        public EstimatesController(IEstimateService service, IEstimateBaseConfigService baseConfig, IOrderPlanningService planning)
         {
             _service = service;
             _baseConfig = baseConfig;
+            _planning = planning;
+        }
+
+        [HttpGet("estimate-finish/{orderRequestId:int}")]
+        public async Task<ActionResult<EstimateFinishDateResponse>> EstimateFinish(int orderRequestId, CancellationToken ct)
+        {
+            var res = await _planning.EstimateFinishByOrderRequestAsync(orderRequestId, ct);
+            if (res == null) return NotFound();
+            return Ok(res);
         }
 
         [HttpPut("adjust-cost/{orderRequestId:int}")]
@@ -56,9 +67,20 @@ namespace AMMS.API.Controllers
             if (!exists)
                 return NotFound(new { message = $"Order request with id {req.order_request_id} not found" });
 
-            await _service.SaveFeCostEstimateAsync(req, ct);
+            var estimateId = await _service.SaveFeCostEstimateAsync(req, ct);
 
-            return NoContent();
+            return Ok(new { estimate_id = estimateId });
+        }
+
+        [HttpGet("get-all-deal-by-{request_id:int}")]
+        public async Task<IActionResult> GetAllEstimatesFlat([FromRoute] int request_id, CancellationToken ct)
+        {
+            var list = await _service.GetAllEstimatesFlatByRequestIdAsync(request_id, ct);
+
+            if (list.Count == 0)
+                return NotFound(new { message = "Order request not found OR no estimates for this request" });
+
+            return Ok(list);
         }
     }
 }

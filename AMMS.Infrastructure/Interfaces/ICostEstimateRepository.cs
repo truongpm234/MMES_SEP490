@@ -1,4 +1,5 @@
 ﻿using AMMS.Infrastructure.Entities;
+using AMMS.Shared.DTOs.Estimates;
 using AMMS.Shared.DTOs.Requests;
 using System;
 using System.Collections.Generic;
@@ -15,8 +16,12 @@ namespace AMMS.Infrastructure.Interfaces
         Task<cost_estimate?> GetByOrderRequestIdAsync(int orderRequestId);
         Task<cost_estimate?> GetByIdAsync(int id);
         Task UpdateAsync(cost_estimate entity);
+        Task<order_request?> GetOrderRequestTrackingAsync(int orderRequestId, CancellationToken ct = default);
         Task<DepositByRequestResponse?> GetDepositByRequestIdAsync(int requestId, CancellationToken ct = default);
         Task<bool> OrderRequestExistsAsync(int order_request_id);
+        Task<List<RequestEstimateDto>> GetAllEstimatesFlatByRequestIdAsync(int requestId, CancellationToken ct = default);
+        Task<List<cost_estimate>> GetAllByOrderRequestIdAsync(int orderRequestId, CancellationToken ct = default);
+
     }
 }
 

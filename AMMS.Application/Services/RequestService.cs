@@ -62,7 +62,11 @@ namespace AMMS.Application.Services
                 order_request_date = AppTime.NowVnUnspecified(),
                 detail_address = req.detail_address,
                 process_status = "Pending",
-                is_send_design = req.is_send_design
+                is_send_design = req.is_send_design,
+                product_height_mm = req.product_height_mm,
+                product_length_mm = req.product_length_mm,
+                product_width_mm = req.product_width_mm,
+                paper_name = req.paper_name
             };
 
             await _requestRepo.AddAsync(entity);
@@ -574,6 +578,61 @@ namespace AMMS.Application.Services
         public async Task<int> DeleteDesignFilePathByRequestIdAsync(int orderRequestId, CancellationToken ct = default)
         {
             return await _requestRepo.DeleteDesignFilePathByRequestIdAsync(orderRequestId, ct);
+        }
+
+        public async Task UpdateApprovalAsync(RequestApprovalUpdateDto dto, CancellationToken ct = default)
+        {
+            if (dto.request_id <= 0) throw new ArgumentException("request_id is required");
+
+            var req = await _requestRepo.GetByIdAsync(dto.request_id);
+            if (req == null) throw new InvalidOperationException("Order request not found");
+
+            var st = (dto.status ?? "").Trim();
+
+            // Normalize
+            st = st.Equals("verified", StringComparison.OrdinalIgnoreCase) ? "Verified" :
+                 st.Equals("processing", StringComparison.OrdinalIgnoreCase) ? "Processing" :
+                 st.Equals("declined", StringComparison.OrdinalIgnoreCase) ? "Declined" :
+                 st;
+
+            if (st is not ("Processing" or "Verified" or "Declined"))
+                throw new ArgumentException("status must be Processing | Verified | Declined");
+
+            if ((st == "Verified" || st == "Declined") && !string.Equals(req.process_status, "Processing", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Request must be Processing before manager decision");
+            }
+
+            req.process_status = st;
+
+            if (dto.note != null)
+                req.note = dto.note;
+
+            await _requestRepo.SaveChangesAsync();
+        }
+
+        public async Task SubmitEstimateForApprovalAsync(int requestId)
+        {
+            if (requestId <= 0)
+                throw new ArgumentException("request_id is required");
+
+            var req = await _requestRepo.GetByIdAsync(requestId);
+            if (req == null)
+                throw new InvalidOperationException("Order request not found");
+
+            var st = (req.process_status ?? "").Trim();
+            if (st.Equals("Accepted", StringComparison.OrdinalIgnoreCase) ||
+                st.Equals("Rejected", StringComparison.OrdinalIgnoreCase) ||
+                st.Equals("Cancel", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Cannot submit when process_status = {req.process_status}");
+            }
+
+            if (st.Equals("Processing", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            req.process_status = "Processing";
+            await _requestRepo.SaveChangesAsync();
         }
 
     }

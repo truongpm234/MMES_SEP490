@@ -19,8 +19,8 @@ namespace AMMS.Application.Interfaces
     bool ascending, int page, int pageSize, CancellationToken ct = default);
         Task<PagedResultLite<RequestSortedDto>> GetSortedByDeliveryDatePagedAsync(
     bool nearestFirst, int page, int pageSize, CancellationToken ct = default);
-         Task<PagedResultLite<RequestEmailStatsDto>> GetEmailsByAcceptedCountPagedAsync(
-    int page, int pageSize, CancellationToken ct = default);
+        Task<PagedResultLite<RequestEmailStatsDto>> GetEmailsByAcceptedCountPagedAsync(
+   int page, int pageSize, CancellationToken ct = default);
         Task<PagedResultLite<RequestStockCoverageDto>> GetSortedByStockCoveragePagedAsync(
     int page, int pageSize, CancellationToken ct = default);
         Task<PagedResultLite<RequestSortedDto>> GetByOrderRequestDatePagedAsync(
@@ -33,5 +33,7 @@ namespace AMMS.Application.Interfaces
         Task<CreateRequestResponse> CreateRequestByConsultantAsync(CreateResquestConsultant req);
         Task<RequestDetailDto?> GetInformationRequestById(int requestId, CancellationToken ct = default);
         Task<RequestWithCostDto?> GetByIdWithCostAsync(int id);
+        Task UpdateApprovalAsync(RequestApprovalUpdateDto dto, CancellationToken ct = default);
+        Task SubmitEstimateForApprovalAsync(int requestId);
     }
 }

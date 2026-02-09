@@ -14,6 +14,7 @@ namespace AMMS.Application.Helpers
             "RALO" => "Ra lô",
             "CAT" => "Cắt",
             "CAN_MANG" => "Cán",
+            "CAN" => "Cán",
             "BOI" => "Bồi",
             "PHU" => "Phủ",
             "DUT" => "Dứt",
@@ -251,11 +252,7 @@ namespace AMMS.Application.Helpers
 </html>";
         }
 
-        public static string AcceptCustomerEmail(
-    order_request req,
-    order order,
-    cost_estimate est,
-    string trackingUrl)
+        public static string AcceptCustomerEmail(order_request req, order order, cost_estimate est, string trackingUrl)
         {
             return $@"
 <div style='font-family:Arial,Helvetica,sans-serif;max-width:720px;margin:24px auto;line-height:1.6'>
