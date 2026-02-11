@@ -708,17 +708,19 @@ namespace AMMS.API.Controllers
                     });
                 }
 
-                var est = await _db.cost_estimates.FirstOrDefaultAsync(x => x.estimate_id == estimate_id && x.order_request_id == request_id, ct);
-                if (est == null) return BadRequest(new { message = "Cost estimate not found" });
+                var quote = await _db.quotes.FirstOrDefaultAsync(x => x.quote_id == quote_id && x.order_request_id == request_id, ct);
+                if (quote == null) return BadRequest(new { message = "Quote not found" });
 
-                var expiredAt = est.created_at.AddHours(24);
+                var nowUtc = AppTime.NowVnUnspecified();
+                var expiredAtUtc = quote.created_at.AddHours(24);
 
-                if (AppTime.NowVnUnspecified() > expiredAt.ToUniversalTime())
+                if (nowUtc > expiredAtUtc)
                     return BadRequest(new { message = "Quote expired" });
+
 
                 var dto = await _dealService.CreateOrReuseDepositLinkAsync(request_id, estimate_id, quote_id, ct);
 
-                dto.expired_at = expiredAt;
+                dto.expired_at = expiredAtUtc;
 
                 dto.status ??= "PENDING";
 

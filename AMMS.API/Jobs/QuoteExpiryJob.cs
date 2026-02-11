@@ -29,88 +29,95 @@ namespace AMMS.API.Jobs
         public async Task RunAsync(CancellationToken ct)
         {
             var now = AppTime.NowVnUnspecified();
-
             var consultantEmail = _config["Deal:ConsultantEmail"];
-            if (string.IsNullOrWhiteSpace(consultantEmail))
-            {
-                _logger.LogWarning("[QuoteExpiryJob] Missing Deal:ConsultantEmail in config");
-            }
-
             var reason = "Từ chối deal do quá hạn 24h";
 
-            var expiredRows = await (
-    from q in _db.quotes.AsTracking()
-    join req in _db.order_requests.AsTracking()
-        on q.order_request_id equals req.order_request_id
-    join est in _db.cost_estimates.AsNoTracking()
-        on q.estimate_id equals est.estimate_id
-    where q.status == "Sent"
-       && req.process_status == "Waiting"
-       && est.created_at.AddHours(24) < now
-       && !_db.payments.AsNoTracking().Any(p =>
-              p.order_request_id == req.order_request_id
-              && p.provider == "PAYOS"
-              && (p.status == "PAID" || p.status == "SUCCESS"))
-    select new { q, req, est }
-).ToListAsync(ct);
+            // 1) chỉ lấy ID (NoTracking cho nhẹ)
+            var expiredIds = await (
+                from q in _db.quotes.AsNoTracking()
+                join req in _db.order_requests.AsNoTracking()
+                    on q.order_request_id equals req.order_request_id
+                join est in _db.cost_estimates.AsNoTracking()
+                    on q.estimate_id equals est.estimate_id
+                where q.status == "Sent"
+                   && req.process_status == "Waiting"
+                   && est.created_at.AddHours(24) < now
+                   && !_db.payments.AsNoTracking().Any(p =>
+                        p.order_request_id == req.order_request_id
+                        && p.provider == "PAYOS"
+                        && (p.status == "PAID" || p.status == "SUCCESS"))
+                select new
+                {
+                    qId = q.quote_id,
+                    reqId = req.order_request_id,
+                    expiredAt = est.created_at.AddHours(24)
+                }
+            ).ToListAsync(ct);
 
-            if (expiredRows.Count == 0)
+            if (expiredIds.Count == 0)
             {
                 _logger.LogInformation("[QuoteExpiryJob] No expired quotes");
                 return;
             }
 
-            _logger.LogInformation("[QuoteExpiryJob] Found {count} expired quotes", expiredRows.Count);
+            _logger.LogInformation("[QuoteExpiryJob] Found {count} expired quotes", expiredIds.Count);
 
-            foreach (var row in expiredRows)
+            foreach (var x in expiredIds)
             {
-                row.q.status = "Rejected";
+                // 2) load tracked entities chắc chắn
+                var quote = await _db.quotes.AsTracking()
+                    .FirstOrDefaultAsync(z => z.quote_id == x.qId, ct);
 
-                // 2) update request
-                row.req.process_status = "Rejected";
-                row.req.reason = reason;
+                var req = await _db.order_requests.AsTracking()
+                    .FirstOrDefaultAsync(z => z.order_request_id == x.reqId, ct);
 
-                var pendingPayments = await _db.payments
-                    .AsTracking()
-                    .Where(p =>
-                        p.order_request_id == row.req.order_request_id
-                        && p.status == "PENDING"
-                        && p.provider == "PAYOS"
-                    )
+                if (quote == null || req == null) continue;
+
+                // 3) update quote + request
+                quote.status = "Rejected";
+                req.process_status = "Rejected";
+                req.reason = reason;
+
+                // 4) update payments PENDING -> CANCELLED
+                var pendingPayments = await _db.payments.AsTracking()
+                    .Where(p => p.order_request_id == x.reqId
+                             && p.provider == "PAYOS"
+                             && p.status == "PENDING")
                     .ToListAsync(ct);
 
+                var updatedAt = AppTime.NowVnUnspecified();
                 foreach (var p in pendingPayments)
                 {
                     p.status = "CANCELLED";
-                    p.updated_at = AppTime.NowVnUnspecified();
+                    p.updated_at = updatedAt;
                 }
 
+                // 5) send email (tuỳ bạn muốn gửi 1 mail / mỗi request)
                 if (!string.IsNullOrWhiteSpace(consultantEmail))
                 {
                     try
                     {
                         var subject = "Từ chối deal do quá hạn";
                         var html = BuildConsultantExpiredEmailHtml(
-                            requestId: row.req.order_request_id,
-                            customerName: row.req.customer_name ?? "N/A",
-                            customerPhone: row.req.customer_phone ?? "N/A",
-                            customerEmail: row.req.customer_email ?? "N/A",
+                            requestId: req.order_request_id,
+                            customerName: req.customer_name ?? "N/A",
+                            customerPhone: req.customer_phone ?? "N/A",
+                            customerEmail: req.customer_email ?? "N/A",
                             reason: reason,
-                            expiredAt: row.est.created_at.AddHours(24)
+                            expiredAt: x.expiredAt
                         );
 
                         await _emailService.SendAsync(consultantEmail, subject, html);
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "[QuoteExpiryJob] Failed to send consultant mail for request_id={id}", row.req.order_request_id);
+                        _logger.LogWarning(ex, "[QuoteExpiryJob] Failed to send consultant mail for request_id={id}", req.order_request_id);
                     }
                 }
             }
 
             await _db.SaveChangesAsync(ct);
-
-            _logger.LogInformation("[QuoteExpiryJob] Done. Updated {count} requests/quotes", expiredRows.Count);
+            _logger.LogInformation("[QuoteExpiryJob] Done. Updated {count} requests/quotes", expiredIds.Count);
         }
 
         private static string BuildConsultantExpiredEmailHtml(

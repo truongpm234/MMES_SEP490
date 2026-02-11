@@ -16,7 +16,7 @@ public partial class quote
 
     public string? status { get; set; }
 
-    public DateTime created_at { get; set; } = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
+    public DateTime created_at { get; set; }
 
     public int estimate_id { get; set; }
 
