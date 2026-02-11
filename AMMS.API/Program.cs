@@ -18,6 +18,9 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Hangfire;
+using Hangfire.PostgreSql;
+using AMMS.API.Jobs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -162,20 +165,39 @@ builder.Services.AddSwaggerGen(c =>
 
 // Configuration
 builder.Services.Configure<CloudinaryOptions>(
-    builder.Configuration.GetSection("Cloudinary"));
+builder.Configuration.GetSection("Cloudinary"));
 builder.Services.Configure<SendGridSettings>(
-    builder.Configuration.GetSection("SendGrid"));
+builder.Configuration.GetSection("SendGrid"));
 builder.Services.Configure<PayOsOptions>(builder.Configuration.GetSection("PayOS"));
-builder.Services.AddControllers().AddJsonOptions(o =>
-{
-    o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.Never;
-});
 builder.Services.ConfigureApplicationCookie(options =>
 {
     options.Cookie.SameSite = SameSiteMode.None;
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
     options.Cookie.HttpOnly = true;
 });
+builder.Services.AddHangfire(config =>
+{
+    config.SetDataCompatibilityLevel(CompatibilityLevel.Version_170)
+          .UseSimpleAssemblyNameTypeSerializer()
+          .UseRecommendedSerializerSettings()
+          .UsePostgreSqlStorage(
+              builder.Configuration.GetConnectionString("HangfireConnection"),
+              new PostgreSqlStorageOptions
+              {
+                  SchemaName = "hangfire",
+                  PrepareSchemaIfNecessary = true,
+                  QueuePollInterval = TimeSpan.FromSeconds(10),
+              });
+});
+
+builder.Services.AddHangfireServer(options =>
+{
+    options.WorkerCount = Math.Max(2, Environment.ProcessorCount);
+    options.Queues = new[] { "default" };
+});
+
+// 2) Register Job class
+builder.Services.AddScoped<QuoteExpiryJob>();
 builder.Services.Configure<SchedulingOptions>(
     builder.Configuration.GetSection("Scheduling"));
 builder.Services.AddSingleton<WorkCalendar>();
@@ -241,6 +263,19 @@ builder.Logging.AddConsole();
 builder.Logging.SetMinimumLevel(LogLevel.Information);
 
 var app = builder.Build();
+app.UseHangfireDashboard("/hangfire", new DashboardOptions
+{
+    Authorization = new[] { new AllowAllDashboardAuthorizationFilter() }
+});
+
+var vnTz = TimeZoneInfo.FindSystemTimeZoneById("Asia/Ho_Chi_Minh");
+
+RecurringJob.AddOrUpdate<QuoteExpiryJob>(
+    "quote-expiry-daily",
+    job => job.RunAsync(CancellationToken.None),
+    Cron.Daily(),
+    vnTz
+);
 
 app.UseSwagger();
 app.UseSwaggerUI(c =>
