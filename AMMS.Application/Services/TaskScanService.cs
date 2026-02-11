@@ -1,12 +1,11 @@
-﻿using AMMS.Application.Interfaces;
+﻿using AMMS.Application.Helpers;
+using AMMS.Application.Interfaces;
 using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Productions;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace AMMS.Application.Services
 {
@@ -18,6 +17,7 @@ namespace AMMS.Application.Services
         private readonly ITaskLogRepository _logRepo;
         private readonly IProductionRepository _prodRepo;
         private readonly IMachineRepository _machineRepo;
+        private readonly IHubContext<RealtimeHub> _hub;
 
         public TaskScanService(
             AppDbContext db,
@@ -25,7 +25,7 @@ namespace AMMS.Application.Services
             ITaskRepository taskRepo,
             ITaskLogRepository logRepo,
             IProductionRepository productionRepo,
-            IMachineRepository machineRepo)
+            IMachineRepository machineRepo, IHubContext<RealtimeHub> hub)
         {
             _db = db;
             _tokenSvc = tokenSvc;
@@ -33,6 +33,7 @@ namespace AMMS.Application.Services
             _logRepo = logRepo;
             _prodRepo = productionRepo;
             _machineRepo = machineRepo;
+            _hub = hub;
         }
 
         public async Task<ScanTaskResult> ScanFinishAsync(ScanTaskRequest req)
@@ -135,6 +136,26 @@ namespace AMMS.Application.Services
                     }
 
                     await tx.CommitAsync();
+                    await _hub.Clients
+                    .Group($"prod-{t.prod_id}")
+                    .SendAsync("ProdUpdated", new
+                    {
+                        prodId = t.prod_id,
+                        taskId = t.task_id,
+                        status = "Finished"
+                    });
+
+                    if (prod?.order_id != null)
+                    {
+                        await _hub.Clients
+                            .Group($"order-{prod.order_id}")
+                            .SendAsync("OrderUpdated", new
+                            {
+                                orderId = prod.order_id,
+                                status = prod.status
+                            });
+                    }
+
 
                     return new ScanTaskResult
                     {
