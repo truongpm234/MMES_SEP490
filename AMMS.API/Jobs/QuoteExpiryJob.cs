@@ -218,8 +218,7 @@ namespace AMMS.API.Jobs
       </table>
 
       <div style='margin-top:18px;padding:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;color:#9a3412'>
-        Ghi chú: Hệ thống đã tự động chuyển trạng thái <b>order_request = Rejected</b>, <b>quote = Rejected</b>
-        và <b>payment(PENDING) = CANCELLED</b> cho request này.
+        Ghi chú: Hệ thống đã ghi nhận trạng thái từ chối báo giá</b> cho request này.
       </div>
     </div>
 
