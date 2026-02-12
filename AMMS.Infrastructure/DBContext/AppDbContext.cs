@@ -151,7 +151,6 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.total_amount).HasPrecision(15, 2);
 
             entity.HasOne(d => d.consultant).WithMany(p => p.orders)
-                .HasForeignKey(d => d.consultant_id)
                 .HasConstraintName("orders_consultant_id_fkey");
 
             entity.HasOne(d => d.quote).WithMany(p => p.orders)
@@ -179,7 +178,6 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.total_amount).HasPrecision(15, 2);
 
             entity.HasOne(d => d.consultant).WithMany(p => p.orders)
-                .HasForeignKey(d => d.consultant_id)
                 .HasConstraintName("orders_consultant_id_fkey");
 
             entity.HasOne(d => d.quote).WithMany(p => p.orders)
@@ -296,7 +294,6 @@ public partial class AppDbContext : DbContext
                 .HasDefaultValueSql("'Pending'::character varying");
 
             entity.HasOne(d => d.created_byNavigation).WithMany(p => p.purchases)
-                .HasForeignKey(d => d.created_by)
                 .HasConstraintName("purchases_created_by_fkey");
 
             entity.HasOne(d => d.supplier).WithMany(p => p.purchases)
@@ -333,7 +330,6 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.total_amount).HasPrecision(15, 2);
 
             entity.HasOne(d => d.consultant).WithMany(p => p.quotes)
-                .HasForeignKey(d => d.consultant_id)
                 .HasConstraintName("quotes_consultant_id_fkey");
 
             entity.HasOne(q => q.order_request)

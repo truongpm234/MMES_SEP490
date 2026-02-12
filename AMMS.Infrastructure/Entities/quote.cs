@@ -10,8 +10,6 @@ public partial class quote
 
     public int? order_request_id { get; set; }
 
-    public int? consultant_id { get; set; }
-
     public decimal? total_amount { get; set; }
 
     public string? status { get; set; }

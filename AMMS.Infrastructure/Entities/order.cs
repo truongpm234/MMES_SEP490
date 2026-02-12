@@ -11,8 +11,6 @@ public partial class order
 
     public int? quote_id { get; set; }
 
-    public int? consultant_id { get; set; }
-
     public DateTime? order_date { get; set; }
 
     public DateTime? delivery_date { get; set; }

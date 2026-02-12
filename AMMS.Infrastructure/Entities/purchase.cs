@@ -12,8 +12,6 @@ public partial class purchase
 
     public int? supplier_id { get; set; }
 
-    public int? created_by { get; set; }
-
     public string? status { get; set; }
 
     public DateTime? created_at { get; set; }

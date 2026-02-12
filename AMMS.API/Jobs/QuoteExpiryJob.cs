@@ -36,11 +36,6 @@ namespace AMMS.API.Jobs
 
             var reason = "Từ chối deal do quá hạn 24h";
 
-            // =========================
-            // (CHỖ SỬA #1) Lấy danh sách quote hết hạn + estimate_id để biết báo giá nào
-            // - Không dùng AsTracking/AsNoTracking
-            // - Lọc thêm: không có payment PAID/SUCCESS
-            // =========================
             var expiredItems = await (
                 from q in _db.quotes
                 join req in _db.order_requests on q.order_request_id equals req.order_request_id
@@ -78,7 +73,7 @@ namespace AMMS.API.Jobs
             {
                 var requestId = g.Key;
 
-                // Load order_request (không AsTracking)
+                // Load order_request
                 var req = await _db.order_requests
                     .FirstOrDefaultAsync(x => x.order_request_id == requestId, ct);
 
@@ -123,7 +118,6 @@ namespace AMMS.API.Jobs
                     MarkModified(p);
                 }
 
-                // Send email 1 lần cho request, liệt kê tất cả estimate/quote hết hạn
                 if (!string.IsNullOrWhiteSpace(consultantEmail))
                 {
                     try

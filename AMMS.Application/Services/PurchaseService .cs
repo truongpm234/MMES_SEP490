@@ -42,7 +42,6 @@ namespace AMMS.Application.Services
             {
                 code = code,
                 supplier_id = dto.supplier_id,
-                created_by = createdBy,
                 status = "Pending",
                 created_at = AppTime.NowVnUnspecified(),
             };
@@ -153,7 +152,6 @@ namespace AMMS.Application.Services
                 {
                     code = code,
                     supplier_id = supplierId,
-                    created_by = managerId,
                     status = "Ordered",
                     created_at = AppTime.NowVnUnspecified(),
                 };

@@ -107,7 +107,6 @@ namespace AMMS.Application.Services
             {
                 code = code,
                 supplier_id = null,      
-                created_by = managerId,
                 status = "Pending",
                 created_at = AppTime.NowVnUnspecified()
             };
