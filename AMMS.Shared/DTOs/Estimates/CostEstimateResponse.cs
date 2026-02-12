@@ -50,9 +50,9 @@ namespace AMMS.Shared.DTOs.Estimates
 
         public decimal material_cost { get; set; }
 
-        public decimal overhead_percent { get; set; }
+        //public decimal overhead_percent { get; set; }
 
-        public decimal overhead_cost { get; set; }
+        //public decimal overhead_cost { get; set; }
 
         public decimal base_cost { get; set; }
 

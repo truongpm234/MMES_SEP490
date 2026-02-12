@@ -218,9 +218,6 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.product_type).HasMaxLength(50);
             entity.Property(e => e.number_of_plates).HasDefaultValue(0);
             entity.Property(e => e.production_processes);
-            entity.Property(e => e.coating_type)
-                .HasMaxLength(20)
-                .HasDefaultValue("NONE");
             entity.HasOne(d => d.order)
                 .WithMany()
                 .HasForeignKey(d => d.order_id)
@@ -475,8 +472,6 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.lamination_weight_kg).HasPrecision(18, 4).HasDefaultValue(0);
             entity.Property(e => e.lamination_rate_per_m2).HasPrecision(18, 6).HasDefaultValue(0);
             entity.Property(e => e.material_cost).HasPrecision(18, 2).HasDefaultValue(0);
-            entity.Property(e => e.overhead_percent).HasPrecision(5, 2).HasDefaultValue(5);
-            entity.Property(e => e.overhead_cost).HasPrecision(18, 2).HasDefaultValue(0);
             entity.Property(e => e.base_cost).HasPrecision(18, 2);
             entity.Property(e => e.is_rush).HasDefaultValue(false);
             entity.Property(e => e.rush_percent).HasPrecision(5, 2).HasDefaultValue(0);

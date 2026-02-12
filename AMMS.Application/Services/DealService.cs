@@ -58,13 +58,16 @@ namespace AMMS.Application.Services
                 if (one.order_request_id != orderRequestId)
                     throw new InvalidOperationException("Estimate does not belong to this order_request_id");
 
+                if (!one.is_active)
+                    throw new InvalidOperationException("Estimate is inactive. Please create a new estimate.");
+
                 estimates = new List<cost_estimate> { one };
             }
             else
             {
                 estimates = await _estimateRepo.GetAllByOrderRequestIdAsync(orderRequestId);
                 if (estimates.Count == 0)
-                    throw new Exception("No estimates found for this request");
+                    throw new Exception("No active estimates found for this request");
             }
 
             var baseUrlFe = _config["Deal:BaseUrlFe"]!;
@@ -90,7 +93,7 @@ namespace AMMS.Application.Services
 
                 var orderDetailUrl = $"{baseUrlFe}/checkout/{orderRequestId}?estimateId={est.estimate_id}&quoteId={quote.quote_id}";
 
-                var htmlCustomer = DealEmailTemplates.QuoteEmail(req, est, orderDetailUrl);
+                var htmlCustomer = DealEmailTemplates.QuoteEmail(req, est, quote, orderDetailUrl);
 
                 var subjectCustomer = $"Báo giá đơn hàng in ấn #{req.order_request_id:D6} (E{est.estimate_id})";
                 await _emailService.SendAsync(req.customer_email, subjectCustomer, htmlCustomer);
@@ -98,7 +101,7 @@ namespace AMMS.Application.Services
                 // copy consultant
                 if (!string.IsNullOrWhiteSpace(consultantEmail))
                 {
-                    var htmlConsultant = DealEmailTemplates.QuoteEmail(req, est, null);
+                    var htmlConsultant = DealEmailTemplates.QuoteEmail(req, est, quote, null);
                     var subjectConsultant = $"[COPY] Đã gửi báo giá #{req.order_request_id:D6} (E{est.estimate_id})";
                     await _emailService.SendAsync(consultantEmail, subjectConsultant, htmlConsultant);
                 }

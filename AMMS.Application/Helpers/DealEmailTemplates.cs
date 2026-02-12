@@ -47,22 +47,23 @@ namespace AMMS.Application.Helpers
             return string.Join(", ", codes.Select(MapProcessCode));
         }
 
-        public static string QuoteEmail(order_request req, cost_estimate est, string orderDetailUrl)
+        public static string QuoteEmail(order_request req, cost_estimate est, quote q, string orderDetailUrl)
         {           
             var address = $"{req.detail_address}";
             var delivery = req.delivery_date?.ToString("dd/MM/yyyy") ?? "N/A";
             var requestDateText = req.order_request_date?.ToString("dd/MM/yyyy HH:mm") ?? "N/A";
             var productName = req.product_name ?? "";
             var quantity = req.quantity ?? 0;
-            var paperName = string.IsNullOrWhiteSpace(req.paper_name) ? "N/A" : req.paper_name;
+            var paperName = string.IsNullOrWhiteSpace(est.paper_name) ? "N/A" : est.paper_name;
+            var coatingType = string.IsNullOrWhiteSpace(est.coating_type) ? "N/A" : est.coating_type;
+            var waveType = string.IsNullOrWhiteSpace(est.wave_type) ? "N/A" : est.wave_type;
             var designType = req.is_send_design == true ? "Tự gửi file thiết kế" : "Sử dụng bản thiết kế của doanh nghiệp";
-            var materialCost = est.paper_cost + est.ink_cost;
-            var laborCost = est.process_costs != null
-                ? est.process_costs
+            var materialCost = est.paper_cost + est.ink_cost + est.coating_glue_cost + est.mounting_glue_cost + est.lamination_cost;
+            var laborCost = est.process_costs != null ? est.process_costs
                     .Where(p => p.estimate_id == est.estimate_id)
                     .Sum(p => p.total_cost)
                 : 0m;
-            var otherFees = est.design_cost + est.overhead_cost;                      
+            var otherFees = est.design_cost;                      
             var rushAmount = est.rush_amount;
             var subtotal = est.subtotal;                                              
             var finalTotal = est.final_total_cost;                                    
@@ -70,7 +71,7 @@ namespace AMMS.Application.Helpers
             var discountAmount = est.discount_amount;
             var deposit = est.deposit_amount;                                         
             var productionProcessText = BuildProductionProcessText(req, est);
-            var expiredAt = est.created_at.AddHours(24);
+            var expiredAt = q.created_at.AddHours(24);
             var expiredAtText = expiredAt.ToString("dd/MM/yyyy HH:mm");
             bool isCustomerCopy = !string.IsNullOrEmpty(orderDetailUrl);
             string actionBlock = "";

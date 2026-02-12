@@ -66,7 +66,6 @@ namespace AMMS.Application.Services
                 product_height_mm = req.product_height_mm,
                 product_length_mm = req.product_length_mm,
                 product_width_mm = req.product_width_mm,
-                paper_name = req.paper_name
             };
 
             await _requestRepo.AddAsync(entity);
@@ -119,10 +118,6 @@ namespace AMMS.Application.Services
             entity.delivery_date = ToUnspecified(req.delivery_date);
             entity.product_type = req.product_type ?? entity.product_type;
             entity.number_of_plates = req.number_of_plates ?? entity.number_of_plates;
-            entity.paper_code = req.paper_code ?? entity.paper_code;
-            entity.paper_name = req.paper_name ?? entity.paper_name;
-            entity.coating_type = req.coating_type ?? entity.coating_type;
-            entity.wave_type = req.wave_type ?? entity.wave_type;
             entity.product_length_mm = req.product_length_mm ?? entity.product_length_mm;
             entity.product_width_mm = req.product_width_mm ?? entity.product_width_mm;
             entity.product_height_mm = req.product_height_mm ?? entity.product_height_mm;
@@ -308,11 +303,11 @@ namespace AMMS.Application.Services
                         quantity = req.quantity ?? 0,
                         design_url = req.design_file_path,
                         product_type_id = productTypeId,
-                        paper_code = req.paper_code,
+                        paper_code = est.paper_code,
                         production_process = req.production_processes,
-                        paper_name = req.paper_name,
-                        glue_type = req.coating_type,
-                        wave_type = req.wave_type,
+                        paper_name = est.paper_name,
+                        glue_type = est.coating_type,
+                        wave_type = est.wave_type,
                         est_paper_sheets_total = est.sheets_total,
                         est_ink_weight_kg = est.ink_weight_kg,
                         est_coating_glue_weight_kg = est.coating_glue_weight_kg,
@@ -328,8 +323,8 @@ namespace AMMS.Application.Services
 
                     // ===== BOM =====
                     material? paperMaterial = null;
-                    if (!string.IsNullOrWhiteSpace(req.paper_code))
-                        paperMaterial = await _materialRepo.GetByCodeAsync(req.paper_code!);
+                    if (!string.IsNullOrWhiteSpace(est.paper_code))
+                        paperMaterial = await _materialRepo.GetByCodeAsync(est.paper_code!);
 
                     var qty = (decimal)(newItem.quantity <= 0 ? 1 : newItem.quantity);
                     var bomTasks = new List<Task>();
@@ -339,8 +334,8 @@ namespace AMMS.Application.Services
                         {
                             order_item_id = newItem.item_id,
                             material_id = paperMaterial?.material_id,
-                            material_code = Trunc20(req.paper_code ?? "PAPER"),
-                            material_name = req.paper_name ?? "Giấy",
+                            material_code = Trunc20(est.paper_code ?? "PAPER"),
+                            material_name = est.paper_name ?? "Giấy",
                             unit = "tờ",
                             qty_total = est.sheets_total,
                             qty_per_product = est.sheets_total / qty,
@@ -363,7 +358,7 @@ namespace AMMS.Application.Services
                         bomTasks.Add(_bomRepo.AddBomAsync(new bom
                         {
                             order_item_id = newItem.item_id,
-                            material_code = Trunc20(req.coating_type ?? "COATING_GLUE"),
+                            material_code = Trunc20(est.coating_type ?? "COATING_GLUE"),
                             material_name = "Keo phủ",
                             unit = "kg",
                             qty_total = est.coating_glue_weight_kg,
@@ -373,7 +368,7 @@ namespace AMMS.Application.Services
 
                     if (est.mounting_glue_weight_kg > 0)
                     {
-                        var codeBoi = string.IsNullOrWhiteSpace(req.wave_type) ? "MOUNTING_GLUE" : $"BOI_{req.wave_type}";
+                        var codeBoi = string.IsNullOrWhiteSpace(est.wave_type) ? "MOUNTING_GLUE" : $"BOI_{est.wave_type}";
                         bomTasks.Add(_bomRepo.AddBomAsync(new bom
                         {
                             order_item_id = newItem.item_id,
@@ -517,28 +512,19 @@ namespace AMMS.Application.Services
                 product_name = dto.product_name?.Trim(),
                 quantity = dto.quantity,
                 description = dto.description,
-
                 design_file_path = dto.design_file_path,
                 is_send_design = dto.is_send_design,
-
                 product_type = dto.product_type?.Trim(),
                 number_of_plates = dto.number_of_plates,
                 production_processes = dto.production_processes?.Trim(),
-                coating_type = dto.coating_type?.Trim(),
-                paper_code = dto.paper_code?.Trim(),
-                paper_name = dto.paper_name?.Trim(),
-                wave_type = dto.wave_type?.Trim(),
-
                 product_length_mm = dto.product_length_mm,
                 product_width_mm = dto.product_width_mm,
                 product_height_mm = dto.product_height_mm,
                 glue_tab_mm = dto.glue_tab_mm,
                 bleed_mm = dto.bleed_mm,
                 is_one_side_box = dto.is_one_side_box,
-
                 print_width_mm = dto.print_width_mm,
                 print_height_mm = dto.print_height_mm,
-
                 order_request_date = AppTime.NowVnUnspecified(),
                 process_status = "Pending"
             };
@@ -607,6 +593,10 @@ namespace AMMS.Application.Services
 
             if (dto.note != null)
                 req.note = dto.note;
+            if (st == "Declined")
+            {
+                await _estimateRepo.DeactivateAllByRequestIdAsync(dto.request_id, ct);
+            }
 
             await _requestRepo.SaveChangesAsync();
         }

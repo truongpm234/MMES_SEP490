@@ -87,7 +87,7 @@ namespace AMMS.Shared.DTOs.Estimates
 
     public class SystemConfig
     {
-        public decimal overhead_percent { get; set; }
+        //public decimal overhead_percent { get; set; }
         public int default_production_days { get; set; }
         public int rush_threshold_days { get; set; }
         public decimal vat_percent { get; set; }

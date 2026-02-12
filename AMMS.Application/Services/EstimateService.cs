@@ -71,7 +71,7 @@ namespace AMMS.Application.Services
             {
                 order_request_id = req.order_request_id,
                 created_at = ToUnspecified(req.created_at ?? now),
-
+                is_active = true,
                 estimated_finish_date = ToUnspecified(req.estimated_finish_date ?? now),
                 desired_delivery_date = ToUnspecified(req.desired_delivery_date ?? (orderReq.delivery_date ?? now)),
             };
@@ -100,7 +100,10 @@ namespace AMMS.Application.Services
             SetIfHasValue(req.coating_glue_cost, v => entity.coating_glue_cost = v);
             SetIfHasValue(req.coating_glue_weight_kg, v => entity.coating_glue_weight_kg = v);
             SetIfHasValue(req.coating_glue_rate_per_m2, v => entity.coating_glue_rate_per_m2 = v);
+            SetIfNotNull(req.paper_code, v => entity.paper_code = v);
+            SetIfNotNull(req.paper_name, v => entity.paper_name = v);
             SetIfNotNull(req.coating_type, v => entity.coating_type = v);
+            SetIfNotNull(req.wave_type, v => entity.wave_type = v);
 
             // ----- MOUNTING GLUE -----
             SetIfHasValue(req.mounting_glue_cost, v => entity.mounting_glue_cost = v);
@@ -114,8 +117,8 @@ namespace AMMS.Application.Services
 
             // ----- MATERIAL / OVERHEAD -----
             SetIfHasValue(req.material_cost, v => entity.material_cost = v);
-            SetIfHasValue(req.overhead_percent, v => entity.overhead_percent = v);
-            SetIfHasValue(req.overhead_cost, v => entity.overhead_cost = v);
+            //SetIfHasValue(req.overhead_percent, v => entity.overhead_percent = v);
+            //SetIfHasValue(req.overhead_cost, v => entity.overhead_cost = v);
             SetIfHasValue(req.base_cost, v => entity.base_cost = v);
 
             // ----- RUSH -----

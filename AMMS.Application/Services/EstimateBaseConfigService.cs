@@ -108,7 +108,7 @@ namespace AMMS.Application.Services
                 },
                 SystemParameters = new SystemConfig
                 {
-                    overhead_percent = GetNum("systemParameters", "overhead_percent"),
+                    //overhead_percent = GetNum("systemParameters", "overhead_percent"),
                     default_production_days = GetInt("systemParameters", "default_production_days"),
                     rush_threshold_days = GetInt("systemParameters", "rush_threshold_days"),
                     vat_percent = GetNum("systemParameters", "vat_percent"),

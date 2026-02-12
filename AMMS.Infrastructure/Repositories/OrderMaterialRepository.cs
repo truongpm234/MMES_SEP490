@@ -63,8 +63,8 @@ namespace AMMS.Infrastructure.Repositories
             //    };
             //}
 
-            var paperCode = r1.paper_code;
-            var paperName = r1.paper_name;
+            var paperCode = ce1.paper_code;
+            var paperName = ce1.paper_name;
 
             if (!string.IsNullOrWhiteSpace(paperCode))
             {
@@ -113,7 +113,7 @@ namespace AMMS.Infrastructure.Repositories
                 items.Add(new OrderMaterialLineDto
                 {
                     material_group = "Keo phủ",
-                    material_code = r1.coating_type,
+                    material_code = ce1.coating_type,
                     material_name = "Keo phủ",
                     unit = "kg",
                     quantity = ce1.coating_glue_weight_kg
@@ -146,13 +146,13 @@ namespace AMMS.Infrastructure.Repositories
                 });
             }
 
-            if (!string.IsNullOrWhiteSpace(r1.wave_type))
+            if (!string.IsNullOrWhiteSpace(ce1.wave_type))
             {
                 items.Add(new OrderMaterialLineDto
                 {
                     material_group = "Loại sóng",
-                    material_code = r1.wave_type,
-                    material_name = $"Sóng {r1.wave_type}"
+                    material_code = ce1.wave_type,
+                    material_name = $"Sóng {ce1.wave_type}"
                 });
             }
 

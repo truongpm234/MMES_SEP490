@@ -25,6 +25,9 @@ namespace AMMS.Shared.DTOs.Estimates
         public decimal? coating_glue_weight_kg { get; set; }
         public decimal? coating_glue_rate_per_m2 { get; set; }
         public string? coating_type { get; set; }
+        public string? paper_code { get; set; }
+        public string? paper_name { get; set; }
+        public string? wave_type { get; set; }
 
         // ----- Keo bồi -----
         public decimal? mounting_glue_cost { get; set; }
@@ -38,8 +41,6 @@ namespace AMMS.Shared.DTOs.Estimates
 
         // ----- Tổng vật liệu / khấu hao -----
         public decimal? material_cost { get; set; }
-        public decimal? overhead_percent { get; set; }
-        public decimal? overhead_cost { get; set; }
         public decimal? base_cost { get; set; }
 
         // ----- Rush -----

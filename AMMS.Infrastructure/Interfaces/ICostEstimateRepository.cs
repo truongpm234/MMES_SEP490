@@ -21,6 +21,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task<bool> OrderRequestExistsAsync(int order_request_id);
         Task<List<RequestEstimateDto>> GetAllEstimatesFlatByRequestIdAsync(int requestId, CancellationToken ct = default);
         Task<List<cost_estimate>> GetAllByOrderRequestIdAsync(int orderRequestId, CancellationToken ct = default);
+        Task<int> DeactivateAllByRequestIdAsync(int orderRequestId, CancellationToken ct = default);
 
     }
 }

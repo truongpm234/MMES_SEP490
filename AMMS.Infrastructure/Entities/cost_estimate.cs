@@ -27,7 +27,7 @@ public partial class cost_estimate
 
     public decimal coating_glue_rate_per_m2 { get; set; }
 
-    public string coating_type { get; set; } = "NONE";
+    public string? coating_type { get; set; } = "KEO_NUOC";
 
     public decimal mounting_glue_cost { get; set; }
 
@@ -43,9 +43,9 @@ public partial class cost_estimate
 
     public decimal material_cost { get; set; }
 
-    public decimal overhead_percent { get; set; }
+    //public decimal overhead_percent { get; set; }
 
-    public decimal overhead_cost { get; set; }
+    //public decimal overhead_cost { get; set; }
 
     public decimal base_cost { get; set; }
 
@@ -84,6 +84,14 @@ public partial class cost_estimate
     public decimal design_cost { get; set; }
 
     public string? cost_note { get; set; }
+
+    public bool is_active { get; set; } = true;
+
+    public string? paper_code { get; set; }
+
+    public string? paper_name { get; set; }
+
+    public string? wave_type { get; set; }
 
     [Column(TypeName = "numeric(18,2)")]
     [DatabaseGenerated(DatabaseGeneratedOption.Computed)]

@@ -29,8 +29,11 @@ namespace AMMS.Infrastructure.Repositories
             var query = from r in _db.order_requests.AsNoTracking()
                         where r.order_request_id == id
                         join ce in _db.cost_estimates.AsNoTracking()
-                            on r.order_request_id equals ce.order_request_id into ceJoin
-                        from ce in ceJoin.OrderBy(x => x.estimate_id).Take(1).DefaultIfEmpty()
+                        on r.order_request_id equals ce.order_request_id into ceJoin
+                        from ce in ceJoin
+                            .OrderByDescending(x => x.estimate_id)
+                            .Take(1)
+                            .DefaultIfEmpty()
 
                         select new RequestWithCostDto
                         {
@@ -49,10 +52,10 @@ namespace AMMS.Infrastructure.Repositories
                             product_type = r.product_type,
                             number_of_plates = r.number_of_plates,
                             production_processes = r.production_processes,
-                            coating_type = r.coating_type,
-                            paper_code = r.paper_code,
-                            paper_name = r.paper_name,
-                            wave_type = r.wave_type,
+                            paper_code = ce != null ? ce.paper_code : null,
+                            paper_name = ce != null ? ce.paper_name : null,
+                            coating_type = ce != null ? ce.coating_type : null,
+                            wave_type = ce != null ? ce.wave_type : null,
                             order_id = r.order_id,
                             quote_id = r.quote_id,
                             product_length_mm = r.product_length_mm,
@@ -133,7 +136,6 @@ namespace AMMS.Infrastructure.Repositories
                     design_file_path = r.design_file_path,
                     detail_address = r.detail_address,
                     number_of_plates = r.number_of_plates,
-                    coating_type = r.coating_type,
                     process_status = r.process_status,
                     order_request_date = r.order_request_date,
                     final_cost = ce != null ? ce.final_total_cost : null,
@@ -664,10 +666,6 @@ namespace AMMS.Infrastructure.Repositories
                 product_type = firstItem.Request.product_type,
                 number_of_plates = firstItem.Request.number_of_plates,
                 production_processes = firstItem.Request.production_processes,
-                coating_type = firstItem.Request.coating_type,
-                paper_code = firstItem.Request.paper_code,
-                paper_name = firstItem.Request.paper_name,
-                wave_type = firstItem.Request.wave_type,
                 product_length_mm = firstItem.Request.product_length_mm,
                 product_width_mm = firstItem.Request.product_width_mm,
                 product_height_mm = firstItem.Request.product_height_mm,
