@@ -25,8 +25,6 @@ public partial class user
 
     public DateTime? created_at { get; set; }
 
-    public virtual ICollection<order> orders { get; set; } = new List<order>();
-
     public virtual ICollection<production> productions { get; set; } = new List<production>();
 
     public virtual ICollection<purchase> purchases { get; set; } = new List<purchase>();

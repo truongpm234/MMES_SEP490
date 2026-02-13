@@ -29,8 +29,6 @@ public partial class order
 
     public virtual production? production { get; set; }
 
-    public virtual user? consultant { get; set; }
-
     public virtual ICollection<delivery> deliveries { get; set; } = new List<delivery>();
 
     public virtual ICollection<order_item> order_items { get; set; } = new List<order_item>();

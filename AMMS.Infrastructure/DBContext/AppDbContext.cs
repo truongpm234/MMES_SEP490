@@ -150,36 +150,6 @@ public partial class AppDbContext : DbContext
                 .HasDefaultValueSql("'New'::character varying");
             entity.Property(e => e.total_amount).HasPrecision(15, 2);
 
-            entity.HasOne(d => d.consultant).WithMany(p => p.orders)
-                .HasConstraintName("orders_consultant_id_fkey");
-
-            entity.HasOne(d => d.quote).WithMany(p => p.orders)
-                .HasForeignKey(d => d.quote_id)
-                .HasConstraintName("orders_quote_id_fkey");
-        });       
-
-        modelBuilder.Entity<order>(entity =>
-        {
-            entity.HasKey(e => e.order_id).HasName("orders_pkey");
-
-            entity.HasIndex(e => e.code, "orders_code_key").IsUnique();
-
-            entity.Property(e => e.code).HasMaxLength(20);
-            entity.Property(e => e.delivery_date).HasColumnType("timestamp without time zone");
-            entity.Property(e => e.order_date)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP")
-                .HasColumnType("timestamp without time zone");
-            entity.Property(e => e.payment_status)
-                .HasMaxLength(20)
-                .HasDefaultValueSql("'Unpaid'::character varying");
-            entity.Property(e => e.status)
-                .HasMaxLength(20)
-                .HasDefaultValueSql("'New'::character varying");
-            entity.Property(e => e.total_amount).HasPrecision(15, 2);
-
-            entity.HasOne(d => d.consultant).WithMany(p => p.orders)
-                .HasConstraintName("orders_consultant_id_fkey");
-
             entity.HasOne(d => d.quote).WithMany(p => p.orders)
                 .HasForeignKey(d => d.quote_id)
                 .HasConstraintName("orders_quote_id_fkey");

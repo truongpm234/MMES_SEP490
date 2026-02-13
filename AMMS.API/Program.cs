@@ -268,12 +268,23 @@ app.UseHangfireDashboard("/hangfire", new DashboardOptions
 
 var vnTz = TimeZoneInfo.FindSystemTimeZoneById("Asia/Ho_Chi_Minh");
 
-RecurringJob.AddOrUpdate<QuoteExpiryJob>(
-    "quote-expiry-daily",
-    job => job.RunAsync(CancellationToken.None),
-    Cron.Daily(),
-    vnTz
-);
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    try
+    {
+        RecurringJob.AddOrUpdate<QuoteExpiryJob>(
+            "quote-expiry-daily",
+            job => job.RunAsync(CancellationToken.None),
+            Cron.Daily(),
+            vnTz
+        );
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Failed to register Hangfire recurring jobs");
+    }
+});
+
 
 app.UseSwagger();
 app.UseSwaggerUI(c =>
