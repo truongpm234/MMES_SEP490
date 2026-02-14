@@ -1,5 +1,6 @@
 ﻿using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
+using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Email;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
@@ -16,12 +17,13 @@ namespace AMMS.Application.Services
         private readonly SendGridSettings _settings;
         private readonly IMemoryCache _cache;
         private readonly IConfiguration _config;
-
-        public EmailService(IOptions<SendGridSettings> options, IConfiguration config, IMemoryCache cache)
+        private readonly IQuoteRepository _quoteRepo;
+        public EmailService(IOptions<SendGridSettings> options, IConfiguration config, IMemoryCache cache, IQuoteRepository quoteRepository)
         {
             _settings = options.Value;
             _config = config;
             _cache = cache;
+            _quoteRepo = quoteRepository;
         }
 
         public async Task SendAsync(string toEmail, string subject, string htmlContent)
@@ -50,6 +52,8 @@ namespace AMMS.Application.Services
                 throw new Exception($"SendGrid failed: {response.StatusCode} - {body}");
             }
         }
+
+        
         private string CacheKey(string email) => $"OTP::{NormalizeEmail(email)}";
 
         private static string NormalizeEmail(string email)

@@ -299,9 +299,6 @@ public partial class AppDbContext : DbContext
                 .HasDefaultValueSql("'Draft'::character varying");
             entity.Property(e => e.total_amount).HasPrecision(15, 2);
 
-            entity.HasOne(d => d.consultant).WithMany(p => p.quotes)
-                .HasConstraintName("quotes_consultant_id_fkey");
-
             entity.HasOne(q => q.order_request)
                 .WithMany()
                 .HasForeignKey(q => q.order_request_id)

@@ -1,9 +1,10 @@
-﻿using System;
+﻿using AMMS.Infrastructure.Entities;
+using AMMS.Shared.DTOs.Email;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using AMMS.Infrastructure.Entities;
 
 namespace AMMS.Infrastructure.Interfaces
 {
@@ -12,6 +13,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task AddAsync(quote entity);
         Task<quote?> GetByIdAsync(int id);
         Task SaveChangesAsync();
+        Task<QuoteEmailPreviewResponse> BuildPreviewAsync(int quoteId, CancellationToken ct = default);
     }
 }
 

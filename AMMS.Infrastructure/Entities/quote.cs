@@ -20,7 +20,5 @@ public partial class quote
 
     public virtual order_request? order_request { get; set; }
 
-    public virtual user? consultant { get; set; }
-
     public virtual ICollection<order> orders { get; set; } = new List<order>();
 }

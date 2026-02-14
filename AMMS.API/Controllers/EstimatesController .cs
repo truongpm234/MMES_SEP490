@@ -1,6 +1,7 @@
 ﻿using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
 using AMMS.Application.Services;
+using AMMS.Shared.DTOs.Email;
 using AMMS.Shared.DTOs.Estimates;
 using AMMS.Shared.DTOs.Estimates.AMMS.Shared.DTOs.Estimates;
 using AMMS.Shared.DTOs.Planning;
@@ -81,6 +82,13 @@ namespace AMMS.API.Controllers
                 return NotFound(new { message = "Order request not found OR no estimates for this request" });
 
             return Ok(list);
+        }
+
+        [HttpGet("email-preview/{quoteId:int}")]
+        public async Task<ActionResult<QuoteEmailPreviewResponse>> GetQuoteEmailPreview([FromRoute] int quoteId, CancellationToken ct)
+        {
+            var res = await _service.BuildPreviewAsync(quoteId, ct);
+            return Ok(res);
         }
     }
 }

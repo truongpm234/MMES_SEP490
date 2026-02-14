@@ -43,10 +43,6 @@ public partial class cost_estimate
 
     public decimal material_cost { get; set; }
 
-    //public decimal overhead_percent { get; set; }
-
-    //public decimal overhead_cost { get; set; }
-
     public decimal base_cost { get; set; }
 
     public bool is_rush { get; set; }

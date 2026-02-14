@@ -2,6 +2,7 @@
 using AMMS.Application.Interfaces;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
+using AMMS.Shared.DTOs.Email;
 using AMMS.Shared.DTOs.Estimates;
 using AMMS.Shared.DTOs.Requests;
 
@@ -10,10 +11,11 @@ namespace AMMS.Application.Services
     public class EstimateService : IEstimateService
     {
         private readonly ICostEstimateRepository _estimateRepo;
-
-        public EstimateService(ICostEstimateRepository costEstimateRepository)
+        private readonly IQuoteRepository _quoteRepo;
+        public EstimateService(ICostEstimateRepository costEstimateRepository, IQuoteRepository quoteRepo)
         {
             _estimateRepo = costEstimateRepository;
+            _quoteRepo = quoteRepo;
         }
 
         public async Task UpdateFinalCostAsync(int orderRequestId, decimal? finalCostInput)
@@ -227,6 +229,11 @@ namespace AMMS.Application.Services
         public async Task<List<RequestEstimateDto>> GetAllEstimatesFlatByRequestIdAsync(int requestId, CancellationToken ct = default)
         {
             return await _estimateRepo.GetAllEstimatesFlatByRequestIdAsync(requestId, ct);
+        }
+
+        public async Task<QuoteEmailPreviewResponse> BuildPreviewAsync(int quoteId, CancellationToken ct = default)
+        {
+            return await _quoteRepo.BuildPreviewAsync(quoteId, ct);
         }
     }
 }
