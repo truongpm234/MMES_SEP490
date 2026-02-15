@@ -324,11 +324,56 @@ namespace AMMS.Infrastructure.Repositories
 
         public async Task<OrderDetailDto?> GetDetailByIdAsync(int orderId, CancellationToken ct = default)
         {
+            static string MapProcessCode(string code) => (code ?? "").Trim().ToUpperInvariant() switch
+            {
+                "IN" => "In",
+                "RALO" => "Ra lô",
+                "CAT" => "Cắt",
+                "CAN_MANG" => "Cán",
+                "CAN" => "Cán",
+                "BOI" => "Bồi",
+                "PHU" => "Phủ",
+                "DUT" => "Dứt",
+                "DAN" => "Dán",
+                "BE" => "Bế",
+                _ => code
+            };
+
+            static string BuildProductionProcessText(order_request req, cost_estimate est)
+            {
+                var codes = new List<string>();
+
+                if (!string.IsNullOrWhiteSpace(req.production_processes))
+                {
+                    codes = req.production_processes
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .ToList();
+                }
+                else if (est.process_costs is { Count: > 0 })
+                {
+                    codes = est.process_costs
+                        .Select(p => p.process_code)
+                        .Where(c => !string.IsNullOrWhiteSpace(c))
+                        .Distinct()
+                        .ToList();
+                }
+
+                if (codes.Count == 0)
+                    return "Không có / Không áp dụng";
+
+                return string.Join(", ", codes.Select(MapProcessCode));
+            }
+
+            static string FormatVND(decimal? amount)
+                => string.Format("{0:N0}", amount ?? 0).Replace(",", ".");
+
+            
+
             var order = await _db.orders
                 .AsNoTracking()
                 .Include(o => o.order_items)
                 .Include(o => o.productions)
-                .ThenInclude(p => p.manager)
+                    .ThenInclude(p => p.manager)
                 .FirstOrDefaultAsync(o => o.order_id == orderId, ct);
 
             if (order == null) return null;
@@ -337,37 +382,38 @@ namespace AMMS.Infrastructure.Repositories
                 .AsNoTracking()
                 .FirstOrDefaultAsync(r => r.order_id == orderId, ct);
 
-            cost_estimate? estimate = null;
+            quote? q = null;
+            if (req?.quote_id is int quoteId && quoteId > 0)
+            {
+                q = await _db.quotes.AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.quote_id == quoteId, ct);
+            }
+
+            cost_estimate? est = null;
             if (req != null)
             {
-                estimate = await _db.cost_estimates
+                var estQuery = _db.cost_estimates
                     .AsNoTracking()
-                    .FirstOrDefaultAsync(e => e.order_request_id == req.order_request_id, ct);
+                    .Include(e => e.process_costs)
+                    .Where(e => e.order_request_id == req.order_request_id);
+
+                if (req.accepted_estimate_id is int aeid && aeid > 0)
+                    est = await estQuery.FirstOrDefaultAsync(e => e.estimate_id == aeid, ct);
+
+                est ??= await estQuery
+                    .OrderByDescending(e => e.is_active)
+                    .ThenByDescending(e => e.estimate_id)
+                    .FirstOrDefaultAsync(ct);
             }
 
             var item = order.order_items.OrderBy(i => i.item_id).FirstOrDefault();
-            string customerName = string.Empty;
-            string? customerEmail = null;
-            string? customerPhone = null;           
-
-            if (req != null)
-            {
-                if (string.IsNullOrWhiteSpace(customerName))
-                    customerName = req.customer_name;
-                customerEmail ??= req.customer_email;
-                customerPhone ??= req.customer_phone;
-            }
 
             var productName = item?.product_name ?? req?.product_name ?? string.Empty;
             var quantity = item?.quantity ?? req?.quantity ?? 0;
 
-            var finalCost = estimate?.final_total_cost ?? order.total_amount ?? 0m;
-
-            var deposit = estimate != null
-                ? estimate.deposit_amount
-                : Math.Round(finalCost * 0.30m, 0);
-
-            var urlDesign = item?.design_url ?? req?.design_file_path;
+            string customerName = req?.customer_name ?? "Khách hàng";
+            string? customerEmail = req?.customer_email;
+            string? customerPhone = req?.customer_phone;
 
             DateTime? prodStart = order.productions
                 .Select(p => p.start_date)
@@ -385,43 +431,115 @@ namespace AMMS.Infrastructure.Repositories
                 .OrderByDescending(p => p.start_date ?? p.end_date ?? order.order_date)
                 .Select(p => p.manager != null ? p.manager.full_name : null)
                 .FirstOrDefault()
-                ?? "Chưa cập nhật";
+                ?? "Quản lí";
 
-            string? specification = null;
-            if (item != null)
+            var urlDesign = item?.design_url ?? req?.design_file_path;
+
+            var finalCost = est?.final_total_cost ?? order.total_amount ?? 0m;
+
+            var depositFallback = est != null
+                ? est.deposit_amount
+                : Math.Round(finalCost * 0.30m, 0);
+
+            object? quoteFields = null;
+
+            if (req != null && est != null && q != null)
             {
-                var parts = new List<string>();
-                if (parts.Count > 0) specification = string.Join(" | ", parts);
+                // giống QuoteEmail
+                var address = $"{req.detail_address}";
+                var delivery = req.delivery_date?.ToString("dd/MM/yyyy") ?? "N/A";
+                var request_date = req.order_request_date?.ToString("dd/MM/yyyy HH:mm") ?? "N/A";
+                var product_name = req.product_name ?? "";
+                quantity = req.quantity ?? 0;
+
+                var paper_name = string.IsNullOrWhiteSpace(est.paper_name) ? "N/A" : est.paper_name;
+                var coating_type = MapCoatingType(est.coating_type);
+                var wave_type = string.IsNullOrWhiteSpace(est.wave_type) ? "N/A" : est.wave_type;
+
+                var design_type = req.is_send_design == true
+                    ? "Tự gửi file thiết kế"
+                    : "Sử dụng bản thiết kế của doanh nghiệp";
+
+                var material_cost =
+                    est.paper_cost +
+                    est.ink_cost +
+                    est.coating_glue_cost +
+                    est.mounting_glue_cost +
+                    est.lamination_cost;
+
+                var labor_cost = est.process_costs != null
+                    ? est.process_costs
+                        .Where(p => p.estimate_id == est.estimate_id)
+                        .Sum(p => p.total_cost)
+                    : 0m;
+
+                var other_fees = est.design_cost;
+                var rush_amount = est.rush_amount;
+                var sub_total = est.subtotal;
+                var final_total = est.final_total_cost;
+                var discount_percent = est.discount_percent;
+                var discount_amount = est.discount_amount;
+                var deposit = est.deposit_amount;
+
+                var production_process = BuildProductionProcessText(req, est);
+
+                var expired_at = q.created_at.AddHours(24);
+                var expired = expired_at.ToString("dd/MM/yyyy HH:mm");
+
+                quoteFields = new
+                {
+                    request_date,
+                    paper_name,
+                    coating_type,
+                    wave_type,
+                    design_type,
+                    production_process,
+                    material_cost,
+                    labor_cost,
+                    other_fees,
+                    rush_amount,
+                    sub_total,
+                    discount_percent,
+                    discount_amount,
+                };
             }
 
+            // ===== return =======================================================
             return new OrderDetailDto
             {
                 order_id = order.order_id,
                 code = order.code,
                 status = order.status ?? "Scheduled",
                 payment_status = order.payment_status ?? "Unpaid",
-                order_date = (DateTime)order.order_date,
-                delivery_date = order.delivery_date,
+                order_date = AsUnspecified(order.order_date) ?? default,
+                delivery_date = AsUnspecified(order.delivery_date),
                 production_id = order.production_id,
+
                 customer_name = customerName,
                 customer_email = customerEmail,
                 customer_phone = customerPhone,
                 detail_address = req?.detail_address,
+
                 product_name = productName,
                 quantity = quantity,
-                production_start_date = prodStart,
-                production_end_date = prodEnd,
+
+                production_start_date = AsUnspecified(prodStart),
+                production_end_date = AsUnspecified(prodEnd),
                 approver_name = approverName,
-                specification = specification,
+
+                specification = null,
                 note = req?.description,
+
                 final_total_cost = finalCost,
-                deposit_amount = deposit,
-                rush_amount = estimate?.rush_amount ?? 0m,
+                deposit_amount = depositFallback,
+                rush_amount = est?.rush_amount ?? 0m,
+
                 file_url = urlDesign,
-                contract_file = null
+                contract_file = null,
+
+                quote_fields = quoteFields
             };
         }
-
 
         private static void NormalizePaging(ref int page, ref int pageSize)
         {
@@ -896,5 +1014,17 @@ namespace AMMS.Infrastructure.Repositories
                 o.is_buy = true;
         }
 
+        private static DateTime? AsUnspecified(DateTime? dt)
+        {
+            if (dt == null) return null;
+            return DateTime.SpecifyKind(dt.Value, DateTimeKind.Unspecified);
+        }
+        static string MapCoatingType(string? coatingType) => (coatingType ?? "").Trim().ToUpperInvariant() switch
+        {
+            "KEO_NUOC" => "Keo nước",
+            "KEO_DAU" => "Keo dầu",
+            "" => "Keo Nước",
+            _ => coatingType ?? "Keo nước"
+        };
     }
 }

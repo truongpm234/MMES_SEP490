@@ -1,5 +1,4 @@
 ﻿using AMMS.API;
-using AMMS.Application.Extensions;
 using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
 using AMMS.Application.Services;
@@ -44,7 +43,6 @@ builder.Services.AddControllers()
     {
         options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
         options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
-        options.JsonSerializerOptions.Converters.Add(new DateTimeConverter());
     });
 
 builder.Services.AddEndpointsApiExplorer();

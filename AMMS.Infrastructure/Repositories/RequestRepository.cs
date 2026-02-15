@@ -682,6 +682,7 @@ namespace AMMS.Infrastructure.Repositories
                         estimate_id = g.Key ?? 0,
                         final_total_cost = g.First().CostEstimate?.final_total_cost,
                         deposit_amount = g.First().CostEstimate?.deposit_amount,
+                        is_active = g.First().CostEstimate?.is_active,
                         process_cost = g
                             .Where(x => x.ProcessCost != null)
                             .Select(x => new ProcessCostDetailDto

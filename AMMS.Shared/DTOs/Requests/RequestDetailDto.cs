@@ -38,6 +38,7 @@ namespace AMMS.Shared.DTOs.Requests
         public int estimate_id { get; set; }
         public decimal? final_total_cost { get; set; }
         public decimal? deposit_amount { get; set; }
+        public bool? is_active { get; set; }
         public List<ProcessCostDetailDto> process_cost { get; set; } = new();
     }
 

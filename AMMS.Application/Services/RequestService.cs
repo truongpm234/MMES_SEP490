@@ -97,6 +97,7 @@ namespace AMMS.Application.Services
         public async Task<UpdateRequestResponse> UpdateAsync(int id, UpdateOrderRequest req)
         {
             var entity = await _requestRepo.GetByIdAsync(id);
+            var ce = await _estimateRepo.GetByOrderRequestIdAsync(id);
             if (entity == null)
             {
                 return new UpdateRequestResponse
@@ -129,7 +130,18 @@ namespace AMMS.Application.Services
             entity.is_send_design = req.is_send_design ?? entity.is_send_design;
             entity.production_processes = req.production_processes ?? entity.production_processes;
             entity.process_status = "Pending";
+            
+            if (ce != null)
+            {
+                if (!string.IsNullOrWhiteSpace(req.paper_name))
+                    ce.paper_name = req.paper_name.Trim();
 
+                if (!string.IsNullOrWhiteSpace(req.wave_type))
+                    ce.wave_type = req.wave_type.Trim();
+
+                if (!string.IsNullOrWhiteSpace(req.coating_type))
+                    ce.coating_type = req.coating_type.Trim();
+            }
             await _requestRepo.UpdateAsync(entity);
             await _requestRepo.SaveChangesAsync();
 

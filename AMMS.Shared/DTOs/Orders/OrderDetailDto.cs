@@ -1,4 +1,5 @@
-﻿using System;
+﻿using AMMS.Shared.DTOs.Quotes;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -45,6 +46,8 @@ namespace AMMS.Shared.DTOs.Orders
         // ✅ File
         public string? file_url { get; set; }       
         public string? contract_file { get; set; }
+        public object? quote_fields { get; set; }
+
     }
 
 }
