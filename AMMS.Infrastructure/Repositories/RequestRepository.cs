@@ -626,15 +626,18 @@ namespace AMMS.Infrastructure.Repositories
 
         public async Task<RequestDetailDto?> GetInformationRequestById(int requestId, CancellationToken ct = default)
         {
-            var query = await (
+            var rows = await (
                 from r in _db.order_requests.AsNoTracking()
                 where r.order_request_id == requestId
+
                 join ce in _db.cost_estimates.AsNoTracking()
                     on r.order_request_id equals ce.order_request_id into ceJoin
                 from ce in ceJoin.DefaultIfEmpty()
+
                 join cep in _db.cost_estimate_processes.AsNoTracking()
                     on ce.estimate_id equals cep.estimate_id into cepJoin
                 from cep in cepJoin.DefaultIfEmpty()
+
                 select new
                 {
                     Request = r,
@@ -642,60 +645,73 @@ namespace AMMS.Infrastructure.Repositories
                     ProcessCost = cep
                 }
             )
-            .OrderByDescending(x => x.CostEstimate != null ? x.CostEstimate.estimate_id : 0)
+            .OrderByDescending(x => x.CostEstimate != null && x.CostEstimate.is_active)
+            .ThenByDescending(x => x.CostEstimate != null ? x.CostEstimate.estimate_id : 0)
             .ToListAsync(ct);
 
-            if (!query.Any())
-                return null;
+            if (rows.Count == 0) return null;
 
-            var firstItem = query.First();
+            var first = rows[0].Request;
             return new RequestDetailDto
             {
-                request_id = firstItem.Request.order_request_id,
-                customer_name = firstItem.Request.customer_name ?? "",
-                customer_phone = firstItem.Request.customer_phone ?? "",
-                email = firstItem.Request.customer_email,
-                delevery_date = firstItem.Request.delivery_date,
-                product_name = firstItem.Request.product_name ?? "",
-                quantity = firstItem.Request.quantity ?? 0,
-                process_status = firstItem.Request.process_status,
-                request_date = firstItem.Request.order_request_date,
-                description = firstItem.Request.description,
-                design_file_path = firstItem.Request.design_file_path,
-                detail_address = firstItem.Request.detail_address,
-                product_type = firstItem.Request.product_type,
-                number_of_plates = firstItem.Request.number_of_plates,
-                production_processes = firstItem.Request.production_processes,
-                product_length_mm = firstItem.Request.product_length_mm,
-                product_width_mm = firstItem.Request.product_width_mm,
-                product_height_mm = firstItem.Request.product_height_mm,
-                glue_tab_mm = firstItem.Request.glue_tab_mm,
-                bleed_mm = firstItem.Request.bleed_mm,
-                is_one_side_box = firstItem.Request.is_one_side_box,
-                print_width_mm = firstItem.Request.print_width_mm,
-                print_height_mm = firstItem.Request.print_height_mm,
-                reason = firstItem.Request.reason,
-                cost_estimate = query
-                    .GroupBy(x => x.CostEstimate?.estimate_id)
-                    .Select(g => new CostEstimateDetailDto
+                request_id = first.order_request_id,
+                customer_name = first.customer_name ?? "",
+                customer_phone = first.customer_phone ?? "",
+                email = first.customer_email,
+                delevery_date = first.delivery_date,
+                product_name = first.product_name ?? "",
+                quantity = first.quantity ?? 0,
+                process_status = first.process_status,
+                request_date = first.order_request_date,
+                description = first.description,
+                design_file_path = first.design_file_path,
+                detail_address = first.detail_address,
+                product_type = first.product_type,
+                number_of_plates = first.number_of_plates,
+                production_processes = first.production_processes,
+                product_length_mm = first.product_length_mm,
+                product_width_mm = first.product_width_mm,
+                product_height_mm = first.product_height_mm,
+                glue_tab_mm = first.glue_tab_mm,
+                bleed_mm = first.bleed_mm,
+                is_one_side_box = first.is_one_side_box,
+                print_width_mm = first.print_width_mm,
+                print_height_mm = first.print_height_mm,
+                reason = first.reason,
+                cost_estimate = rows
+                    .Where(x => x.CostEstimate != null)
+                    .GroupBy(x => x.CostEstimate!.estimate_id)
+                    .OrderByDescending(g => g.Key)
+                    .Select(g =>
                     {
-                        estimate_id = g.Key ?? 0,
-                        final_total_cost = g.First().CostEstimate?.final_total_cost,
-                        deposit_amount = g.First().CostEstimate?.deposit_amount,
-                        is_active = g.First().CostEstimate?.is_active,
-                        process_cost = g
-                            .Where(x => x.ProcessCost != null)
-                            .Select(x => new ProcessCostDetailDto
-                            {
-                                process_cost_id = x.ProcessCost.process_cost_id,
-                                process_code = x.ProcessCost.process_code,
-                                cost = x.ProcessCost.total_cost
-                            })
-                            .ToList()
+                        var ce = g.First().CostEstimate!;
+
+                        return new CostEstimateDetailDto
+                        {
+                            estimate_id = ce.estimate_id,
+                            final_total_cost = ce.final_total_cost,
+                            deposit_amount = ce.deposit_amount,
+                            is_active = ce.is_active,
+                            paper_code = ce.paper_code,
+                            paper_name = ce.paper_name,
+                            coating_type = ce.coating_type,
+                            wave_type = ce.wave_type,
+
+                            process_cost = g
+                                .Where(x => x.ProcessCost != null)
+                                .Select(x => new ProcessCostDetailDto
+                                {
+                                    process_cost_id = x.ProcessCost!.process_cost_id,
+                                    process_code = x.ProcessCost.process_code,
+                                    cost = x.ProcessCost.total_cost
+                                })
+                                .ToList()
+                        };
                     })
                     .ToList()
             };
         }
+
         public async Task<int> DeleteDesignFilePathByRequestIdAsync(int orderRequestId, CancellationToken ct = default)
         {
             return await _db.order_requests

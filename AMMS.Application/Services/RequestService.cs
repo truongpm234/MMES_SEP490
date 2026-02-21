@@ -618,24 +618,24 @@ namespace AMMS.Application.Services
             if (requestId <= 0)
                 throw new ArgumentException("request_id is required");
 
+            // Load request (tracked)
             var req = await _requestRepo.GetByIdAsync(requestId);
             if (req == null)
                 throw new InvalidOperationException("Order request not found");
 
             var st = (req.process_status ?? "").Trim();
+
             if (st.Equals("Accepted", StringComparison.OrdinalIgnoreCase) ||
                 st.Equals("Rejected", StringComparison.OrdinalIgnoreCase) ||
                 st.Equals("Cancel", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException($"Cannot submit when process_status = {req.process_status}");
             }
-
-            if (st.Equals("Processing", StringComparison.OrdinalIgnoreCase))
-                return;
+            await _estimateRepo.DeactivateAllByRequestIdAsync(requestId);
 
             req.process_status = "Processing";
+
             await _requestRepo.SaveChangesAsync();
         }
-
     }
 }

@@ -36,6 +36,10 @@ namespace AMMS.Shared.DTOs.Requests
     public class CostEstimateDetailDto
     {
         public int estimate_id { get; set; }
+        public string? paper_code { get; set; }
+        public string? paper_name { get; set; }
+        public string? coating_type { get; set; }
+        public string? wave_type { get; set; }
         public decimal? final_total_cost { get; set; }
         public decimal? deposit_amount { get; set; }
         public bool? is_active { get; set; }
