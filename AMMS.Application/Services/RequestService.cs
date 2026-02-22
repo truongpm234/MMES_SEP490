@@ -631,10 +631,24 @@ namespace AMMS.Application.Services
             {
                 throw new InvalidOperationException($"Cannot submit when process_status = {req.process_status}");
             }
-            await _estimateRepo.DeactivateAllByRequestIdAsync(requestId);
+
+            var latest2Ids = await _db.cost_estimates
+                .AsNoTracking()
+                .Where(x => x.order_request_id == requestId)
+                .OrderByDescending(x => x.estimate_id)
+                .Select(x => x.estimate_id)
+                .Take(2)
+                .ToListAsync();
+
+            if (latest2Ids.Count == 0)
+                throw new InvalidOperationException("No cost estimate found for this request");
+
+            await _db.cost_estimates
+                .Where(x => x.order_request_id == requestId)
+                .ExecuteUpdateAsync(setters =>
+                    setters.SetProperty(x => x.is_active, x => latest2Ids.Contains(x.estimate_id)));
 
             req.process_status = "Processing";
-
             await _requestRepo.SaveChangesAsync();
         }
     }

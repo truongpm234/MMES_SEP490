@@ -31,10 +31,10 @@ namespace AMMS.Infrastructure.Repositories
                         join ce in _db.cost_estimates.AsNoTracking()
                         on r.order_request_id equals ce.order_request_id into ceJoin
                         from ce in ceJoin
-                            .OrderByDescending(x => x.estimate_id)
+                            .OrderByDescending(x => x.is_active)
+                            .ThenByDescending(x => x.estimate_id)
                             .Take(1)
                             .DefaultIfEmpty()
-
                         select new RequestWithCostDto
                         {
                             order_request_id = r.order_request_id,

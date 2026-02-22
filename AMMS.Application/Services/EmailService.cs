@@ -53,7 +53,7 @@ namespace AMMS.Application.Services
             }
         }
 
-        
+  
         private string CacheKey(string email) => $"OTP::{NormalizeEmail(email)}";
 
         private static string NormalizeEmail(string email)
@@ -67,7 +67,6 @@ namespace AMMS.Application.Services
 
         private static string GenerateOtp6()
         {
-            // crypto-safe 000000-999999
             var b = RandomNumberGenerator.GetBytes(4);
             var v = BitConverter.ToUInt32(b, 0) % 1_000_000;
             return v.ToString("D6");
@@ -168,11 +167,9 @@ namespace AMMS.Application.Services
 
             email = NormalizeEmail(email);
 
-            // ===== 1. Tạo token reset password =====
-            var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)); // 64 chars
+            var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
             var expiresAt = DateTime.UtcNow.AddMinutes(ExpiryMinutes);
 
-            // Có thể dùng chung cache hoặc tạo key riêng
             var cacheKey = $"RESET_PASSWORD::{email}";
 
             _cache.Set(
@@ -188,21 +185,18 @@ namespace AMMS.Application.Services
                 }
             );
 
-            // ===== 2. Tạo link reset =====
             var resetBaseUrl = _config["App:ResetPasswordUrl"];
             if (string.IsNullOrWhiteSpace(resetBaseUrl))
                 throw new Exception("Thiếu cấu hình App:ResetPasswordUrl");
 
             var resetLink = $"{resetBaseUrl}?token={token}&email={Uri.EscapeDataString(email)}";
 
-            // ===== 3. Render email HTML =====
             var html = ResetPasswordMail.GetHtmlBody(
-                fullName: email, // hoặc truyền FullName nếu có
+                fullName: email,
                 resetLink: resetLink,
                 expiredMinutes: ExpiryMinutes
             );
 
-            // ===== 4. Gửi mail =====
             await SendAsync(
                 toEmail: email,
                 subject: ResetPasswordMail.Subject,
