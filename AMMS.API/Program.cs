@@ -1,4 +1,5 @@
 ﻿using AMMS.API;
+using AMMS.API.Jobs;
 using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
 using AMMS.Application.Services;
@@ -9,16 +10,16 @@ using AMMS.Infrastructure.Interfaces;
 using AMMS.Infrastructure.Repositories;
 using AMMS.Shared.DTOs.Email;
 using AMMS.Shared.DTOs.PayOS;
+using Hangfire;
+using Hangfire.PostgreSql;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Hangfire;
-using Hangfire.PostgreSql;
-using AMMS.API.Jobs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -165,6 +166,7 @@ builder.Configuration.GetSection("Cloudinary"));
 builder.Services.Configure<SendGridSettings>(
 builder.Configuration.GetSection("SendGrid"));
 builder.Services.Configure<PayOsOptions>(builder.Configuration.GetSection("PayOS"));
+builder.Services.Configure<SendGridSettings>(builder.Configuration.GetSection("EmailSender"));
 builder.Services.ConfigureApplicationCookie(options =>
 {
     options.Cookie.SameSite = SameSiteMode.None;

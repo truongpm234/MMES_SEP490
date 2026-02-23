@@ -9,6 +9,9 @@ using SendGrid;
 using SendGrid.Helpers.Mail;
 using System.Security.Cryptography;
 using System.Text;
+using MailKit.Net.Smtp;
+using MailKit.Security;
+using MimeKit;
 
 namespace AMMS.Application.Services
 {
@@ -28,32 +31,38 @@ namespace AMMS.Application.Services
 
         public async Task SendAsync(string toEmail, string subject, string htmlContent)
         {
-            if (string.IsNullOrWhiteSpace(_settings.ApiKey))
-                throw new Exception("SendGrid:ApiKey missing");
+            var host = _config["EmailSmtp:Host"];
+            var portStr = _config["EmailSmtp:Port"];
+            var username = _config["EmailSmtp:Username"];
+            var password = _config["EmailSmtp:Password"];
 
-            var client = new SendGridClient(_settings.ApiKey);
+            var fromEmail = _config["EmailSender:FromEmail"];
+            var fromName = _config["EmailSender:FromName"];
 
-            var from = new EmailAddress(_settings.FromEmail, _settings.FromName);
-            var to = new EmailAddress(toEmail);
+            if (string.IsNullOrWhiteSpace(fromEmail))
+                throw new Exception("Thiếu EmailSender:FromEmail");
+            if (string.IsNullOrWhiteSpace(fromName))
+                fromName = "";
 
-            var msg = MailHelper.CreateSingleEmail(
-                from,
-                to,
-                subject,
-                plainTextContent: null,
-                htmlContent: htmlContent
-            );
+            if (!int.TryParse(portStr, out var port))
+                throw new Exception("EmailSmtp:Port không hợp lệ.");
 
-            var response = await client.SendEmailAsync(msg);
+            var msg = new MimeMessage();
+            msg.From.Add(new MailboxAddress(fromName, fromEmail));
+            msg.To.Add(MailboxAddress.Parse(toEmail));
+            msg.Subject = subject;
+            msg.Body = new BodyBuilder { HtmlBody = htmlContent }.ToMessageBody();
 
-            if ((int)response.StatusCode >= 400)
-            {
-                var body = await response.Body.ReadAsStringAsync();
-                throw new Exception($"SendGrid failed: {response.StatusCode} - {body}");
-            }
+            using var smtp = new SmtpClient { Timeout = 15000 };
+            var secure = port == 465 ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls;
+
+            await smtp.ConnectAsync(host, port, secure);
+            smtp.AuthenticationMechanisms.Remove("XOAUTH2");
+            await smtp.AuthenticateAsync(username, password);
+            await smtp.SendAsync(msg);
+            await smtp.DisconnectAsync(true);
         }
 
-  
         private string CacheKey(string email) => $"OTP::{NormalizeEmail(email)}";
 
         private static string NormalizeEmail(string email)
