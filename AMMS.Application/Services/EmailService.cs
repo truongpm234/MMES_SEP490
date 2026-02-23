@@ -81,13 +81,12 @@ namespace AMMS.Application.Services
         //}
         public Task SendAsync(string toEmail, string subject, string htmlContent)
         {
-            // Fire-and-forget: trả về ngay, không chờ gửi xong
             _ = Task.Run(async () =>
             {
                 try
                 {
                     var baseUrl = _config["Unosend:BaseUrl"] ?? "https://www.unosend.co/api/v1";
-                    var apiKey = _config["Unosend:ApiKey"]; // nên bắt buộc có
+                    var apiKey = _config["Unosend:ApiKey"];
 
                     var fromEmail = _config["EmailSender:FromEmail"] ?? _settings.FromEmail;
                     var fromName = _config["EmailSender:FromName"] ?? _settings.FromName ?? "";
@@ -113,7 +112,6 @@ namespace AMMS.Application.Services
 
                     var json = JsonSerializer.Serialize(payload);
 
-                    // Retry 1 lần nếu mạng chập
                     for (var attempt = 1; attempt <= 2; attempt++)
                     {
                         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
@@ -128,20 +126,17 @@ namespace AMMS.Application.Services
 
                         if (resp.IsSuccessStatusCode) return;
 
-                        // Nếu lần 1 fail, đợi chút rồi thử lại
                         if (attempt == 1)
                         {
                             await Task.Delay(500);
                             continue;
                         }
 
-                        // Lần 2 vẫn fail -> log
                         Console.WriteLine($"[Unosend] Send failed: {(int)resp.StatusCode} - {respText}");
                     }
                 }
                 catch (Exception ex)
                 {
-                    // Không throw ra ngoài (vì chạy ngầm), chỉ log
                     Console.WriteLine($"[Unosend] Send exception: {ex}");
                 }
             });
