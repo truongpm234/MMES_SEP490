@@ -2,16 +2,18 @@
 using AMMS.Application.Interfaces;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Email;
+using MailKit.Net.Smtp;
+using MailKit.Security;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
+using MimeKit;
 using SendGrid;
 using SendGrid.Helpers.Mail;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
-using MailKit.Net.Smtp;
-using MailKit.Security;
-using MimeKit;
+using System.Text.Json;
 
 namespace AMMS.Application.Services
 {
@@ -31,36 +33,51 @@ namespace AMMS.Application.Services
 
         public async Task SendAsync(string toEmail, string subject, string htmlContent)
         {
-            var host = _config["EmailSmtp:Host"];
-            var portStr = _config["EmailSmtp:Port"];
-            var username = _config["EmailSmtp:Username"];
-            var password = _config["EmailSmtp:Password"];
+            // Config
+            var baseUrl = _config["Unosend:BaseUrl"] ?? "https://www.unosend.co/api/v1";
+            var apiKey = _config["Unosend:ApiKey"] ?? _config["EmailSmtp:Password"];
 
-            var fromEmail = _config["EmailSender:FromEmail"];
-            var fromName = _config["EmailSender:FromName"];
+            var fromEmail = _config["EmailSender:FromEmail"] ?? _settings.FromEmail;
+            var fromName = _config["EmailSender:FromName"] ?? _settings.FromName ?? "";
+
+            if (string.IsNullOrWhiteSpace(apiKey))
+                throw new Exception("Thiếu Unosend:ApiKey (API key dạng un_...)");
 
             if (string.IsNullOrWhiteSpace(fromEmail))
                 throw new Exception("Thiếu EmailSender:FromEmail");
-            if (string.IsNullOrWhiteSpace(fromName))
-                fromName = "";
 
-            if (!int.TryParse(portStr, out var port))
-                throw new Exception("EmailSmtp:Port không hợp lệ.");
+            if (string.IsNullOrWhiteSpace(toEmail))
+                throw new ArgumentException("toEmail is required");
 
-            var msg = new MimeMessage();
-            msg.From.Add(new MailboxAddress(fromName, fromEmail));
-            msg.To.Add(MailboxAddress.Parse(toEmail));
-            msg.Subject = subject;
-            msg.Body = new BodyBuilder { HtmlBody = htmlContent }.ToMessageBody();
+            var url = $"{baseUrl.TrimEnd('/')}/emails";
 
-            using var smtp = new SmtpClient { Timeout = 15000 };
-            var secure = port == 465 ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls;
+            var payload = new
+            {
+                from = fromEmail,
+                to = new[] { toEmail },
+                subject = subject,
+                html = htmlContent
+            };
 
-            await smtp.ConnectAsync(host, port, secure);
-            smtp.AuthenticationMechanisms.Remove("XOAUTH2");
-            await smtp.AuthenticateAsync(username, password);
-            await smtp.SendAsync(msg);
-            await smtp.DisconnectAsync(true);
+            var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            });
+
+            using var http = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(30)
+            };
+
+            http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var resp = await http.PostAsync(url, content);
+            var respText = await resp.Content.ReadAsStringAsync();
+
+            if (!resp.IsSuccessStatusCode)
+                throw new Exception($"Unosend API failed: {(int)resp.StatusCode} - {respText}");
         }
 
         private string CacheKey(string email) => $"OTP::{NormalizeEmail(email)}";
