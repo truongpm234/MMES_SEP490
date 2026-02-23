@@ -25,7 +25,7 @@ namespace AMMS.API.Controllers
                 return BadRequest(new { message = "email is required" });
 
             await _emailService.SendOtpAsync(req.email);
-            return Ok(new { message = "OTP sent" });
+            return Ok(new { message = "OTP đã gửi, vui lòng kiểm tra email." });
         }
 
         [HttpPost("verify-otp")]

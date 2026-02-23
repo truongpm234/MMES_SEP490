@@ -154,7 +154,7 @@ namespace AMMS.API.Controllers
             try
             {
                 await _dealService.SendDealAndEmailAsync(req.request_id);
-                return Ok(new { message = "Sent deal email", request_id = req.request_id});
+                return Ok(new { message = "Báo giá đã được hệ thống gửi.", request_id = req.request_id});
             }
             catch (Exception ex)
             {

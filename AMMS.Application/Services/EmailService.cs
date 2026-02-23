@@ -31,55 +31,123 @@ namespace AMMS.Application.Services
             _quoteRepo = quoteRepository;
         }
 
-        public async Task SendAsync(string toEmail, string subject, string htmlContent)
+        //public async Task SendAsync(string toEmail, string subject, string htmlContent)
+        //{
+        //    // Config
+        //    var baseUrl = _config["Unosend:BaseUrl"] ?? "https://www.unosend.co/api/v1";
+        //    var apiKey = _config["Unosend:ApiKey"] ?? _config["EmailSmtp:Password"];
+
+        //    var fromEmail = _config["EmailSender:FromEmail"] ?? _settings.FromEmail;
+        //    var fromName = _config["EmailSender:FromName"] ?? _settings.FromName ?? "";
+
+        //    if (string.IsNullOrWhiteSpace(apiKey))
+        //        throw new Exception("Thiếu Unosend:ApiKey (API key dạng un_...)");
+
+        //    if (string.IsNullOrWhiteSpace(fromEmail))
+        //        throw new Exception("Thiếu EmailSender:FromEmail");
+
+        //    if (string.IsNullOrWhiteSpace(toEmail))
+        //        throw new ArgumentException("toEmail is required");
+
+        //    var url = $"{baseUrl.TrimEnd('/')}/emails";
+
+        //    var payload = new
+        //    {
+        //        from = fromEmail,
+        //        to = new[] { toEmail },
+        //        subject = subject,
+        //        html = htmlContent
+        //    };
+
+        //    var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
+        //    {
+        //        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        //    });
+
+        //    using var http = new HttpClient
+        //    {
+        //        Timeout = TimeSpan.FromSeconds(30)
+        //    };
+
+        //    http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        //    http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        //    using var content = new StringContent(json, Encoding.UTF8, "application/json");
+        //    using var resp = await http.PostAsync(url, content);
+        //    var respText = await resp.Content.ReadAsStringAsync();
+
+        //    if (!resp.IsSuccessStatusCode)
+        //        throw new Exception($"Unosend API failed: {(int)resp.StatusCode} - {respText}");
+        //}
+        public Task SendAsync(string toEmail, string subject, string htmlContent)
         {
-            // Config
-            var baseUrl = _config["Unosend:BaseUrl"] ?? "https://www.unosend.co/api/v1";
-            var apiKey = _config["Unosend:ApiKey"] ?? _config["EmailSmtp:Password"];
-
-            var fromEmail = _config["EmailSender:FromEmail"] ?? _settings.FromEmail;
-            var fromName = _config["EmailSender:FromName"] ?? _settings.FromName ?? "";
-
-            if (string.IsNullOrWhiteSpace(apiKey))
-                throw new Exception("Thiếu Unosend:ApiKey (API key dạng un_...)");
-
-            if (string.IsNullOrWhiteSpace(fromEmail))
-                throw new Exception("Thiếu EmailSender:FromEmail");
-
-            if (string.IsNullOrWhiteSpace(toEmail))
-                throw new ArgumentException("toEmail is required");
-
-            var url = $"{baseUrl.TrimEnd('/')}/emails";
-
-            var payload = new
+            // Fire-and-forget: trả về ngay, không chờ gửi xong
+            _ = Task.Run(async () =>
             {
-                from = fromEmail,
-                to = new[] { toEmail },
-                subject = subject,
-                html = htmlContent
-            };
+                try
+                {
+                    var baseUrl = _config["Unosend:BaseUrl"] ?? "https://www.unosend.co/api/v1";
+                    var apiKey = _config["Unosend:ApiKey"]; // nên bắt buộc có
 
-            var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                    var fromEmail = _config["EmailSender:FromEmail"] ?? _settings.FromEmail;
+                    var fromName = _config["EmailSender:FromName"] ?? _settings.FromName ?? "";
+
+                    if (string.IsNullOrWhiteSpace(apiKey))
+                        throw new Exception("Thiếu Unosend:ApiKey");
+
+                    if (string.IsNullOrWhiteSpace(fromEmail))
+                        throw new Exception("Thiếu EmailSender:FromEmail");
+
+                    if (string.IsNullOrWhiteSpace(toEmail))
+                        throw new ArgumentException("toEmail is required");
+
+                    var url = $"{baseUrl.TrimEnd('/')}/emails";
+
+                    var payload = new
+                    {
+                        from = fromEmail,
+                        to = new[] { toEmail },
+                        subject,
+                        html = htmlContent
+                    };
+
+                    var json = JsonSerializer.Serialize(payload);
+
+                    // Retry 1 lần nếu mạng chập
+                    for (var attempt = 1; attempt <= 2; attempt++)
+                    {
+                        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                        http.DefaultRequestHeaders.Authorization =
+                            new AuthenticationHeaderValue("Bearer", apiKey);
+                        http.DefaultRequestHeaders.Accept.Add(
+                            new MediaTypeWithQualityHeaderValue("application/json"));
+
+                        using var content = new StringContent(json, Encoding.UTF8, "application/json");
+                        using var resp = await http.PostAsync(url, content);
+                        var respText = await resp.Content.ReadAsStringAsync();
+
+                        if (resp.IsSuccessStatusCode) return;
+
+                        // Nếu lần 1 fail, đợi chút rồi thử lại
+                        if (attempt == 1)
+                        {
+                            await Task.Delay(500);
+                            continue;
+                        }
+
+                        // Lần 2 vẫn fail -> log
+                        Console.WriteLine($"[Unosend] Send failed: {(int)resp.StatusCode} - {respText}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Không throw ra ngoài (vì chạy ngầm), chỉ log
+                    Console.WriteLine($"[Unosend] Send exception: {ex}");
+                }
             });
 
-            using var http = new HttpClient
-            {
-                Timeout = TimeSpan.FromSeconds(30)
-            };
-
-            http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-            using var content = new StringContent(json, Encoding.UTF8, "application/json");
-            using var resp = await http.PostAsync(url, content);
-            var respText = await resp.Content.ReadAsStringAsync();
-
-            if (!resp.IsSuccessStatusCode)
-                throw new Exception($"Unosend API failed: {(int)resp.StatusCode} - {respText}");
+            return Task.CompletedTask;
         }
-
         private string CacheKey(string email) => $"OTP::{NormalizeEmail(email)}";
 
         private static string NormalizeEmail(string email)
