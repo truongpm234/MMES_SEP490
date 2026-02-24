@@ -693,7 +693,7 @@ namespace AMMS.Infrastructure.Repositories
                             deposit_amount = ce.deposit_amount,
                             is_active = ce.is_active,
                             paper_code = ce.paper_code,
-                            paper_name = ce.paper_name,
+                            paper_name = ce.paper_name ?? ce.paper_code,
                             coating_type = ce.coating_type,
                             wave_type = ce.wave_type,
 
