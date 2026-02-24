@@ -147,13 +147,19 @@ namespace AMMS.Application.Services
 
                     if (prod?.order_id != null)
                     {
-                        await _hub.Clients
-                            .Group($"order-{prod.order_id}")
-                            .SendAsync("OrderUpdated", new
-                            {
-                                orderId = prod.order_id,
-                                status = prod.status
-                            });
+
+                        //await _hub.Clients
+                        //   .Group($"order-{prod.order_id}")
+                        //   .SendAsync("OrderUpdated", new
+                        //   {
+                        //       orderId = prod.order_id,
+                        //       status = prod.status
+                        //   });
+                        await _hub.Clients.All.SendAsync("OrderUpdated", new
+                        {
+                            orderId = prod.order_id,
+                            status = prod.status
+                        });
                     }
 
 
