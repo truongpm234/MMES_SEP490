@@ -65,7 +65,13 @@ namespace AMMS.Application.Services
             }
             else
             {
-                estimates = await _estimateRepo.GetAllByOrderRequestIdAsync(orderRequestId);
+                var all = await _estimateRepo.GetAllByOrderRequestIdAsync(orderRequestId);
+                estimates = all
+                    .Where(x => x.is_active)
+                    .OrderByDescending(x => x.estimate_id)
+                    .Take(2)
+                    .ToList();
+
                 if (estimates.Count == 0)
                     throw new Exception("No active estimates found for this request");
             }
@@ -73,11 +79,12 @@ namespace AMMS.Application.Services
             var baseUrlFe = _config["Deal:BaseUrlFe"]!;
             var consultantEmail = _config["Deal:ConsultantEmail"];
 
-            int? lastQuoteId = null;
+            // 2) tạo quote cho từng estimate
+            var quotePairs = new List<(cost_estimate est, quote q, string checkoutUrl)>();
 
             foreach (var est in estimates)
             {
-                var quote = new quote
+                var q = new quote
                 {
                     order_request_id = orderRequestId,
                     estimate_id = est.estimate_id,
@@ -86,25 +93,39 @@ namespace AMMS.Application.Services
                     created_at = AppTime.NowVnUnspecified()
                 };
 
-                await _quoteRepo.AddAsync(quote);
+                await _quoteRepo.AddAsync(q);
                 await _quoteRepo.SaveChangesAsync();
 
-                lastQuoteId = quote.quote_id;
+                var checkoutUrl = $"{baseUrlFe}/checkout/{orderRequestId}?estimateId={est.estimate_id}&quoteId={q.quote_id}";
+                quotePairs.Add((est, q, checkoutUrl));
 
-                var orderDetailUrl = $"{baseUrlFe}/checkout/{orderRequestId}?estimateId={est.estimate_id}&quoteId={quote.quote_id}";
+            }
 
-                var htmlCustomer = DealEmailTemplates.QuoteEmail(req, est, quote, orderDetailUrl);
+            var htmlCustomer = DealEmailTemplates.QuoteEmailCompare(req, quotePairs);
 
-                var subjectCustomer = $"Báo giá đơn hàng in ấn #{req.order_request_id:D6} (E{est.estimate_id})";
-                await _emailService.SendAsync(req.customer_email, subjectCustomer, htmlCustomer);
+            var subjectCustomer =
+                quotePairs.Count == 1
+                    ? $"Báo giá đơn hàng in ấn #{req.order_request_id:D6} (E{quotePairs[0].est.estimate_id})"
+                    : $"Báo giá đơn hàng in ấn #{req.order_request_id:D6} (E{quotePairs[0].est.estimate_id} vs {quotePairs[1].est.estimate_id})";
 
-                // copy consultant
-                if (!string.IsNullOrWhiteSpace(consultantEmail))
-                {
-                    var htmlConsultant = DealEmailTemplates.QuoteEmail(req, est, quote, null);
-                    var subjectConsultant = $"[COPY] Đã gửi báo giá #{req.order_request_id:D6} (E{est.estimate_id})";
-                    await _emailService.SendAsync(consultantEmail, subjectConsultant, htmlConsultant);
-                }
+            await _emailService.SendAsync(req.customer_email, subjectCustomer, htmlCustomer);
+
+            // 4) copy consultant (cũng 1 email)
+            if (!string.IsNullOrWhiteSpace(consultantEmail))
+            {
+                // consultant copy: có thể vẫn show compare, nhưng không cần nút thanh toán => truyền checkoutUrl = null
+                var consultantPairs = quotePairs
+                    .Select(x => (x.est, x.q, checkoutUrl: (string?)null))
+                    .ToList();
+
+                var htmlConsultant = DealEmailTemplates.QuoteEmailCompare(req, consultantPairs);
+
+                var subjectConsultant =
+                    quotePairs.Count == 1
+                        ? $"[COPY] Đã gửi báo giá #{req.order_request_id:D6} (E{quotePairs[0].est.estimate_id})"
+                        : $"[COPY] Đã gửi báo giá #{req.order_request_id:D6} (Compare {quotePairs[0].est.estimate_id} vs {quotePairs[1].est.estimate_id})";
+
+                await _emailService.SendAsync(consultantEmail, subjectConsultant, htmlConsultant);
             }
 
             req.process_status = "Waiting";
