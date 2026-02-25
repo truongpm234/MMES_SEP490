@@ -89,6 +89,8 @@ public partial class cost_estimate
 
     public string? wave_type { get; set; }
 
+    public string? production_processes { get; set; }
+
     [Column(TypeName = "numeric(18,2)")]
     [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
     public decimal deposit_amount { get; private set; }

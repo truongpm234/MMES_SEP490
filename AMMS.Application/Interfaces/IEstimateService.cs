@@ -20,6 +20,6 @@ namespace AMMS.Application.Interfaces
         Task<bool> OrderRequestExistsAsync(int order_request_id);
         Task<int> SaveFeCostEstimateAsync(CostEstimateInsertRequest req, CancellationToken ct = default);
         Task<List<RequestEstimateDto>> GetAllEstimatesFlatByRequestIdAsync(int requestId, CancellationToken ct = default);
-        Task<QuoteEmailPreviewResponse> BuildPreviewAsync(int quoteId, CancellationToken ct = default);
+        Task<QuoteEmailComparePreviewResponse> BuildPreviewAsync(int requestId, CancellationToken ct = default);
     }
 }

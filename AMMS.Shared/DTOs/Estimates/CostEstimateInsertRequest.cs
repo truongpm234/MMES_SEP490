@@ -59,6 +59,7 @@ namespace AMMS.Shared.DTOs.Estimates
         public DateTime? estimated_finish_date { get; set; }
         public DateTime? desired_delivery_date { get; set; }
         public DateTime? created_at { get; set; }
+        public string? production_processes { get; set; }
 
         // ----- Số tờ / diện tích -----
         public int? sheets_required { get; set; }

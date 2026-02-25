@@ -13,7 +13,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task AddAsync(quote entity);
         Task<quote?> GetByIdAsync(int id);
         Task SaveChangesAsync();
-        Task<QuoteEmailPreviewResponse> BuildPreviewAsync(int quoteId, CancellationToken ct = default);
+        Task<QuoteEmailComparePreviewResponse> BuildPreviewAsync(int requestId, CancellationToken ct = default);
     }
 }
 

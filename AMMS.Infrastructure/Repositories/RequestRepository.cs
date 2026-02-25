@@ -51,7 +51,6 @@ namespace AMMS.Infrastructure.Repositories
                             process_status = r.process_status,
                             product_type = r.product_type,
                             number_of_plates = r.number_of_plates,
-                            production_processes = r.production_processes,
                             paper_code = ce != null ? ce.paper_code : null,
                             paper_name = ce != null ? ce.paper_name : null,
                             coating_type = ce != null ? ce.coating_type : null,
@@ -668,7 +667,6 @@ namespace AMMS.Infrastructure.Repositories
                 detail_address = first.detail_address,
                 product_type = first.product_type,
                 number_of_plates = first.number_of_plates,
-                production_processes = first.production_processes,
                 product_length_mm = first.product_length_mm,
                 product_width_mm = first.product_width_mm,
                 product_height_mm = first.product_height_mm,
@@ -710,6 +708,84 @@ namespace AMMS.Infrastructure.Repositories
                     })
                     .ToList()
             };
+        }
+
+        public async Task<RequestWithTwoEstimatesDto?> GetActiveEstimatesInProcessAsync(int requestId, CancellationToken ct = default)
+        {
+            var req = await _db.order_requests
+                .AsNoTracking()
+                .Where(r => r.order_request_id == requestId)
+                .Select(r => new RequestWithTwoEstimatesDto
+                {
+                    order_request_id = r.order_request_id,
+                    customer_name = r.customer_name ?? "",
+                    customer_phone = r.customer_phone ?? "",
+                    customer_email = r.customer_email,
+                    delivery_date = r.delivery_date,
+                    product_name = r.product_name ?? "",
+                    quantity = r.quantity ?? 0,
+                    description = r.description,
+                    detail_address = r.detail_address,
+                    product_type = r.product_type,
+                    number_of_plates = r.number_of_plates,
+                    product_length_mm = r.product_length_mm,
+                    product_width_mm = r.product_width_mm,
+                    product_height_mm = r.product_height_mm,
+                    glue_tab_mm = r.glue_tab_mm,
+                    bleed_mm = r.bleed_mm,
+                    is_one_side_box = r.is_one_side_box,
+                    print_width_mm = r.print_width_mm,
+                    print_height_mm = r.print_height_mm,
+                    is_send_design = r.is_send_design
+                })
+                .FirstOrDefaultAsync(ct);
+
+            if (req == null) return null;
+
+            var ests = await _db.cost_estimates
+                .AsNoTracking()
+                .Where(e => e.order_request_id == requestId && e.is_active)
+                .OrderByDescending(e => e.estimate_id)
+                .Take(2)
+                .Select(e => new CostEstimateCompareDto
+                {
+                    estimate_id = e.estimate_id,
+                    is_active = e.is_active,
+                    paper_cost = e.paper_cost,
+                    ink_cost = e.ink_cost,
+                    coating_glue_cost = e.coating_glue_cost,
+                    mounting_glue_cost = e.mounting_glue_cost,
+                    lamination_cost = e.lamination_cost,
+                    material_cost = e.material_cost,
+                    base_cost = e.base_cost,
+                    is_rush = e.is_rush,
+                    rush_percent = e.rush_percent,
+                    rush_amount = e.rush_amount,
+                    subtotal = e.subtotal,
+                    discount_percent = e.discount_percent,
+                    discount_amount = e.discount_amount,
+                    final_total_cost = e.final_total_cost,
+                    deposit_amount = e.deposit_amount,
+                    created_at = e.created_at,
+                    estimated_finish_date = e.estimated_finish_date,
+                    desired_delivery_date = e.desired_delivery_date,
+                    sheets_required = e.sheets_required,
+                    sheets_waste = e.sheets_waste,
+                    sheets_total = e.sheets_total,
+                    n_up = e.n_up,
+                    total_area_m2 = e.total_area_m2,
+                    production_processes = e.production_processes,
+                    design_cost = e.design_cost,
+                    paper_code = e.paper_code,
+                    paper_name = e.paper_name,
+                    coating_type = e.coating_type,
+                    wave_type = e.wave_type,
+                    cost_note = e.cost_note
+                })
+                .ToListAsync(ct);
+
+            req.estimates = ests;
+            return req;
         }
 
         public async Task<int> DeleteDesignFilePathByRequestIdAsync(int orderRequestId, CancellationToken ct = default)

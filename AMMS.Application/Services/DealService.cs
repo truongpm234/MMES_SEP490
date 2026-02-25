@@ -79,7 +79,6 @@ namespace AMMS.Application.Services
             var baseUrlFe = _config["Deal:BaseUrlFe"]!;
             var consultantEmail = _config["Deal:ConsultantEmail"];
 
-            // 2) tạo quote cho từng estimate
             var quotePairs = new List<(cost_estimate est, quote q, string checkoutUrl)>();
 
             foreach (var est in estimates)
@@ -96,7 +95,7 @@ namespace AMMS.Application.Services
                 await _quoteRepo.AddAsync(q);
                 await _quoteRepo.SaveChangesAsync();
 
-                var checkoutUrl = $"{baseUrlFe}/checkout/{orderRequestId}?estimateId={est.estimate_id}&quoteId={q.quote_id}";
+                var checkoutUrl = $"{baseUrlFe}/checkout/{orderRequestId}";
                 quotePairs.Add((est, q, checkoutUrl));
 
             }
@@ -110,10 +109,8 @@ namespace AMMS.Application.Services
 
             await _emailService.SendAsync(req.customer_email, subjectCustomer, htmlCustomer);
 
-            // 4) copy consultant (cũng 1 email)
             if (!string.IsNullOrWhiteSpace(consultantEmail))
             {
-                // consultant copy: có thể vẫn show compare, nhưng không cần nút thanh toán => truyền checkoutUrl = null
                 var consultantPairs = quotePairs
                     .Select(x => (x.est, x.q, checkoutUrl: (string?)null))
                     .ToList();

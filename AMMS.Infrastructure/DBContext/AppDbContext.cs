@@ -185,7 +185,6 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.product_name).HasMaxLength(200);
             entity.Property(e => e.product_type).HasMaxLength(50);
             entity.Property(e => e.number_of_plates).HasDefaultValue(0);
-            entity.Property(e => e.production_processes);
             entity.HasOne(d => d.order)
                 .WithMany()
                 .HasForeignKey(d => d.order_id)

@@ -84,10 +84,10 @@ namespace AMMS.API.Controllers
             return Ok(list);
         }
 
-        [HttpGet("email-preview/{quoteId:int}")]
-        public async Task<ActionResult<QuoteEmailPreviewResponse>> GetQuoteEmailPreview([FromRoute] int quoteId, CancellationToken ct)
+        [HttpGet("email-preview/{requestId:int}")]
+        public async Task<IActionResult> QuotePreviewByRequest(int requestId, CancellationToken ct)
         {
-            var res = await _service.BuildPreviewAsync(quoteId, ct);
+            var res = await _service.BuildPreviewAsync(requestId, ct);
             return Ok(res);
         }
     }

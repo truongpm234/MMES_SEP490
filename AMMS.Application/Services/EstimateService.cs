@@ -75,6 +75,7 @@ namespace AMMS.Application.Services
                 created_at = ToUnspecified(req.created_at ?? now),
                 is_active = true,
                 estimated_finish_date = ToUnspecified(req.estimated_finish_date ?? now),
+                production_processes = req.production_processes.Trim(),
                 desired_delivery_date = ToUnspecified(req.desired_delivery_date ?? (orderReq.delivery_date ?? now)),
             };
 
@@ -231,9 +232,9 @@ namespace AMMS.Application.Services
             return await _estimateRepo.GetAllEstimatesFlatByRequestIdAsync(requestId, ct);
         }
 
-        public async Task<QuoteEmailPreviewResponse> BuildPreviewAsync(int quoteId, CancellationToken ct = default)
+        public async Task<QuoteEmailComparePreviewResponse> BuildPreviewAsync(int requestId, CancellationToken ct = default)
         {
-            return await _quoteRepo.BuildPreviewAsync(quoteId, ct);
+            return await _quoteRepo.BuildPreviewAsync(requestId, ct);
         }
     }
 }

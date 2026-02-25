@@ -128,7 +128,10 @@ namespace AMMS.Application.Services
             entity.print_width_mm = req.print_width_mm ?? entity.print_width_mm;
             entity.print_height_mm = req.print_height_mm ?? entity.print_height_mm;
             entity.is_send_design = req.is_send_design ?? entity.is_send_design;
-            entity.production_processes = req.production_processes ?? entity.production_processes;
+            if (ce != null && !string.IsNullOrWhiteSpace(req.production_processes))
+            {
+                ce.production_processes = req.production_processes.Trim();
+            }
             entity.process_status = "Pending";
             
             if (ce != null)
@@ -316,7 +319,7 @@ namespace AMMS.Application.Services
                         design_url = req.design_file_path,
                         product_type_id = productTypeId,
                         paper_code = est.paper_code,
-                        production_process = req.production_processes,
+                        production_process = est.production_processes,
                         paper_name = est.paper_name,
                         glue_type = est.coating_type,
                         wave_type = est.wave_type,
@@ -528,7 +531,6 @@ namespace AMMS.Application.Services
                 is_send_design = dto.is_send_design,
                 product_type = dto.product_type?.Trim(),
                 number_of_plates = dto.number_of_plates,
-                production_processes = dto.production_processes?.Trim(),
                 product_length_mm = dto.product_length_mm,
                 product_width_mm = dto.product_width_mm,
                 product_height_mm = dto.product_height_mm,
@@ -650,6 +652,11 @@ namespace AMMS.Application.Services
 
             req.process_status = "Processing";
             await _requestRepo.SaveChangesAsync();
+        }
+        public async Task<RequestWithTwoEstimatesDto?> GetCompareQuotesAsync(int requestId, CancellationToken ct = default)
+        {
+            if (requestId <= 0) return null;
+            return await _requestRepo.GetActiveEstimatesInProcessAsync(requestId, ct);
         }
     }
 }

@@ -633,7 +633,7 @@ namespace AMMS.Infrastructure.Repositories
 
             var tasks = await _db.tasks
                 .Where(t => t.prod_id == prodId)
-                .Select(t => new { t.status, t.end_time })
+                .Select(t => new { t.status, t.end_time, t.seq_num })
                 .ToListAsync(ct);
 
             if (tasks.Count == 0) return false;
@@ -644,9 +644,9 @@ namespace AMMS.Infrastructure.Repositories
 
             if (!allFinished) return false;
 
-            if (prod.end_date == null)
-                prod.end_date = now;
+            var finishedAt = tasks.Where(t => t.end_time != null).Select(t => t.end_time!.Value).DefaultIfEmpty(now).Max();
 
+            prod.end_date = finishedAt;
             prod.status = "Finished";
 
             await _db.SaveChangesAsync(ct);

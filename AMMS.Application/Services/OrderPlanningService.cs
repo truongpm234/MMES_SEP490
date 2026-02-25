@@ -178,9 +178,28 @@ namespace AMMS.Application.Services
                 .ToListAsync(ct);
 
             HashSet<string>? selected = null;
-            if (!string.IsNullOrWhiteSpace(req.production_processes))
+
+            // ✅ NEW: ưu tiên accepted_estimate_id, nếu không thì lấy latest active estimate
+            string? csv = null;
+
+            if (req.accepted_estimate_id.HasValue)
             {
-                selected = req.production_processes.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                csv = await _db.cost_estimates.AsNoTracking()
+                    .Where(x => x.estimate_id == req.accepted_estimate_id.Value
+                             && x.order_request_id == orderRequestId)
+                    .Select(x => x.production_processes)
+                    .FirstOrDefaultAsync(ct);
+            }
+
+            csv ??= await _db.cost_estimates.AsNoTracking()
+                .Where(x => x.order_request_id == orderRequestId && x.is_active)
+                .OrderByDescending(x => x.estimate_id)
+                .Select(x => x.production_processes)
+                .FirstOrDefaultAsync(ct);
+
+            if (!string.IsNullOrWhiteSpace(csv))
+            {
+                selected = csv.Split(',', StringSplitOptions.RemoveEmptyEntries)
                     .Select(x => Norm(x))
                     .Where(x => !string.IsNullOrWhiteSpace(x))
                     .ToHashSet();

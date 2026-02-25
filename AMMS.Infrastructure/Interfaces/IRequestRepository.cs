@@ -38,5 +38,6 @@ namespace AMMS.Infrastructure.Interfaces
         Task<RequestDetailDto?> GetInformationRequestById(int requestId, CancellationToken ct = default);
         Task<RequestWithCostDto?> GetByIdWithCostAsync(int id);
         Task<int> DeleteDesignFilePathByRequestIdAsync(int orderRequestId, CancellationToken ct = default);
+        Task<RequestWithTwoEstimatesDto?> GetActiveEstimatesInProcessAsync(int requestId, CancellationToken ct = default);
     }
 }

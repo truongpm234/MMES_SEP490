@@ -33,16 +33,6 @@ public partial class order_request
 
     public int? number_of_plates { get; set; }
 
-    public string? production_processes { get; set; }
-
-    //public string? coating_type { get; set; }
-
-    //public string? paper_code { get; set; }
-
-    //public string? paper_name { get; set; }
-
-    //public string? wave_type { get; set; }
-
     public int? order_id { get; set; }
 
     public int? quote_id { get; set; }

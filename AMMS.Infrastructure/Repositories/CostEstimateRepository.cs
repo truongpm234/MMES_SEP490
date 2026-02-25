@@ -106,7 +106,7 @@ namespace AMMS.Infrastructure.Repositories
                     process_status = r.process_status,
                     product_type = r.product_type,
                     number_of_plates = r.number_of_plates,
-                    production_processes = r.production_processes,
+                    production_processes = ce.production_processes,
                     order_id = r.order_id,
                     quote_id = r.quote_id,
                     product_length_mm = r.product_length_mm,
@@ -121,7 +121,6 @@ namespace AMMS.Infrastructure.Repositories
                     note = r.note,
                     reason = r.reason,
                     accepted_estimate_id = r.accepted_estimate_id,
-                    // ===== cost_estimate =====
                     estimate_id = ce.estimate_id,
                     estimate_order_request_id = ce.order_request_id,
                     paper_cost = ce.paper_cost,

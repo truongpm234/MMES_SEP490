@@ -22,30 +22,6 @@ namespace AMMS.Application.Helpers
             "BE" => "Bế",
             _ => code
         };
-        private static string BuildProductionProcessText(order_request req, cost_estimate est)
-        {
-            var codes = new List<string>();
-
-            if (!string.IsNullOrWhiteSpace(req.production_processes))
-            {
-                codes = req.production_processes
-                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    .ToList();
-            }
-            else if (est.process_costs is { Count: > 0 })
-            {
-                codes = est.process_costs
-                    .Select(p => p.process_code)
-                    .Where(c => !string.IsNullOrWhiteSpace(c))
-                    .Distinct()
-                    .ToList();
-            }
-
-            if (codes.Count == 0)
-                return "Không có / Không áp dụng";
-
-            return string.Join(", ", codes.Select(MapProcessCode));
-        }
 
         private static string QuoteEmailInner(order_request req, cost_estimate est, quote q, string? orderDetailUrl)
         {
@@ -227,7 +203,6 @@ namespace AMMS.Application.Helpers
   </div>
 </div>";
         }
-        // ✅ giữ API cũ: 1 báo giá / 1 email
         public static string QuoteEmail(order_request req, cost_estimate est, quote q, string orderDetailUrl)
         {
             var inner = QuoteEmailInner(req, est, q, orderDetailUrl);
@@ -247,8 +222,6 @@ namespace AMMS.Application.Helpers
 </html>";
         }
 
-        // ✅ NEW: compare 2 báo giá trong 1 email, 2 cột
-        // pairs: (est, quote, checkoutUrl) - checkoutUrl null => không hiện nút thanh toán (cho consultant)
         public static string QuoteEmailCompare(
             order_request req,
             List<(cost_estimate est, quote q, string? checkoutUrl)> pairs)

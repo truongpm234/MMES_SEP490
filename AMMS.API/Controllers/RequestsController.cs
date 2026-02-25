@@ -760,5 +760,15 @@ namespace AMMS.API.Controllers
             }
         }
 
+        [HttpGet("get-deal-price-inProcess/{request_id:int}")]
+        [ProducesResponseType(typeof(RequestWithTwoEstimatesDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetCompareQuotes(int request_id, CancellationToken ct)
+        {
+            var dto = await _service.GetCompareQuotesAsync(request_id, ct);
+            if (dto == null)
+                return NotFound(new { message = "Order request not found" });
+
+            return Ok(dto);
+        }
     }
 }

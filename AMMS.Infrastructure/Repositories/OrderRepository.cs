@@ -343,17 +343,23 @@ namespace AMMS.Infrastructure.Repositories
             {
                 var codes = new List<string>();
 
-                if (!string.IsNullOrWhiteSpace(req.production_processes))
+                // ✅ NEW: lấy theo estimate.production_processes
+                if (!string.IsNullOrWhiteSpace(est.production_processes))
                 {
-                    codes = req.production_processes
-                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    codes = est.production_processes
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(x => x.Trim().ToUpperInvariant())
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .Distinct()
                         .ToList();
                 }
                 else if (est.process_costs is { Count: > 0 })
                 {
+                    // fallback: nếu estimate chưa lưu production_processes
                     codes = est.process_costs
                         .Select(p => p.process_code)
                         .Where(c => !string.IsNullOrWhiteSpace(c))
+                        .Select(c => c.Trim().ToUpperInvariant())
                         .Distinct()
                         .ToList();
                 }
@@ -480,9 +486,7 @@ namespace AMMS.Infrastructure.Repositories
                 var discount_percent = est.discount_percent;
                 var discount_amount = est.discount_amount;
                 var deposit = est.deposit_amount;
-
                 var production_process = BuildProductionProcessText(req, est);
-
                 var expired_at = q.created_at.AddHours(24);
                 var expired = expired_at.ToString("dd/MM/yyyy HH:mm");
 
