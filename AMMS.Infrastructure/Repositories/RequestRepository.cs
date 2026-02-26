@@ -676,6 +676,7 @@ namespace AMMS.Infrastructure.Repositories
                 print_width_mm = first.print_width_mm,
                 print_height_mm = first.print_height_mm,
                 reason = first.reason,
+                note = first.note,
                 cost_estimate = rows
                     .Where(x => x.CostEstimate != null)
                     .GroupBy(x => x.CostEstimate!.estimate_id)

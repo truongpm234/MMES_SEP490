@@ -142,7 +142,6 @@ namespace AMMS.Infrastructure.Repositories
                             x => Math.Round(x.UsageLast30Days, 4)
                         );
 
-                    // 2.3) Tính thiếu NVL theo BOM + safety (30% usage 30 ngày)
                     missingByOrder = bomLines
                         .GroupBy(x => new { x.OrderId, x.MaterialId, x.MaterialName, x.StockQty })
                         .Select(g =>

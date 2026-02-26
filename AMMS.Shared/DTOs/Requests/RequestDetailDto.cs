@@ -30,6 +30,8 @@ namespace AMMS.Shared.DTOs.Requests
         public int? print_width_mm { get; set; }
         public int? print_height_mm { get; set; }
         public string? reason { get; set; }
+        public string? note { get; set; }
+
         public List<CostEstimateDetailDto> cost_estimate { get; set; } = new();
     }
 
