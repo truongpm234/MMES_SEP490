@@ -8,22 +8,19 @@ namespace AMMS.Application.Helpers
     {
         private static string VND(decimal v)
             => string.Format(new CultureInfo("vi-VN"), "{0:N0} ₫", v);
-        private static string MapProcessCode(string code) => code.Trim().ToUpperInvariant() switch
+        private static string MapCoatingType(string? coatingType)
         {
-            "IN" => "In",
-            "RALO" => "Ra lô",
-            "CAT" => "Cắt",
-            "CAN_MANG" => "Cán",
-            "CAN" => "Cán",
-            "BOI" => "Bồi",
-            "PHU" => "Phủ",
-            "DUT" => "Dứt",
-            "DAN" => "Dán",
-            "BE" => "Bế",
-            _ => code
-        };
+            var v = (coatingType ?? "").Trim().ToUpperInvariant();
+            return v switch
+            {
+                "KEO_NUOC" => "Keo nước",
+                "KEO_DAU" => "Keo dầu",
+                "" => "N/A",
+                _ => coatingType ?? "N/A"
+            };
+        }
 
-        private static string QuoteEmailInner(order_request req, cost_estimate est, quote q, string? orderDetailUrl)
+        private static string QuoteEmailInner(order_request req, cost_estimate est, quote q, string? orderDetailUrl, bool showAction)
         {
             var delivery = req.delivery_date?.ToString("dd/MM/yyyy") ?? "N/A";
             var requestDateText = req.order_request_date?.ToString("dd/MM/yyyy HH:mm") ?? "N/A";
@@ -31,7 +28,7 @@ namespace AMMS.Application.Helpers
             var quantity = req.quantity ?? 0;
 
             var paperName = string.IsNullOrWhiteSpace(est.paper_name) ? "N/A" : est.paper_name;
-            var coatingType = string.IsNullOrWhiteSpace(est.coating_type) ? "N/A" : est.coating_type;
+            var coatingType = MapCoatingType(est.coating_type);
             var waveType = string.IsNullOrWhiteSpace(est.wave_type) ? "N/A" : est.wave_type;
 
             var designType = req.is_send_design == true ? "Tự gửi file thiết kế" : "Sử dụng bản thiết kế của doanh nghiệp";
@@ -54,12 +51,13 @@ namespace AMMS.Application.Helpers
 
             string FormatVND(decimal? amount) => string.Format("{0:N0} đ", amount ?? 0).Replace(",", ".");
 
-            var font = "font-family:'Segoe UI', Tahoma, Verdana, Arial, Helvetica, sans-serif;";
+            var font = "font-family:Roboto, Arial, Helvetica, sans-serif; line-height:1.35;";
             var tableFixed = "width:100%;border-collapse:collapse;table-layout:fixed;";
             var tdLabel = "width:130px;white-space:nowrap;color:#64748b;font-size:13px;padding:7px 0;border-bottom:1px solid #eef2f7;vertical-align:top;";
             var tdValue = "color:#0f172a;font-size:13px;font-weight:700;padding:7px 0;border-bottom:1px solid #eef2f7;text-align:right;vertical-align:top;word-break:break-word;";
+            var tdValueNoWrap = tdValue + "white-space:nowrap;font-size:12px;";
             var tdValueLink = "color:#2563eb;font-size:13px;font-weight:800;padding:7px 0;border-bottom:1px solid #eef2f7;text-align:right;vertical-align:top;word-break:break-word;";
-            var card = "background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;box-shadow:0 6px 20px rgba(15,23,42,0.08);";
+            var card = "background:#ffffff;border:1px solid #cbd5e1;border-radius:12px;overflow:hidden;box-shadow:0 6px 20px rgba(15,23,42,0.08);";
             var header = "background:linear-gradient(90deg,#1e4f86 0%,#1d3f73 100%);padding:18px 20px;";
             var badge = "display:inline-block;background:rgba(255,255,255,0.18);color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;font-weight:700;";
             var h1 = "color:#ffffff;font-size:18px;font-weight:800;margin:4px 0 0 0;letter-spacing:0.2px;";
@@ -98,24 +96,36 @@ namespace AMMS.Application.Helpers
   (*) Báo giá có hiệu lực đến <b>{expiredAt:dd/MM/yyyy HH:mm}</b>. Sau thời gian này, đơn giá và chi phí có thể thay đổi.
 </div>";
 
-            string actionBlock;
-            if (isCustomerCopy)
+            string actionBlock = "";
+            if (showAction)
             {
-                actionBlock = $@"
+                if (isCustomerCopy)
+                {
+                    var copyBox = "margin:10px auto 0 auto;max-width:520px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;padding:10px 12px;text-align:left;";
+                    var copyTitle = "font-size:12px;color:#475569;font-weight:800;margin:0 0 6px 0;";
+                    var copyUrl = "font-size:12px;color:#0f172a;word-break:break-all;line-height:1.4;margin:0;font-family:Roboto, Arial, Helvetica, sans-serif;";
+
+                    actionBlock = $@"
 <div style='text-align:center;margin-top:14px;'>
-  <a href='{orderDetailUrl}' style='{btn}'>XEM CHI TIẾT &amp; THANH TOÁN</a>
+  <a href='{orderDetailUrl}' style='{btn}'>XÁC NHẬN &amp; THANH TOÁN</a>
 </div>
+
+<div style='{copyBox}'>
+  <p style='{copyTitle}'>Nếu đường link trên không hoạt động, hãy copy link bên dưới và dán vào trình duyệt:</p>
+  <p style='{copyUrl}'>{orderDetailUrl}</p>
+</div>
+
 {expiryNoteHtml}";
-            }
-            else
-            {
-                actionBlock = $@"
+                }
+                else
+                {
+                    actionBlock = $@"
 <div style='text-align:center;margin-top:14px;'>
   <div style='{warnBox}'><span style='{warnText}'>⚠ Email copy cho tư vấn viên.</span></div>
 </div>
 {expiryNoteHtml}";
+                }
             }
-
             return $@"
 <div style='{font}{card}'>
   <div style='{header}'>
@@ -170,7 +180,7 @@ namespace AMMS.Application.Helpers
   <tr><td style='{tdLabel}'>Loại giấy</td><td style='{tdValue}'>{paperName}</td></tr>
   <tr><td style='{tdLabel}'>Phủ</td><td style='{tdValue}'>{coatingType}</td></tr>
   <tr><td style='{tdLabel}'>Sóng</td><td style='{tdValue}'>{waveType}</td></tr>
-  <tr><td style='{tdLabel}'>Thiết kế</td><td style='{tdValue}'>{designType}</td></tr>
+  <tr><td style='{tdLabel}'>Thiết kế</td><td style='{tdValueNoWrap}'>{designType}</td></tr>
   <tr><td style='{tdLabel}'>Giao dự kiến</td><td style='{tdValue}'>{delivery}</td></tr>
 </table>
         </td>
@@ -205,8 +215,7 @@ namespace AMMS.Application.Helpers
         }
         public static string QuoteEmail(order_request req, cost_estimate est, quote q, string orderDetailUrl)
         {
-            var inner = QuoteEmailInner(req, est, q, orderDetailUrl);
-
+            var inner = QuoteEmailInner(req, est, q, orderDetailUrl, showAction: true);
             return $@"
 <!DOCTYPE html>
 <html>
@@ -229,35 +238,69 @@ namespace AMMS.Application.Helpers
             if (pairs == null || pairs.Count == 0)
                 return QuoteEmail(req, new cost_estimate(), new quote { created_at = AppTime.NowVnUnspecified() }, "");
 
-            // tối đa 2 theo yêu cầu
             var left = pairs[0];
             var right = pairs.Count > 1 ? pairs[1] : ((cost_estimate est, quote q, string? checkoutUrl)?)null;
 
-            var leftHtml = QuoteEmailInner(req, left.est, left.q, left.checkoutUrl);
-            var rightHtml = right.HasValue ? QuoteEmailInner(req, right.Value.est, right.Value.q, right.Value.checkoutUrl) : "";
+            var leftHtml = QuoteEmailInner(req, left.est, left.q, left.checkoutUrl, showAction: false);
+            var rightHtml = right.HasValue
+                ? QuoteEmailInner(req, right.Value.est, right.Value.q, right.Value.checkoutUrl, showAction: false)
+                : "";
+            string sharedAction = "";
+            if (!string.IsNullOrWhiteSpace(left.checkoutUrl))
+            {
+                var btn = "background:#2563eb;color:#ffffff;display:inline-block;padding:12px 18px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:900;box-shadow:0 8px 14px rgba(37,99,235,0.25);";
+                var copyBox = "margin:10px auto 0 auto;max-width:640px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;padding:10px 12px;text-align:left;";
+                var copyTitle = "font-size:12px;color:#475569;font-weight:800;margin:0 0 6px 0;";
+                var copyUrl = "font-size:12px;color:#0f172a;word-break:break-all;line-height:1.4;margin:0;font-family:Roboto, Arial, Helvetica, sans-serif;";
 
+                sharedAction = $@"
+<div style='text-align:center;margin-top:16px;'>
+  <a href='{left.checkoutUrl}' style='{btn}'>XÁC NHẬN &amp; THANH TOÁN</a>
+</div>
+
+<div style='{copyBox}'>
+  <p style='{copyTitle}'>Nếu đường link trên không hoạt động, hãy copy link bên dưới và dán vào trình duyệt:</p>
+  <p style='{copyUrl}'>{left.checkoutUrl}</p>
+</div>";
+            }
             return $@"
 <!DOCTYPE html>
 <html>
-<head><meta charset='utf-8'></head>
-<body style='background-color:#f7fafc;padding:30px 0;font-family:Arial,Helvetica,sans-serif;'>
-  <div style='max-width:1100px;margin:0 auto;'>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1'>
+  <!-- Roboto (có fallback nếu email client chặn) -->
+  <link href='https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;800&display=swap' rel='stylesheet'>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;800&display=swap');
+  </style>
+</head>
+<body style='margin:0;background-color:#f7fafc;padding:30px 0;font-family:Roboto, Arial, Helvetica, sans-serif;'>
+  <div style='max-width:1100px;margin:0 auto;padding:0 12px;'>
 
-    <div style='margin-bottom:18px;text-align:center;color:#334155;font-weight:800;font-size:18px;'>
+    <div style='margin-bottom:18px;text-align:center;color:#0f172a;font-weight:800;font-size:18px;'>
       BÁO GIÁ ĐƠN HÀNG AM{req.order_request_id:D6}
     </div>
 
-    <table width='100%' cellpadding='0' cellspacing='0' border='0'>
-  <tr>
-    <td width='50%' valign='top' style='padding:0 10px 0 0;'>
-      {leftHtml}
-    </td>
-    <td width='50%' valign='top' style='padding:0 0 0 10px;'>
-      {(right.HasValue ? rightHtml : "<div style='font-family:Arial,Helvetica,sans-serif;color:#64748b;font-size:13px;padding:18px;background:#fff;border:1px dashed #cbd5e1;border-radius:12px;'>Chỉ có 1 báo giá active.</div>")}
-    </td>
-  </tr>
-</table>
-    <div style='background-color:#edf2f7;padding:15px;text-align:center;font-size:12px;color:#718096;margin-top:16px;'>
+    <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
+      <tr>
+        <td width='50%' valign='top' style='padding:0 10px 0 0;'>
+          <div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;padding:10px;box-shadow:0 10px 22px rgba(15,23,42,0.06);'>
+            {leftHtml}
+          </div>
+        </td>
+
+        <td width='50%' valign='top' style='padding:0 0 0 10px;'>
+          {(right.HasValue
+              ? $"<div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;padding:10px;box-shadow:0 10px 22px rgba(15,23,42,0.06);'>{rightHtml}</div>"
+              : "<div style='font-family:Roboto, Arial, Helvetica, sans-serif;color:#64748b;font-size:13px;padding:18px;background:#fff;border:1px dashed #cbd5e1;border-radius:14px;'>Chỉ có 1 báo giá active.</div>"
+          )}
+        </td>
+      </tr>
+    </table>
+{sharedAction}
+
+    <div style='background-color:#edf2f7;padding:15px;text-align:center;font-size:12px;color:#718096;margin-top:16px;border-radius:12px;'>
       Email này được gửi tự động từ hệ thống MES.
     </div>
 
@@ -265,6 +308,7 @@ namespace AMMS.Application.Helpers
 </body>
 </html>";
         }
+
         public static string AcceptCustomerEmail(order_request req, order order, cost_estimate est, string trackingUrl)
         {
             return $@"
