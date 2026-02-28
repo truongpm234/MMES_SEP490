@@ -91,10 +91,7 @@ namespace AMMS.Application.Helpers
             var warnBox = "background:#f1f5f9;border:1px dashed #94a3b8;border-radius:10px;padding:10px 12px;display:inline-block;";
             var warnText = "color:#475569;font-weight:800;font-size:12px;";
 
-            var expiryNoteHtml = $@"
-<div style='{note}'>
-  (*) Báo giá có hiệu lực đến <b>{expiredAt:dd/MM/yyyy HH:mm}</b>. Sau thời gian này, đơn giá và chi phí có thể thay đổi.
-</div>";
+            var expiryNoteHtml = QuoteExpiryNotice(expiredAt, includeAutoReject: true);
 
             string actionBlock = "";
             if (showAction)
@@ -213,6 +210,7 @@ namespace AMMS.Application.Helpers
   </div>
 </div>";
         }
+
         public static string QuoteEmail(order_request req, cost_estimate est, quote q, string orderDetailUrl)
         {
             var inner = QuoteEmailInner(req, est, q, orderDetailUrl, showAction: true);
@@ -240,7 +238,8 @@ namespace AMMS.Application.Helpers
 
             var left = pairs[0];
             var right = pairs.Count > 1 ? pairs[1] : ((cost_estimate est, quote q, string? checkoutUrl)?)null;
-
+            var expiredAt = left.q.created_at.AddHours(24);
+            var expiryBox = QuoteExpiryNotice(expiredAt, includeAutoReject: true);
             var leftHtml = QuoteEmailInner(req, left.est, left.q, left.checkoutUrl, showAction: false);
             var rightHtml = right.HasValue
                 ? QuoteEmailInner(req, right.Value.est, right.Value.q, right.Value.checkoutUrl, showAction: false)
@@ -263,6 +262,46 @@ namespace AMMS.Application.Helpers
   <p style='{copyUrl}'>{left.checkoutUrl}</p>
 </div>";
             }
+            string compareLayoutHtml;
+            if (pairs.Count == 1)
+            {
+                compareLayoutHtml = $@"
+<table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
+  <tr>
+    <td align='center' style='padding:0;'>
+      <table width='750' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse; max-width:720px; width:720px;'>
+        <tr>
+          <td style='padding:0;'>
+            <div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;padding:10px;box-shadow:0 10px 22px rgba(15,23,42,0.06);'>
+              {leftHtml}
+            </div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>";
+            }
+            else
+            {
+                compareLayoutHtml = $@"
+<table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
+  <tr>
+    <td width='50%' valign='top' style='padding:0 10px 0 0;'>
+      <div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;padding:10px;box-shadow:0 10px 22px rgba(15,23,42,0.06);'>
+        {leftHtml}
+      </div>
+    </td>
+
+    <td width='50%' valign='top' style='padding:0 0 0 10px;'>
+      <div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;padding:10px;box-shadow:0 10px 22px rgba(15,23,42,0.06);'>
+        {rightHtml}
+      </div>
+    </td>
+  </tr>
+</table>";
+            }
+
             return $@"
 <!DOCTYPE html>
 <html>
@@ -282,23 +321,10 @@ namespace AMMS.Application.Helpers
       BÁO GIÁ ĐƠN HÀNG AM{req.order_request_id:D6}
     </div>
 
-    <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
-      <tr>
-        <td width='50%' valign='top' style='padding:0 10px 0 0;'>
-          <div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;padding:10px;box-shadow:0 10px 22px rgba(15,23,42,0.06);'>
-            {leftHtml}
-          </div>
-        </td>
+    {compareLayoutHtml}
 
-        <td width='50%' valign='top' style='padding:0 0 0 10px;'>
-          {(right.HasValue
-              ? $"<div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;padding:10px;box-shadow:0 10px 22px rgba(15,23,42,0.06);'>{rightHtml}</div>"
-              : "<div style='font-family:Roboto, Arial, Helvetica, sans-serif;color:#64748b;font-size:13px;padding:18px;background:#fff;border:1px dashed #cbd5e1;border-radius:14px;'>Chỉ có 1 báo giá active.</div>"
-          )}
-        </td>
-      </tr>
-    </table>
-{sharedAction}
+    {sharedAction}
+    {expiryBox}
 
     <div style='background-color:#edf2f7;padding:15px;text-align:center;font-size:12px;color:#718096;margin-top:16px;border-radius:12px;'>
       Email này được gửi tự động từ hệ thống MES.
@@ -376,6 +402,30 @@ namespace AMMS.Application.Helpers
       <td style='border:1px solid transparent;padding:4px 8px;'>{req.quantity}</td>
     </tr>
   </table>
+</div>";
+        }
+
+    private static string QuoteExpiryNotice(DateTime expiredAt, bool includeAutoReject = true)
+        {
+            var wrap = "margin-top:14px;background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:12px 14px;";
+            var title = "font-size:13px;color:#9a3412;font-weight:900;margin:0 0 6px 0;letter-spacing:0.2px;";
+            var text = "margin:0;color:#7c2d12;font-size:12.5px;line-height:1.55;";
+            var small = "margin:8px 0 0 0;color:#9a3412;font-size:12px;line-height:1.4;font-weight:700;";
+
+            var autoRejectLine = includeAutoReject
+                ? "Nếu sau thời hạn này bạn chưa phản hồi, hệ thống sẽ tự động ghi nhận là <b>từ chối báo giá</b>."
+                : "Vui lòng phản hồi trong thời hạn hiệu lực để chúng tôi giữ đúng đơn giá và tiến độ.";
+
+            return $@"
+<div style='{wrap}'>
+  <p style='{title}'>⏳ Lưu ý quan trọng về thời hạn báo giá</p>
+  <p style='{text}'>
+    Báo giá này có hiệu lực đến <b>{expiredAt:dd/MM/yyyy HH:mm}</b> (trong vòng <b>24 giờ</b> kể từ thời điểm gửi).
+    {autoRejectLine}
+  </p>
+  <p style='{small}'>
+    Sau khi hết hạn, bạn vẫn có thể yêu cầu tạo báo giá mới — chi phí và thời gian giao hàng có thể thay đổi theo thời điểm.
+  </p>
 </div>";
         }
     }

@@ -146,7 +146,6 @@ namespace AMMS.Infrastructure.Repositories
             .ToListAsync();
         }
 
-
         public Task<bool> AnyOrderLinkedAsync(int requestId)
             => _db.order_requests
                 .AnyAsync(r => r.order_request_id == requestId && r.order_id != null);

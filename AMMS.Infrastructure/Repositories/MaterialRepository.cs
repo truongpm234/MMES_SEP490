@@ -73,13 +73,12 @@ namespace AMMS.Infrastructure.Repositories
                     m.name,
                     m.unit,
                     StockQty = m.stock_qty ?? 0m,
-                    OrderQty = (decimal)(oi.quantity),          // nếu quantity là int
+                    OrderQty = (decimal)(oi.quantity),
                     QtyPerProduct = b.qty_per_product ?? 0m,
                     WastagePercent = b.wastage_percent ?? 0m
                 }
             ).ToListAsync(ct);
 
-            // Nếu không có BOM nào thì trả về rỗng luôn
             if (!bomRows.Any())
             {
                 return new PagedResultLite<MaterialShortageDto>
@@ -91,7 +90,6 @@ namespace AMMS.Infrastructure.Repositories
                 };
             }
 
-            // ===== 3. Lấy usage 30 ngày gần nhất từ stock_moves (OUT) =====
             var usageLast30List = await _db.stock_moves
                 .AsNoTracking()
                 .Where(s =>
@@ -110,7 +108,6 @@ namespace AMMS.Infrastructure.Repositories
             var usageDict = usageLast30List
                 .ToDictionary(x => x.MaterialId, x => x.UsageLast30Days);
 
-            // ===== 4. Tính toán RequiredQty, ShortageQty, NeedToBuyQty hoàn toàn ở C# =====
             var allMaterials = bomRows
                 .GroupBy(x => new
                 {
@@ -124,12 +121,11 @@ namespace AMMS.Infrastructure.Repositories
                 {
                     decimal requiredQty = 0m;
 
-                    // Tính tổng RequiredQty cho từng material
                     foreach (var r in g)
                     {
-                        var orderQty = r.OrderQty;        // đã là decimal
-                        var qtyPerProduct = r.QtyPerProduct;   // decimal
-                        var wastePercent = r.WastagePercent;  // decimal
+                        var orderQty = r.OrderQty;
+                        var qtyPerProduct = r.QtyPerProduct;
+                        var wastePercent = r.WastagePercent;
 
                         // baseQty = số sp * định mức
                         var baseQty = orderQty * qtyPerProduct;
@@ -157,7 +153,6 @@ namespace AMMS.Infrastructure.Repositories
                         ? (totalNeeded - stockQty)
                         : 0m;
 
-                    // Theo yêu cầu hiện tại: NeedToBuyQty >= ShortageQty (đã có thêm 30% safety)
                     var needToBuyQty = shortageQty;
 
                     return new
@@ -177,7 +172,6 @@ namespace AMMS.Infrastructure.Repositories
                 .ThenBy(x => x.name)
                 .ToList();
 
-            // ===== 5. Paging trên bộ nhớ =====
             var paged = allMaterials
                 .Skip(skip)
                 .Take(pageSize + 1)
@@ -187,7 +181,6 @@ namespace AMMS.Infrastructure.Repositories
             if (hasNext)
                 paged = paged.Take(pageSize).ToList();
 
-            // ===== 6. Map sang DTO =====
             var dtoList = paged
     .Select(x => new MaterialShortageDto
     {
