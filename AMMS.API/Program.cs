@@ -17,12 +17,16 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Npgsql;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-var builder = WebApplication.CreateBuilder(args);
 
+var builder = WebApplication.CreateBuilder(args);
+var hangfireConnStr = builder.Configuration.GetConnectionString("HangfireConnection")!;
+var hangfireDataSource = new NpgsqlDataSourceBuilder(hangfireConnStr).Build();
+builder.Services.AddSingleton(hangfireDataSource);
 builder.Services.AddDbContext<AppDbContext>((sp, options) =>
 {
     options.UseNpgsql(
@@ -184,17 +188,23 @@ builder.Services.AddHangfire(config =>
               {
                   SchemaName = "hangfire",
                   PrepareSchemaIfNecessary = true,
-                  QueuePollInterval = TimeSpan.FromSeconds(10),
+                  QueuePollInterval = TimeSpan.FromSeconds(30),
+                  InvisibilityTimeout = TimeSpan.FromMinutes(30),
               });
 });
 
 builder.Services.AddHangfireServer(options =>
 {
-    options.WorkerCount = Math.Max(2, Environment.ProcessorCount);
+    options.WorkerCount = 2;
     options.Queues = new[] { "default" };
+    options.SchedulePollingInterval = TimeSpan.FromSeconds(30);
+});
+builder.Services.AddHttpClient("Unosend", client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["Unosend:BaseUrl"] ?? "https://www.unosend.co/api/v1/");
+    client.Timeout = TimeSpan.FromSeconds(45);
 });
 
-// 2) Register Job class
 builder.Services.AddScoped<QuoteExpiryJob>();
 builder.Services.Configure<SchedulingOptions>(
     builder.Configuration.GetSection("Scheduling"));

@@ -55,7 +55,7 @@ namespace AMMS.Application.Services
 
                 is_active = x.is_active,
                 created_at = x.created_at,
-                updated_at = x.updated_at
+                unit_value = x.unit_value
             }).ToList();
         }
 

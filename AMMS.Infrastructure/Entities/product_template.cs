@@ -54,7 +54,8 @@ namespace AMMS.Infrastructure.Entities
 
         public DateTime created_at { get; set; }
 
-        public DateTime? updated_at { get; set; }
+        [Column(TypeName = "numeric(18,2)")]
+        public decimal? unit_value { get; set; }
 
         public virtual product_type product_type { get; set; } = null!;
     }

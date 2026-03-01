@@ -1,9 +1,11 @@
 ﻿using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
+using AMMS.Application.Jobs;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Exceptions.AMMS.Application.Exceptions;
 using AMMS.Shared.DTOs.PayOS;
+using Hangfire;
 using Microsoft.Extensions.Configuration;
 
 namespace AMMS.Application.Services
@@ -18,6 +20,8 @@ namespace AMMS.Application.Services
         private readonly IQuoteRepository _quoteRepo;
         private readonly IPayOsService _payOs;
         private readonly IPaymentsService _payment;
+        private readonly IBackgroundJobClient _jobs;
+
         public DealService(
             IRequestRepository requestRepo,
             ICostEstimateRepository estimateRepo,
@@ -25,7 +29,7 @@ namespace AMMS.Application.Services
             IConfiguration config,
             IEmailService emailService,
             IQuoteRepository quoteRepo,
-            IPayOsService payOs, IPaymentsService payment)
+            IPayOsService payOs, IPaymentsService payment, IBackgroundJobClient jobs)
         {
             _requestRepo = requestRepo;
             _estimateRepo = estimateRepo;
@@ -35,6 +39,7 @@ namespace AMMS.Application.Services
             _quoteRepo = quoteRepo;
             _payOs = payOs;
             _payment = payment;
+            _jobs = jobs;
         }
 
         public async Task SendDealAndEmailAsync(int orderRequestId, int? estimateId = null)
@@ -66,11 +71,10 @@ namespace AMMS.Application.Services
             else
             {
                 var all = await _estimateRepo.GetAllByOrderRequestIdAsync(orderRequestId);
-                estimates = all
-                    .Where(x => x.is_active)
-                    .OrderByDescending(x => x.estimate_id)
-                    .Take(2)
-                    .ToList();
+                estimates = all.Where(x => x.is_active)
+                               .OrderByDescending(x => x.estimate_id)
+                               .Take(2)
+                               .ToList();
 
                 if (estimates.Count == 0)
                     throw new Exception("No active estimates found for this request");
@@ -97,7 +101,6 @@ namespace AMMS.Application.Services
 
                 var checkoutUrl = $"{baseUrlFe}/checkout/{orderRequestId}";
                 quotePairs.Add((est, q, checkoutUrl));
-
             }
 
             var htmlCustomer = DealEmailTemplates.QuoteEmailCompare(req, quotePairs);
@@ -107,7 +110,8 @@ namespace AMMS.Application.Services
                     ? $"Báo giá đơn hàng in ấn #{req.order_request_id:D6} (E{quotePairs[0].est.estimate_id})"
                     : $"Báo giá đơn hàng in ấn #{req.order_request_id:D6} (E{quotePairs[0].est.estimate_id} vs {quotePairs[1].est.estimate_id})";
 
-            await _emailService.SendAsync(req.customer_email, subjectCustomer, htmlCustomer);
+            var customerJobId = _jobs.Enqueue<EmailJob>(job =>
+                job.SendAsync(req.customer_email!, subjectCustomer, htmlCustomer));
 
             if (!string.IsNullOrWhiteSpace(consultantEmail))
             {
@@ -122,7 +126,8 @@ namespace AMMS.Application.Services
                         ? $"[COPY] Đã gửi báo giá #{req.order_request_id:D6} (E{quotePairs[0].est.estimate_id})"
                         : $"[COPY] Đã gửi báo giá #{req.order_request_id:D6} (Compare {quotePairs[0].est.estimate_id} vs {quotePairs[1].est.estimate_id})";
 
-                await _emailService.SendAsync(consultantEmail, subjectConsultant, htmlConsultant);
+                _jobs.ContinueJobWith<EmailJob>(customerJobId, job =>
+                    job.SendAsync(consultantEmail!, subjectConsultant, htmlConsultant));
             }
 
             req.process_status = "Waiting";
@@ -637,6 +642,5 @@ namespace AMMS.Application.Services
 
             throw new InvalidOperationException("Cannot allocate orderCode: attempts exhausted.");
         }
-
     }
 }

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -52,7 +53,7 @@ namespace AMMS.Shared.DTOs.ProductTemplates
 
         public DateTime created_at { get; set; }
 
-        public DateTime? updated_at { get; set; }
+        public decimal? unit_value { get; set; }
     }
 }
 
