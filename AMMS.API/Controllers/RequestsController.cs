@@ -746,7 +746,11 @@ namespace AMMS.API.Controllers
         {
             try
             {
-                await _service.SubmitEstimateForApprovalAsync(dto.request_id);
+                if (dto == null || dto.request_id <= 0)
+                    return BadRequest(new { message = "request_id is required" });
+
+                await _service.SubmitEstimateForApprovalAsync(dto);
+
                 return Ok(new
                 {
                     message = "Submitted for approval",

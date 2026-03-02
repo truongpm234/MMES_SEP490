@@ -7,6 +7,7 @@ namespace AMMS.Shared.DTOs.Requests
         public string customer_phone { get; set; } = "";
         public string? email { get; set; }
         public DateTime? delevery_date { get; set; }
+        public string? consultant_note { get; set; }
         public string product_name { get; set; } = "";
         public int quantity { get; set; }
         public string? process_status { get; set; }
@@ -37,6 +38,8 @@ namespace AMMS.Shared.DTOs.Requests
 
     public class CostEstimateDetailDto
     {
+        public string? consultant_note;
+
         public int estimate_id { get; set; }
         public string? paper_code { get; set; }
         public string? paper_name { get; set; }

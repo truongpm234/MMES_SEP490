@@ -34,7 +34,7 @@ namespace AMMS.Application.Interfaces
         Task<RequestDetailDto?> GetInformationRequestById(int requestId, CancellationToken ct = default);
         Task<RequestWithCostDto?> GetByIdWithCostAsync(int id);
         Task UpdateApprovalAsync(RequestApprovalUpdateDto dto, CancellationToken ct = default);
-        Task SubmitEstimateForApprovalAsync(int requestId);
+        Task SubmitEstimateForApprovalAsync(SubmitForApprovalRequestDto input);
         Task<RequestWithTwoEstimatesDto?> GetCompareQuotesAsync(int requestId, CancellationToken ct = default);
     }
 }

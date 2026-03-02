@@ -615,18 +615,16 @@ namespace AMMS.Application.Services
             await _requestRepo.SaveChangesAsync();
         }
 
-        public async Task SubmitEstimateForApprovalAsync(int requestId)
+        public async Task SubmitEstimateForApprovalAsync(SubmitForApprovalRequestDto input)
         {
-            if (requestId <= 0)
+            if (input.request_id <= 0)
                 throw new ArgumentException("request_id is required");
 
-            // Load request (tracked)
-            var req = await _requestRepo.GetByIdAsync(requestId);
+            var req = await _requestRepo.GetByIdAsync(input.request_id);
             if (req == null)
                 throw new InvalidOperationException("Order request not found");
 
             var st = (req.process_status ?? "").Trim();
-
             if (st.Equals("Accepted", StringComparison.OrdinalIgnoreCase) ||
                 st.Equals("Rejected", StringComparison.OrdinalIgnoreCase) ||
                 st.Equals("Cancel", StringComparison.OrdinalIgnoreCase))
@@ -636,7 +634,7 @@ namespace AMMS.Application.Services
 
             var latest2Ids = await _db.cost_estimates
                 .AsNoTracking()
-                .Where(x => x.order_request_id == requestId)
+                .Where(x => x.order_request_id == input.request_id)
                 .OrderByDescending(x => x.estimate_id)
                 .Select(x => x.estimate_id)
                 .Take(2)
@@ -646,13 +644,20 @@ namespace AMMS.Application.Services
                 throw new InvalidOperationException("No cost estimate found for this request");
 
             await _db.cost_estimates
-                .Where(x => x.order_request_id == requestId)
+                .Where(x => x.order_request_id == input.request_id)
                 .ExecuteUpdateAsync(setters =>
                     setters.SetProperty(x => x.is_active, x => latest2Ids.Contains(x.estimate_id)));
+
+            var normalizedNote = string.IsNullOrWhiteSpace(input.consultant_note)
+                ? null
+                : input.consultant_note.Trim();
+
+            req.consultant_note = normalizedNote;
 
             req.process_status = "Processing";
             await _requestRepo.SaveChangesAsync();
         }
+
         public async Task<RequestWithTwoEstimatesDto?> GetCompareQuotesAsync(int requestId, CancellationToken ct = default)
         {
             if (requestId <= 0) return null;

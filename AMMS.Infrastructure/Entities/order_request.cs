@@ -61,6 +61,8 @@ public partial class order_request
 
     public int? accepted_estimate_id { get; set; }
 
+    public string? consultant_note { get; set; }
+
     public virtual quote? quote { get; set; }
 
     public virtual order? order { get; set; }

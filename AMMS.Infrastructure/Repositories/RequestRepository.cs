@@ -657,6 +657,7 @@ namespace AMMS.Infrastructure.Repositories
                 customer_phone = first.customer_phone ?? "",
                 email = first.customer_email,
                 delevery_date = first.delivery_date,
+                consultant_note = first.consultant_note,
                 product_name = first.product_name ?? "",
                 quantity = first.quantity ?? 0,
                 process_status = first.process_status,
@@ -694,7 +695,6 @@ namespace AMMS.Infrastructure.Repositories
                             paper_name = ce.paper_name ?? ce.paper_code,
                             coating_type = ce.coating_type,
                             wave_type = ce.wave_type,
-
                             process_cost = g
                                 .Where(x => x.ProcessCost != null)
                                 .Select(x => new ProcessCostDetailDto
@@ -722,6 +722,7 @@ namespace AMMS.Infrastructure.Repositories
                     customer_phone = r.customer_phone ?? "",
                     customer_email = r.customer_email,
                     delivery_date = r.delivery_date,
+                    consultant_note = r.consultant_note,
                     product_name = r.product_name ?? "",
                     quantity = r.quantity ?? 0,
                     description = r.description,

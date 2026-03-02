@@ -13,6 +13,7 @@ namespace AMMS.Shared.DTOs.Requests
         public string customer_phone { get; set; } = "";
         public string? customer_email { get; set; }
         public DateTime? delivery_date { get; set; }
+        public string? consultant_note { get; set; }
 
         public string product_name { get; set; } = "";
         public int quantity { get; set; }
