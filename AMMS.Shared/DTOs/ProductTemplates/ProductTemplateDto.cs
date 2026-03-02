@@ -54,6 +54,8 @@ namespace AMMS.Shared.DTOs.ProductTemplates
         public DateTime created_at { get; set; }
 
         public decimal? unit_value { get; set; }
+
+        public string? design_file { get; set; }
     }
 }
 

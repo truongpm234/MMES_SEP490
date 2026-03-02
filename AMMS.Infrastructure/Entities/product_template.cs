@@ -57,6 +57,8 @@ namespace AMMS.Infrastructure.Entities
         [Column(TypeName = "numeric(18,2)")]
         public decimal? unit_value { get; set; }
 
+        public string? design_file { get; set; }
+
         public virtual product_type product_type { get; set; } = null!;
     }
 }
