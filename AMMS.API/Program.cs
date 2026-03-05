@@ -265,6 +265,7 @@ builder.Services.AddScoped<IOrderMaterialRepository, OrderMaterialRepository>();
 builder.Services.AddScoped<IOrderMaterialService, OrderMaterialService>();
 builder.Services.AddScoped<IProductRepository, ProductRepository>();
 builder.Services.AddScoped<IProductService, ProductService>();
+builder.Services.AddSingleton<IRealtimePublisher, RealtimePublisher>();
 // Logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();

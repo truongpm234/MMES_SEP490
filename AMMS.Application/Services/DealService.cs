@@ -21,6 +21,7 @@ namespace AMMS.Application.Services
         private readonly IPayOsService _payOs;
         private readonly IPaymentsService _payment;
         private readonly IBackgroundJobClient _jobs;
+        private readonly IRealtimePublisher _rt;
 
         public DealService(
             IRequestRepository requestRepo,
@@ -29,7 +30,7 @@ namespace AMMS.Application.Services
             IConfiguration config,
             IEmailService emailService,
             IQuoteRepository quoteRepo,
-            IPayOsService payOs, IPaymentsService payment, IBackgroundJobClient jobs)
+            IPayOsService payOs, IPaymentsService payment, IBackgroundJobClient jobs, IRealtimePublisher rt)
         {
             _requestRepo = requestRepo;
             _estimateRepo = estimateRepo;
@@ -40,6 +41,7 @@ namespace AMMS.Application.Services
             _payOs = payOs;
             _payment = payment;
             _jobs = jobs;
+            _rt = rt;
         }
 
         public async Task SendDealAndEmailAsync(int orderRequestId, int? estimateId = null)
@@ -132,6 +134,18 @@ namespace AMMS.Application.Services
 
             req.process_status = "Waiting";
             await _requestRepo.SaveChangesAsync();
+            var oldStatus = req.process_status;
+            req.process_status = "Waiting";
+            await _requestRepo.SaveChangesAsync();
+
+            await _rt.PublishRequestChangedAsync(new(
+                request_id: req.order_request_id,
+                old_status: oldStatus,
+                new_status: req.process_status,
+                action: "sent_deal_email",
+                changed_at: AppTime.NowVnUnspecified(),
+                changed_by: null
+            ));
         }
 
         public async Task<string> AcceptAndCreatePayOsLinkAsync(int orderRequestId)

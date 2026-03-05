@@ -17,6 +17,7 @@ namespace AMMS.Application.Services
         private readonly ICostEstimateRepository _estimateRepo;
         private readonly IMaterialRepository _materialRepo;
         private readonly IBomRepository _bomRepo;
+        private readonly IRealtimePublisher _rt;
 
         public RequestService(
             IRequestRepository requestRepo,
@@ -24,6 +25,7 @@ namespace AMMS.Application.Services
             ICostEstimateRepository estimateRepo,
             IMaterialRepository materialRepo,
             IBomRepository bomRepo,
+            IRealtimePublisher rt,
             AppDbContext db)
         {
             _requestRepo = requestRepo;
@@ -32,6 +34,7 @@ namespace AMMS.Application.Services
             _materialRepo = materialRepo;
             _bomRepo = bomRepo;
             _db = db;
+            _rt = rt;
         }
 
         private DateTime? ToUnspecified(DateTime? dateTime)
@@ -70,8 +73,10 @@ namespace AMMS.Application.Services
 
             await _requestRepo.AddAsync(entity);
             await _requestRepo.SaveChangesAsync();
-
-            return new CreateRequestResponse();
+            
+            await _rt.PublishRequestChangedAsync(new(request_id: entity.order_request_id, old_status: null, new_status: entity.process_status, action: "created", changed_at: AppTime.NowVnUnspecified(), changed_by: null));
+            
+            return new CreateRequestResponse();           
         }
 
         public async Task<CreateRequestResponse> CreateRequestByConsultantAsync(CreateResquestConsultant req)
@@ -89,6 +94,8 @@ namespace AMMS.Application.Services
             await _requestRepo.AddAsync(entity);
             await _requestRepo.SaveChangesAsync();
 
+            await _rt.PublishRequestChangedAsync(new(request_id: entity.order_request_id, old_status: null, new_status: entity.process_status, action: "created", changed_at: AppTime.NowVnUnspecified(), changed_by: null));
+            
             return new CreateRequestResponse
             {
                 order_request_id = entity.order_request_id
@@ -613,6 +620,18 @@ namespace AMMS.Application.Services
             }
 
             await _requestRepo.SaveChangesAsync();
+
+            var oldStatus = req.process_status;
+            await _requestRepo.SaveChangesAsync();
+
+            await _rt.PublishRequestChangedAsync(new(
+                request_id: req.order_request_id,
+                old_status: oldStatus,
+                new_status: req.process_status,
+                action: (st == "Verified") ? "manager_verified" : "manager_declined",
+                changed_at: AppTime.NowVnUnspecified(),
+                changed_by: null
+            ));
         }
 
         public async Task SubmitEstimateForApprovalAsync(SubmitForApprovalRequestDto input)
@@ -623,6 +642,8 @@ namespace AMMS.Application.Services
             var req = await _requestRepo.GetByIdAsync(input.request_id);
             if (req == null)
                 throw new InvalidOperationException("Order request not found");
+
+            var oldStatus = req.process_status;
 
             var st = (req.process_status ?? "").Trim();
             if (st.Equals("Accepted", StringComparison.OrdinalIgnoreCase) ||
@@ -656,6 +677,20 @@ namespace AMMS.Application.Services
 
             req.process_status = "Processing";
             await _requestRepo.SaveChangesAsync();
+            await _rt.PublishRequestNoteChangedAsync(new(
+        request_id: req.order_request_id,
+        consultant_note: req.consultant_note,
+        changed_at: AppTime.NowVnUnspecified()
+    ));
+
+            await _rt.PublishRequestChangedAsync(new(
+                request_id: req.order_request_id,
+                old_status: oldStatus,
+                new_status: req.process_status,
+                action: "submitted_for_approval",
+                changed_at: AppTime.NowVnUnspecified(),
+                changed_by: null
+            ));
         }
 
         public async Task<RequestWithTwoEstimatesDto?> GetCompareQuotesAsync(int requestId, CancellationToken ct = default)
