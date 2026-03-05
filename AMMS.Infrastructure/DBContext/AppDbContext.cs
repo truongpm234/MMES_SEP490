@@ -256,18 +256,24 @@ public partial class AppDbContext : DbContext
 
             entity.Property(e => e.code).HasMaxLength(20);
             entity.Property(e => e.created_at)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP")
-                .HasColumnType("timestamp without time zone");
-            entity.Property(e => e.status)
-                .HasMaxLength(20)
-                .HasDefaultValueSql("'Pending'::character varying");
+                  .HasDefaultValueSql("CURRENT_TIMESTAMP")
+                  .HasColumnType("timestamp without time zone");
 
-            entity.HasOne(d => d.created_byNavigation).WithMany(p => p.purchases)
-                .HasConstraintName("purchases_created_by_fkey");
+            entity.Property(e => e.status)
+                  .HasMaxLength(20)
+                  .HasDefaultValueSql("'Pending'::character varying");
+
+            // ✅ map FK column name đúng trong DB
+            entity.Property(e => e.created_by).HasColumnName("created_by");
+
+            entity.HasOne(d => d.created_byNavigation)
+                  .WithMany(u => u.purchases)
+                  .HasForeignKey(d => d.created_by)     
+                  .HasConstraintName("purchases_created_by_fkey");
 
             entity.HasOne(d => d.supplier).WithMany(p => p.purchases)
-                .HasForeignKey(d => d.supplier_id)
-                .HasConstraintName("purchases_supplier_id_fkey");
+                  .HasForeignKey(d => d.supplier_id)
+                  .HasConstraintName("purchases_supplier_id_fkey");
         });
 
         modelBuilder.Entity<purchase_item>(entity =>
@@ -344,7 +350,7 @@ public partial class AppDbContext : DbContext
 
             entity.Property(e => e.contact_person).HasMaxLength(100);
             entity.Property(e => e.email).HasMaxLength(100);
-            entity.Property(e => e.type).HasMaxLength(50);
+            entity.Property(e => e.main_material_type).HasMaxLength(50);
             entity.Property(e => e.name).HasMaxLength(150);
             entity.Property(e => e.phone).HasMaxLength(20);
             entity.Property(e => e.rating)
