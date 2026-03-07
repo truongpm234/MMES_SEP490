@@ -5,6 +5,7 @@ using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Requests;
+using AMMS.Shared.DTOs.Socket;
 using Microsoft.EntityFrameworkCore;
 
 namespace AMMS.Application.Services
@@ -73,10 +74,10 @@ namespace AMMS.Application.Services
 
             await _requestRepo.AddAsync(entity);
             await _requestRepo.SaveChangesAsync();
-            
+
             await _rt.PublishRequestChangedAsync(new(request_id: entity.order_request_id, old_status: null, new_status: entity.process_status, action: "created", changed_at: AppTime.NowVnUnspecified(), changed_by: null));
-            
-            return new CreateRequestResponse();           
+
+            return new CreateRequestResponse();
         }
 
         public async Task<CreateRequestResponse> CreateRequestByConsultantAsync(CreateResquestConsultant req)
@@ -95,7 +96,7 @@ namespace AMMS.Application.Services
             await _requestRepo.SaveChangesAsync();
 
             await _rt.PublishRequestChangedAsync(new(request_id: entity.order_request_id, old_status: null, new_status: entity.process_status, action: "created", changed_at: AppTime.NowVnUnspecified(), changed_by: null));
-            
+
             return new CreateRequestResponse
             {
                 order_request_id = entity.order_request_id
@@ -140,7 +141,7 @@ namespace AMMS.Application.Services
                 ce.production_processes = req.production_processes.Trim();
             }
             entity.process_status = "Pending";
-            
+
             if (ce != null)
             {
                 if (!string.IsNullOrWhiteSpace(req.paper_name))
@@ -169,7 +170,7 @@ namespace AMMS.Application.Services
         {
             var entity = await _requestRepo.GetByIdAsync(id);
             if (entity == null) return;
-           
+
             if (entity.order_id != null)
                 throw new InvalidOperationException("This request is already linked to an order, cannot cancel.");
             entity.reason = reason;
@@ -308,11 +309,21 @@ namespace AMMS.Application.Services
                         is_enough = null,
                         is_buy = false
                     };
-
+                    //Signalr Deposit
+                    RequestChangedEvent evt = new RequestChangedEvent(
+                        requestId,
+                        "Pending",
+                        "Deposited",
+                        "customer_deposited",
+                        DateTime.Now,
+                        "customer"
+                    );
+                    await _rt.PublishRequestChangedAsync(evt);
+                    //
                     await _orderRepo.AddOrderAsync(newOrder);
                     await _orderRepo.SaveChangesAsync();
 
-                    newOrder.code = $"ORD-{newOrder.order_id:00000}"; 
+                    newOrder.code = $"ORD-{newOrder.order_id:00000}";
                     _orderRepo.Update(newOrder);
 
                     await _orderRepo.SaveChangesAsync();
@@ -341,7 +352,7 @@ namespace AMMS.Application.Services
                     };
 
                     await _orderRepo.AddOrderItemAsync(newItem);
-                    await _orderRepo.SaveChangesAsync(); 
+                    await _orderRepo.SaveChangesAsync();
 
                     // ===== BOM =====
                     material? paperMaterial = null;
