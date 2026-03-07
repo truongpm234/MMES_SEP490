@@ -850,5 +850,23 @@ namespace AMMS.Infrastructure.Repositories
             if (pageSize <= 0) pageSize = 10;
             if (pageSize > 200) pageSize = 200;
         }
+
+        public async Task<bool> SetProductionDeliveryByOrderIdAsync(int orderId, CancellationToken ct = default)
+        {
+            var prod = await _db.productions
+                .FirstOrDefaultAsync(p => p.order_id == orderId, ct);
+
+            if (prod == null)
+                return false;
+
+            prod.status = "Delivery";
+
+            await _db.SaveChangesAsync(ct);
+
+            return true;
+        }
+
+        public Task SaveChangesAsync(CancellationToken ct = default)
+            => _db.SaveChangesAsync(ct);
     }
 }

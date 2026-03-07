@@ -97,5 +97,16 @@ namespace AMMS.API.Controllers
 
             return NoContent();
         }
+
+        [HttpPut("delivery/{orderId:int}")]
+        public async Task<IActionResult> SetDelivery(int orderId, CancellationToken ct)
+        {
+            var ok = await _service.SetProductionDeliveryAsync(orderId, ct);
+
+            if (!ok)
+                return NotFound(new { message = "Production not found for this orderId" });
+
+            return NoContent();
+        }
     }
 }
