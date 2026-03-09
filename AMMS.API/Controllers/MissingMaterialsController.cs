@@ -14,15 +14,6 @@ namespace AMMS.API.Controllers
         {
             _service = service;
         }
-
-        // POST api/missingmaterials/recalculate
-        [HttpPost("recalculate")]
-        public async Task<IActionResult> Recalculate(CancellationToken ct = default)
-        {
-            var result = await _service.RecalculateAndSaveAsync(ct);
-            return Ok(result);
-        }
-
         // GET api/missingmaterials/paged?page=1&pageSize=10
         [HttpGet("paged")]
         public async Task<IActionResult> GetPaged(
