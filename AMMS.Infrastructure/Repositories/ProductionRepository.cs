@@ -110,7 +110,6 @@ namespace AMMS.Infrastructure.Repositories
 
             var prodIds = baseRows.Select(x => x.prod_id).ToList();
 
-            // 2) Load tasks by prod_id (để biết đang ở seq nào)
             var taskRows = await _db.tasks
                 .AsNoTracking()
                 .Where(t => t.prod_id != null && prodIds.Contains(t.prod_id.Value))
@@ -249,7 +248,6 @@ namespace AMMS.Infrastructure.Repositories
             if (total <= 0)
                 return new ProductionProgressResponse { prod_id = prodId, total_steps = 0, finished_steps = 0, progress_percent = 0 };
 
-            // task nào có log Finished
             var finishedTaskIds = await _db.task_logs
                 .AsNoTracking()
                 .Where(l => l.task_id != null
@@ -685,7 +683,7 @@ namespace AMMS.Infrastructure.Repositories
     string processCode,
     string processName,
     ProductionDetailDto detail,
-    StageOutputRef? prevOutput,          // ✅ NEW: output của công đoạn trước
+    StageOutputRef? prevOutput,         
     int sheetsRequired,
     int sheetsTotal,
     int nUp,
@@ -705,7 +703,7 @@ namespace AMMS.Infrastructure.Repositories
             var baseSheets = sheetsTotal > 0 ? sheetsTotal : (sheetsRequired > 0 ? sheetsRequired : detail.quantity);
             if (baseSheets <= 0) baseSheets = 1;
 
-            // ========= RALO (giữ như bạn đang ổn) =========
+            // ========= RALO =========
             if (code == "RALO" || code == "RA_LO")
             {
                 inputs.Add(new StageMaterialDto
@@ -781,7 +779,6 @@ namespace AMMS.Infrastructure.Repositories
                 }
             }
 
-            // ✅ Output name: "Thành phẩm " + processName
             var outQty = qtyGood > 0 ? qtyGood : (int)Math.Round(inputQty);
             if (outQty <= 0) outQty = (int)Math.Round(inputQty);
 

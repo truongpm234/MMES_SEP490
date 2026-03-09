@@ -65,6 +65,36 @@ namespace AMMS.API.Controllers
             return StatusCode(StatusCodes.Status201Created, result);
         }
 
+        [HttpPost("clone-request")]
+        public async Task<IActionResult> CloneRequest([FromBody] CloneRequestDto dto, CancellationToken ct)
+        {
+            try
+            {
+                if (dto == null || dto.request_id <= 0)
+                    return BadRequest(new { message = "request_id is required" });
+
+                var result = await _service.CloneRequestAsync(dto.request_id, ct);
+
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "An unexpected error occurred",
+                    detail = ex.Message
+                });
+            }
+        }
+
         [HttpPut("{id}")]
         [ProducesResponseType(typeof(UpdateRequestResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(UpdateRequestResponse), StatusCodes.Status404NotFound)]

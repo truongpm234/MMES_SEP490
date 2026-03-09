@@ -132,9 +132,8 @@ namespace AMMS.Application.Services
                     job.SendAsync(consultantEmail!, subjectConsultant, htmlConsultant));
             }
 
-            req.process_status = "Waiting";
-            await _requestRepo.SaveChangesAsync();
             var oldStatus = req.process_status;
+
             req.process_status = "Waiting";
             await _requestRepo.SaveChangesAsync();
 
