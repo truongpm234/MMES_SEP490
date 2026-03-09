@@ -520,61 +520,75 @@ namespace AMMS.API.Controllers
     IPaymentRepository paymentRepo,
     CancellationToken ct)
         {
-            // 1) load request
             var req = await _db.order_requests
                 .FirstOrDefaultAsync(x => x.order_request_id == orderRequestId, ct);
 
             if (req == null)
                 return (false, $"order_request_id={orderRequestId} not found");
 
-            await UpsertPaidPaymentRowAsync(orderRequestId, orderCode, amount, paymentLinkId, transactionId, rawJson, estimateIdFromQuery, quoteIdFromQuery, paymentRepo, ct);
-
-            if (req.order_id != null)
-                return (true, $"Already processed: order_id={req.order_id}");
+            await UpsertPaidPaymentRowAsync(
+                orderRequestId, orderCode, amount,
+                paymentLinkId, transactionId, rawJson,
+                estimateIdFromQuery, quoteIdFromQuery,
+                paymentRepo, ct);
 
             var paidPayment = await _db.payments
-                                       .Where(p => p.provider == "PAYOS" && p.order_code == orderCode)
-                                       .OrderByDescending(p => p.payment_id)
-                                       .FirstOrDefaultAsync(ct);
+                .Where(p => p.provider == "PAYOS" && p.order_code == orderCode)
+                .OrderByDescending(p => p.payment_id)
+                .FirstOrDefaultAsync(ct);
+
             if (paidPayment == null)
                 return (false, "Payment row not found");
 
             var resolvedEstimateId =
-        (paidPayment.estimate_id.HasValue && paidPayment.estimate_id.Value > 0) ? paidPayment.estimate_id.Value :
-        (estimateIdFromQuery.HasValue && estimateIdFromQuery.Value > 0) ? estimateIdFromQuery.Value : 0;
+                (paidPayment.estimate_id.HasValue && paidPayment.estimate_id.Value > 0) ? paidPayment.estimate_id.Value :
+                (estimateIdFromQuery.HasValue && estimateIdFromQuery.Value > 0) ? estimateIdFromQuery.Value : 0;
 
             if (resolvedEstimateId <= 0)
                 return (false, "Cannot resolve estimate_id for this payment/order_code");
 
             var resolvedQuoteId =
-        (quoteIdFromQuery.HasValue && quoteIdFromQuery.Value > 0) ? quoteIdFromQuery.Value :
-        (paidPayment.quote_id.HasValue && paidPayment.quote_id.Value > 0) ? paidPayment.quote_id.Value : 0;
+                (quoteIdFromQuery.HasValue && quoteIdFromQuery.Value > 0) ? quoteIdFromQuery.Value :
+                (paidPayment.quote_id.HasValue && paidPayment.quote_id.Value > 0) ? paidPayment.quote_id.Value : 0;
 
             var est = await _db.cost_estimates
-    .FirstOrDefaultAsync(x => x.estimate_id == resolvedEstimateId
-                              && x.order_request_id == orderRequestId, ct);
+                .FirstOrDefaultAsync(x => x.estimate_id == resolvedEstimateId
+                                       && x.order_request_id == orderRequestId, ct);
 
             if (est == null)
                 return (false, "Cost estimate not found for paid payment");
-
-            if (req.accepted_estimate_id == null)
-                req.accepted_estimate_id = est.estimate_id;
-            else if (req.accepted_estimate_id != est.estimate_id)
-                return (false, "Request already accepted with a different estimate.");
 
             var expiredAt = est.created_at.AddHours(24);
 
             if (AppTime.NowVnUnspecified() > expiredAt.ToUniversalTime())
                 return (false, $"Quote expired at {expiredAt:o}, ignore payment.");
 
+            if (req.accepted_estimate_id == null)
+                req.accepted_estimate_id = est.estimate_id;
+            else if (req.accepted_estimate_id != est.estimate_id)
+                return (false, "Request already accepted with a different estimate.");
+
+            req.accepted_estimate_id = resolvedEstimateId;
+
             if (resolvedQuoteId > 0)
                 req.quote_id = resolvedQuoteId;
 
+            // Chỉ sau khi validate thành công mới update các estimate / quote khác
+            await _db.cost_estimates
+                .Where(x => x.order_request_id == orderRequestId)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(x => x.is_active, x => x.estimate_id == resolvedEstimateId), ct);
+
             if (resolvedQuoteId > 0)
             {
-                var q = await _db.quotes.AsTracking().FirstOrDefaultAsync(x => x.quote_id == resolvedQuoteId, ct);
-                if (q != null) q.status = "Accepted";
+                await _db.quotes
+                    .Where(x => x.order_request_id == orderRequestId)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(x => x.status,
+                            x => x.quote_id == resolvedQuoteId ? "Accepted" : "Rejected"), ct);
             }
+
+            await _db.SaveChangesAsync(ct);
 
             int orderId;
             if (req.order_id == null)
@@ -592,14 +606,6 @@ namespace AMMS.API.Controllers
                 orderId = req.order_id.Value;
             }
 
-            req.quote_id = resolvedQuoteId > 0 ? resolvedQuoteId : req.quote_id;
-
-            if (resolvedQuoteId > 0)
-            {
-                var q = await _db.quotes.FirstOrDefaultAsync(x => x.quote_id == resolvedQuoteId, ct);
-                if (q != null) q.status = "Accepted";
-            }
-
             var prod = await _db.productions.AsNoTracking()
                 .Where(p => p.order_id == orderId && p.end_date == null)
                 .OrderByDescending(p => p.prod_id)
@@ -608,7 +614,8 @@ namespace AMMS.API.Controllers
             var hasTasks = false;
             if (prod != null)
             {
-                hasTasks = await _db.tasks.AsNoTracking().AnyAsync(t => t.prod_id == prod.prod_id, ct);
+                hasTasks = await _db.tasks.AsNoTracking()
+                    .AnyAsync(t => t.prod_id == prod.prod_id, ct);
             }
 
             var now = AppTime.NowVnUnspecified();
@@ -627,16 +634,20 @@ namespace AMMS.API.Controllers
                     .Where(x => x.order_id == orderId)
                     .OrderBy(x => x.item_id)
                     .FirstOrDefaultAsync(ct);
+
                 try
                 {
-                    var prodId = await _schedulingService.ScheduleOrderAsync(
-                    orderId: orderId,
-                    productTypeId: productTypeId,
-                    productionProcessCsv: item?.production_process,
-                    managerId: 3
-                );
+                    await _schedulingService.ScheduleOrderAsync(
+                        orderId: orderId,
+                        productTypeId: productTypeId,
+                        productionProcessCsv: item?.production_process,
+                        managerId: 3
+                    );
                 }
-                catch (Exception ex) { return (false, "ScheduleOrder failed: " + ex.Message); }
+                catch (Exception ex)
+                {
+                    return (false, "ScheduleOrder failed: " + ex.Message);
+                }
 
                 try
                 {
@@ -647,7 +658,8 @@ namespace AMMS.API.Controllers
                 {
                 }
             }
-            return (true, $"Already has production and tasks: order_id={orderId}, prod_id={prod?.prod_id}");
+
+            return (true, $"Processed successfully: order_id={orderId}, prod_id={prod?.prod_id}");
         }
 
         private async Task UpsertPaidPaymentRowAsync(

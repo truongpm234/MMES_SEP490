@@ -268,7 +268,6 @@ namespace AMMS.Application.Services
                         };
                     }
 
-                    // ===== map product_type_id from req.product_type (code) =====
                     var ptCode = (req.product_type ?? "").Trim();
                     if (string.IsNullOrWhiteSpace(ptCode))
                     {
@@ -343,7 +342,6 @@ namespace AMMS.Application.Services
                     await _orderRepo.AddOrderItemAsync(newItem);
                     await _orderRepo.SaveChangesAsync(); 
 
-                    // ===== BOM =====
                     material? paperMaterial = null;
                     if (!string.IsNullOrWhiteSpace(est.paper_code))
                         paperMaterial = await _materialRepo.GetByCodeAsync(est.paper_code!);
@@ -451,9 +449,6 @@ namespace AMMS.Application.Services
                     }
 
                     newOrder.is_enough = isEnough;
-                    _orderRepo.Update(newOrder);
-                    await _orderRepo.SaveChangesAsync();
-
                     _orderRepo.Update(newOrder);
                     await _orderRepo.SaveChangesAsync();
 
@@ -620,8 +615,6 @@ namespace AMMS.Application.Services
             {
                 await _estimateRepo.DeactivateAllByRequestIdAsync(dto.request_id, ct);
             }
-
-            await _requestRepo.SaveChangesAsync();
 
             await _requestRepo.SaveChangesAsync();
 
