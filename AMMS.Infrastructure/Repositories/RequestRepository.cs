@@ -797,5 +797,14 @@ namespace AMMS.Infrastructure.Repositories
                     setters => setters.SetProperty(x => x.design_file_path, (string?)null),
                     ct);
         }
+
+        public async Task<List<cost_estimate>> GetActiveEstimatesWithProcessesByRequestIdAsync(int requestId, CancellationToken ct = default)
+        {
+            return await _db.cost_estimates
+                .Include(x => x.process_costs)
+                .Where(x => x.order_request_id == requestId && x.is_active)
+                .OrderByDescending(x => x.estimate_id)
+                .ToListAsync(ct);
+        }
     }
 }
