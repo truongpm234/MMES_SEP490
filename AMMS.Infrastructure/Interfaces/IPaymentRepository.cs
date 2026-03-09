@@ -13,5 +13,6 @@ namespace AMMS.Infrastructure.Interfaces
         Task UpsertPendingAsync(payment p, CancellationToken ct);
         Task<payment?> GetLatestPendingByRequestIdAndEstimateIdAsync(int requestId, int estimateId, CancellationToken ct = default);
         Task<payment?> GetByOrderCodeAsync(long orderCode, CancellationToken ct = default);
+        Task<payment?> GetLatestByRequestIdAndEstimateIdAsync(int requestId, int estimateId, CancellationToken ct = default);
     }
 }

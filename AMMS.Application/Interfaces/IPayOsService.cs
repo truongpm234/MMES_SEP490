@@ -11,5 +11,7 @@ namespace AMMS.Application.Interfaces
     {
         Task<PayOsResultDto> CreatePaymentLinkAsync(int orderCode, int amount, string description, string buyerName, string buyerEmail, string buyerPhone, string returnUrl, string cancelUrl, CancellationToken ct = default);
         Task<PayOsResultDto?> GetPaymentLinkInformationAsync(long orderCode, CancellationToken ct = default);
+        Task ConfirmWebhookAsync(CancellationToken ct = default);
+
     }
 }

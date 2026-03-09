@@ -16,5 +16,6 @@ namespace AMMS.Shared.DTOs.PayOS
         public string? account_number { get; set; }
         public string? account_name { get; set; }
         public string? bin { get; set; }
+        public string? status { get; set; }
     }
 }

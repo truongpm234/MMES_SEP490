@@ -83,5 +83,20 @@ namespace AMMS.Infrastructure.Repositories
                 .OrderByDescending(p => p.payment_id)
                 .FirstOrDefaultAsync(ct);
         }
+
+        public async Task<payment?> GetLatestByRequestIdAndEstimateIdAsync(
+    int requestId,
+    int estimateId,
+    CancellationToken ct = default)
+        {
+            return await _db.payments
+                .AsNoTracking()
+                .Where(p =>
+                    p.provider == "PAYOS" &&
+                    p.order_request_id == requestId &&
+                    p.estimate_id == estimateId)
+                .OrderByDescending(p => p.payment_id)
+                .FirstOrDefaultAsync(ct);
+        }
     }
 }
