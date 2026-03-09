@@ -218,56 +218,81 @@ namespace AMMS.API.Controllers
         }
 
         [HttpGet("payos/status-by-request-id")]
-        public async Task<IActionResult> GetPayOsStatusByRequest([FromQuery] int order_request_id, [FromServices] IPaymentRepository paymentRepo, CancellationToken ct)
+        public async Task<IActionResult> CheckAndProcessPayOsPayment(
+    [FromQuery] int request_id,
+    [FromQuery] int estimate_id,
+    [FromQuery] int? quote_id,
+    CancellationToken ct)
         {
-            if (order_request_id <= 0)
-                return BadRequest(new { message = "order_request_id is required" });
+            if (request_id <= 0)
+                return BadRequest(new { message = "request_id is required" });
 
-            var latest = await paymentRepo.GetLatestByRequestIdAsync(order_request_id, ct);
+            if (estimate_id <= 0)
+                return BadRequest(new { message = "estimate_id is required" });
 
-            if (latest == null)
+            var pending = await _paymentService.GetLatestPendingByRequestIdAndEstimateIdAsync(request_id, estimate_id, ct);
+            if (pending == null)
             {
                 return Ok(new
                 {
                     paid = false,
-                    status = "PENDING",
-                    order_request_id,
-                    order_code = (long?)null,
-                    paid_at = AppTime.NowVnUnspecified()
+                    processed = false,
+                    message = "Pending payment not found"
                 });
             }
 
-            var isPaid = string.Equals(latest.status, "PAID", StringComparison.OrdinalIgnoreCase)
-                         || string.Equals(latest.status, "SUCCESS", StringComparison.OrdinalIgnoreCase);
+            var info = await HttpContext.RequestServices
+                .GetRequiredService<IPayOsService>()
+                .GetPaymentLinkInformationAsync(pending.order_code, ct);
+
+            if (info == null)
+            {
+                return Ok(new
+                {
+                    paid = false,
+                    processed = false,
+                    status = "PENDING",
+                    order_code = pending.order_code
+                });
+            }
+
+            var isPaid =
+                string.Equals(info.status, "PAID", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(info.status, "SUCCESS", StringComparison.OrdinalIgnoreCase);
+
+            if (!isPaid)
+            {
+                return Ok(new
+                {
+                    paid = false,
+                    processed = false,
+                    status = info.status ?? "PENDING",
+                    order_code = pending.order_code
+                });
+            }
+
+            var result = await ProcessPaidAsync(
+                orderRequestId: request_id,
+                orderCode: pending.order_code,
+                amount: info.amount ?? (long)pending.amount,
+                paymentLinkId: info.payment_link_id ?? pending.payos_payment_link_id,
+                transactionId: info.transaction_id ?? pending.payos_transaction_id,
+                rawJson: info.raw_json ?? pending.payos_raw ?? "{}",
+                estimateIdFromQuery: pending.estimate_id ?? estimate_id,
+                quoteIdFromQuery: pending.quote_id ?? quote_id,
+                paymentRepo: HttpContext.RequestServices.GetRequiredService<IPaymentRepository>(),
+                ct: ct
+            );
 
             return Ok(new
             {
-                paid = isPaid,
-                status = latest.status,
-                order_request_id = latest.order_request_id,
-                order_code = latest.order_code,
-                paid_at = latest.paid_at
+                paid = true,
+                processed = result.ok,
+                message = result.message,
+                status = info.status,
+                order_code = pending.order_code
             });
         }
-
-        //[HttpGet("reject-form")]
-        //public async Task<IActionResult> RejectForm([FromQuery] int orderRequestId, [FromQuery] string token)
-        //{
-        //    var fe = "https://sep490-fe.vercel.app";
-
-        //    var req = await _service.GetByIdAsync(orderRequestId);
-        //    if (req == null)
-        //    {
-        //        return Redirect($"{fe}/reject-deal?orderRequestId={orderRequestId}&token={token}&error=not_found");
-        //    }
-
-        //    if (string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase))
-        //    {
-        //        return Redirect($"{fe}/reject-deal?orderRequestId={orderRequestId}&token={token}&error=accepted");
-        //    }
-
-        //    return Redirect($"{fe}/reject-deal?orderRequestId={orderRequestId}&token={token}");
-        //}
 
         [HttpPost("reject")]
         public async Task<IActionResult> RejectDeal([FromBody] RejectDealRequest dto, CancellationToken ct)
