@@ -27,6 +27,8 @@ namespace AMMS.Application.Services
     int pageSize,
     CancellationToken ct = default)
         {
+            await _repo.RecalculateAndSaveAsync(ct);
+
             var result = await _repo.GetPagedFromDbAsync(page, pageSize, ct);
             if (result.Data == null || result.Data.Count == 0) return result;
 
@@ -38,17 +40,12 @@ namespace AMMS.Application.Services
 
             foreach (var x in result.Data)
             {
-                // quantity trong DB = remaining base
                 var baseQty = x.quantity;
                 if (baseQty < 0m) baseQty = 0m;
 
-                // ✅ +10%
                 var withBuffer = baseQty * 1.10m;
-
-                // ✅ round lên bội 10
                 var roundedQty = RoundUpToTens(withBuffer);
 
-                // ✅ giữ unit price ngầm bằng total_price/baseQty
                 decimal unitPrice = 0m;
                 if (baseQty > 0m && x.total_price > 0m)
                     unitPrice = x.total_price / baseQty;
