@@ -851,11 +851,14 @@ namespace AMMS.API.Controllers
         }
 
         [HttpGet("full-data-by-request_id/{request_id:int}")]
+        [ProducesResponseType(typeof(RequestDetailDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetFullDataByRequestId(int request_id, CancellationToken ct)
         {
             var result = await _service.GetInformationRequestById(request_id, ct);
             if (result == null)
                 return NotFound(new { message = "Order request not found" });
+
             return Ok(result);
         }
 

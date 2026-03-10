@@ -624,89 +624,121 @@ namespace AMMS.Infrastructure.Repositories
 
         public async Task<RequestDetailDto?> GetInformationRequestById(int requestId, CancellationToken ct = default)
         {
-            var rows = await (
-                from r in _db.order_requests.AsNoTracking()
-                where r.order_request_id == requestId
+            var request = await _db.order_requests
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.order_request_id == requestId, ct);
 
-                join ce in _db.cost_estimates.AsNoTracking()
-                    on r.order_request_id equals ce.order_request_id into ceJoin
-                from ce in ceJoin.DefaultIfEmpty()
+            if (request == null)
+                return null;
 
-                join cep in _db.cost_estimate_processes.AsNoTracking()
-                    on ce.estimate_id equals cep.estimate_id into cepJoin
-                from cep in cepJoin.DefaultIfEmpty()
+            var estimates = await _db.cost_estimates
+                .AsNoTracking()
+                .Include(x => x.process_costs)
+                .Where(x => x.order_request_id == requestId)
+                .OrderByDescending(x => x.is_active)
+                .ThenByDescending(x => x.estimate_id)
+                .ToListAsync(ct);
 
-                select new
-                {
-                    Request = r,
-                    CostEstimate = ce,
-                    ProcessCost = cep
-                }
-            )
-            .OrderByDescending(x => x.CostEstimate != null && x.CostEstimate.is_active)
-            .ThenByDescending(x => x.CostEstimate != null ? x.CostEstimate.estimate_id : 0)
-            .ToListAsync(ct);
+            var vatPercent = await GetVatPercentAsync(ct);
 
-            if (rows.Count == 0) return null;
+            var selectedEstimate = estimates.FirstOrDefault();
 
-            var first = rows[0].Request;
             return new RequestDetailDto
             {
-                request_id = first.order_request_id,
-                customer_name = first.customer_name ?? "",
-                customer_phone = first.customer_phone ?? "",
-                email = first.customer_email,
-                delevery_date = first.delivery_date,
-                consultant_note = first.consultant_note,
-                product_name = first.product_name ?? "",
-                quantity = first.quantity ?? 0,
-                process_status = first.process_status,
-                request_date = first.order_request_date,
-                description = first.description,
-                design_file_path = first.design_file_path,
-                detail_address = first.detail_address,
-                product_type = first.product_type,
-                number_of_plates = first.number_of_plates,
-                product_length_mm = first.product_length_mm,
-                product_width_mm = first.product_width_mm,
-                product_height_mm = first.product_height_mm,
-                glue_tab_mm = first.glue_tab_mm,
-                bleed_mm = first.bleed_mm,
-                is_one_side_box = first.is_one_side_box,
-                print_width_mm = first.print_width_mm,
-                print_height_mm = first.print_height_mm,
-                reason = first.reason,
-                note = first.note,
-                cost_estimate = rows
-                    .Where(x => x.CostEstimate != null)
-                    .GroupBy(x => x.CostEstimate!.estimate_id)
-                    .OrderByDescending(g => g.Key)
-                    .Select(g =>
-                    {
-                        var ce = g.First().CostEstimate!;
+                request_id = request.order_request_id,
+                customer_name = SafeText(request.customer_name),
+                customer_phone = SafeText(request.customer_phone),
+                email = SafeText(request.customer_email),
+                delevery_date = request.delivery_date,
+                consultant_note = SafeText(request.consultant_note),
+                product_name = SafeText(request.product_name),
+                quantity = request.quantity ?? 0,
+                process_status = SafeText(request.process_status),
+                request_date = request.order_request_date,
+                description = SafeText(request.description),
+                design_file_path = SafeText(request.design_file_path),
+                detail_address = SafeText(request.detail_address),
+                product_type = SafeText(request.product_type),
+                number_of_plates = request.number_of_plates,
 
-                        return new CostEstimateDetailDto
-                        {
-                            estimate_id = ce.estimate_id,
-                            final_total_cost = ce.final_total_cost,
-                            deposit_amount = ce.deposit_amount,
-                            is_active = ce.is_active,
-                            paper_code = ce.paper_code,
-                            paper_name = ce.paper_name ?? ce.paper_code,
-                            coating_type = ce.coating_type,
-                            wave_type = ce.wave_type,
-                            process_cost = g
-                                .Where(x => x.ProcessCost != null)
-                                .Select(x => new ProcessCostDetailDto
-                                {
-                                    process_cost_id = x.ProcessCost!.process_cost_id,
-                                    process_code = x.ProcessCost.process_code,
-                                    cost = x.ProcessCost.total_cost
-                                })
-                                .ToList()
-                        };
-                    })
-                    .ToList()
+                production_processes = SafeText(selectedEstimate?.production_processes),
+                coating_type = SafeText(selectedEstimate?.coating_type),
+                paper_code = SafeText(selectedEstimate?.paper_code),
+                paper_name = FirstText(selectedEstimate?.paper_name, selectedEstimate?.paper_code),
+                wave_type = SafeText(selectedEstimate?.wave_type),
+
+                product_length_mm = request.product_length_mm,
+                product_width_mm = request.product_width_mm,
+                product_height_mm = request.product_height_mm,
+                glue_tab_mm = request.glue_tab_mm,
+                bleed_mm = request.bleed_mm,
+                is_one_side_box = request.is_one_side_box,
+                print_width_mm = request.print_width_mm,
+                print_height_mm = request.print_height_mm,
+                reason = SafeText(request.reason),
+                note = SafeText(request.note),
+
+                cost_estimate = estimates.Select(ce =>
+                {
+                    var discountAmount = ce.discount_amount < 0m ? 0m : ce.discount_amount;
+                    var vatBase = Math.Max(ce.subtotal - discountAmount, 0m);
+                    var vatAmount = vatPercent <= 0m ? 0m : vatBase * vatPercent / 100m;
+
+                    return new CostEstimateDetailDto
+                    {
+                        estimate_id = ce.estimate_id,
+                        final_total_cost = ce.final_total_cost,
+                        deposit_amount = ce.deposit_amount,
+                        is_active = ce.is_active,
+
+                        paper_code = SafeText(ce.paper_code),
+                        paper_name = FirstText(ce.paper_name, ce.paper_code),
+                        coating_type = SafeText(ce.coating_type),
+                        wave_type = SafeText(ce.wave_type),
+                        production_processes = SafeText(ce.production_processes),
+                        cost_note = SafeText(ce.cost_note),
+
+                        paper_sheets_used = ce.paper_sheets_used,
+                        paper_unit_price = ce.paper_unit_price,
+
+                        ink_weight_kg = ce.ink_weight_kg,
+                        ink_rate_per_m2 = ce.ink_rate_per_m2,
+
+                        coating_glue_weight_kg = ce.coating_glue_weight_kg,
+                        coating_glue_rate_per_m2 = ce.coating_glue_rate_per_m2,
+
+                        mounting_glue_weight_kg = ce.mounting_glue_weight_kg,
+                        mounting_glue_rate_per_m2 = ce.mounting_glue_rate_per_m2,
+
+                        lamination_weight_kg = ce.lamination_weight_kg,
+                        lamination_rate_per_m2 = ce.lamination_rate_per_m2,
+
+                        paper_cost = ce.paper_cost,
+                        ink_cost = ce.ink_cost,
+                        coating_glue_cost = ce.coating_glue_cost,
+                        mounting_glue_cost = ce.mounting_glue_cost,
+                        lamination_cost = ce.lamination_cost,
+                        material_cost = ce.material_cost,
+
+                        base_cost = ce.base_cost,
+                        design_cost = ce.design_cost,
+                        subtotal = ce.subtotal,
+                        discount_percent = ce.discount_percent,
+                        discount_amount = discountAmount,
+                        vat_percent = vatPercent,
+                        vat_amount = vatAmount,
+
+                        process_cost = ce.process_costs
+                            .OrderBy(pc => pc.process_cost_id)
+                            .Select(pc => new ProcessCostDetailDto
+                            {
+                                process_cost_id = pc.process_cost_id,
+                                process_code = SafeText(pc.process_code),
+                                cost = pc.total_cost
+                            })
+                            .ToList()
+                    };
+                }).ToList()
             };
         }
 
@@ -805,6 +837,35 @@ namespace AMMS.Infrastructure.Repositories
                 .Where(x => x.order_request_id == requestId && x.is_active)
                 .OrderByDescending(x => x.estimate_id)
                 .ToListAsync(ct);
+        }
+
+        private static string SafeText(string? value)
+    => string.IsNullOrWhiteSpace(value) ? "" : value.Trim();
+
+        private static string FirstText(params string?[] values)
+        {
+            foreach (var value in values)
+            {
+                if (!string.IsNullOrWhiteSpace(value))
+                    return value.Trim();
+            }
+
+            return "";
+        }
+
+        private async Task<decimal> GetVatPercentAsync(CancellationToken ct = default)
+        {
+            var vat = await _db.estimate_config
+                .AsNoTracking()
+                .Where(x =>
+                    x.config_key == "vat_percent" &&
+                    (x.config_group == "systemParameters" || x.config_group == "system"))
+                .OrderByDescending(x => x.config_group == "systemParameters" ? 1 : 0)
+                .ThenByDescending(x => x.updated_at)
+                .Select(x => x.value_num)
+                .FirstOrDefaultAsync(ct);
+
+            return vat ?? 0m;
         }
     }
 }
