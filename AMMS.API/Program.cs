@@ -286,7 +286,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
         RecurringJob.AddOrUpdate<QuoteExpiryJob>(
             "quote-expiry-daily",
             job => job.RunAsync(CancellationToken.None),
-            Cron.Daily(),
+            Cron.Hourly(),
             vnTz
         );
     }
