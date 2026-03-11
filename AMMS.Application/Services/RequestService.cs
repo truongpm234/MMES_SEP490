@@ -135,12 +135,12 @@ namespace AMMS.Application.Services
             entity.print_width_mm = req.print_width_mm ?? entity.print_width_mm;
             entity.print_height_mm = req.print_height_mm ?? entity.print_height_mm;
             entity.is_send_design = req.is_send_design ?? entity.is_send_design;
+
             if (ce != null && !string.IsNullOrWhiteSpace(req.production_processes))
             {
                 ce.production_processes = req.production_processes.Trim();
             }
-            entity.process_status = "Pending";
-            
+
             if (ce != null)
             {
                 if (!string.IsNullOrWhiteSpace(req.paper_name))
@@ -152,6 +152,12 @@ namespace AMMS.Application.Services
                 if (!string.IsNullOrWhiteSpace(req.coating_type))
                     ce.coating_type = req.coating_type.Trim();
             }
+
+            entity.process_status = "Pending";
+            entity.verified_at = null;
+            entity.quote_expires_at = null;
+            entity.accepted_estimate_id = null;
+
             await _requestRepo.UpdateAsync(entity);
             await _requestRepo.SaveChangesAsync();
 
@@ -163,7 +169,6 @@ namespace AMMS.Application.Services
                 UpdatedAt = AppTime.NowVnUnspecified()
             };
         }
-
 
         public async Task CancelAsync(int id, string? reason, CancellationToken ct = default)
         {
@@ -594,7 +599,6 @@ namespace AMMS.Application.Services
 
             var st = (dto.status ?? "").Trim();
 
-            // Normalize
             st = st.Equals("verified", StringComparison.OrdinalIgnoreCase) ? "Verified" :
                  st.Equals("processing", StringComparison.OrdinalIgnoreCase) ? "Processing" :
                  st.Equals("declined", StringComparison.OrdinalIgnoreCase) ? "Declined" :
@@ -603,17 +607,33 @@ namespace AMMS.Application.Services
             if (st is not ("Processing" or "Verified" or "Declined"))
                 throw new ArgumentException("status must be Processing | Verified | Declined");
 
-            if ((st == "Verified" || st == "Declined") && !string.Equals(req.process_status, "Processing", StringComparison.OrdinalIgnoreCase))
+            if ((st == "Verified" || st == "Declined") &&
+                !string.Equals(req.process_status, "Processing", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("Request must be Processing before manager decision");
             }
+
+            var now = AppTime.NowVnUnspecified();
 
             req.process_status = st;
 
             if (dto.note != null)
                 req.note = dto.note;
+
+            if (st == "Verified")
+            {
+                req.verified_at = now;
+                req.quote_expires_at = now.AddDays(7);
+            }
+            else
+            {
+                req.verified_at = null;
+                req.quote_expires_at = null;
+            }
+
             if (st == "Declined")
             {
+                req.accepted_estimate_id = null;
                 await _estimateRepo.DeactivateAllByRequestIdAsync(dto.request_id, ct);
             }
 
@@ -624,7 +644,7 @@ namespace AMMS.Application.Services
                 old_status: oldStatus,
                 new_status: req.process_status,
                 action: (st == "Verified") ? "manager_verified" : "manager_declined",
-                changed_at: AppTime.NowVnUnspecified(),
+                changed_at: now,
                 changed_by: null
             ));
         }
@@ -671,12 +691,18 @@ namespace AMMS.Application.Services
             req.consultant_note = normalizedNote;
 
             req.process_status = "Processing";
+
+            req.verified_at = null;
+            req.quote_expires_at = null;
+            req.accepted_estimate_id = null;
+
             await _requestRepo.SaveChangesAsync();
+
             await _rt.PublishRequestNoteChangedAsync(new(
-        request_id: req.order_request_id,
-        consultant_note: req.consultant_note,
-        changed_at: AppTime.NowVnUnspecified()
-    ));
+                request_id: req.order_request_id,
+                consultant_note: req.consultant_note,
+                changed_at: AppTime.NowVnUnspecified()
+            ));
 
             await _rt.PublishRequestChangedAsync(new(
                 request_id: req.order_request_id,
@@ -741,7 +767,8 @@ namespace AMMS.Application.Services
 
                 note = null,
                 reason = null,
-
+                verified_at = null,
+                quote_expires_at = null,
                 consultant_note = source.consultant_note
             };
 

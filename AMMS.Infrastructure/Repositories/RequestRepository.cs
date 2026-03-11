@@ -68,7 +68,9 @@ namespace AMMS.Infrastructure.Repositories
                             is_send_design = r.is_send_design,
                             reason = r.reason,
                             final_total_cost = ce != null ? ce.final_total_cost : null,
-                            deposit_amount = ce != null ? ce.deposit_amount : null
+                            deposit_amount = ce != null ? ce.deposit_amount : null,
+                            verified_at = r.verified_at,
+                            quote_expires_at = r.quote_expires_at,
                         };
 
             return await query.FirstOrDefaultAsync();
@@ -677,7 +679,8 @@ namespace AMMS.Infrastructure.Repositories
                 print_height_mm = request.print_height_mm,
                 reason = SafeText(request.reason),
                 note = SafeText(request.note),
-
+                verified_at = request.verified_at,
+                quote_expires_at = request.quote_expires_at,
                 cost_estimate = estimates.Select(ce =>
                 {
                     var discountAmount = ce.discount_amount < 0m ? 0m : ce.discount_amount;
@@ -866,7 +869,6 @@ namespace AMMS.Infrastructure.Repositories
                 .ThenByDescending(x => x.updated_at)
                 .Select(x => x.value_num)
                 .FirstOrDefaultAsync(ct);
-
             return vat ?? 0m;
         }
     }

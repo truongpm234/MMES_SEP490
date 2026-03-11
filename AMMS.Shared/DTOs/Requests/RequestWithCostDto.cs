@@ -27,6 +27,8 @@ namespace AMMS.Shared.DTOs.Requests
         public string? paper_code { get; set; }
         public string? paper_name { get; set; }
         public string? wave_type { get; set; }
+        public DateTime? verified_at { get; set; }
+        public DateTime? quote_expires_at { get; set; }
         public int? order_id { get; set; }
         public int? quote_id { get; set; }
         public int? product_length_mm { get; set; }

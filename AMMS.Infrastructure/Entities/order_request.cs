@@ -63,6 +63,12 @@ public partial class order_request
 
     public string? consultant_note { get; set; }
 
+    [Column("verified_at")]
+    public DateTime? verified_at { get; set; }
+
+    [Column("quote_expire_at")]
+    public DateTime? quote_expires_at { get; set; }
+
     public virtual quote? quote { get; set; }
 
     public virtual order? order { get; set; }

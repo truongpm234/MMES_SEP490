@@ -215,6 +215,11 @@ namespace AMMS.API.Controllers
                 return Redirect($"{fe}/deal-invalid?orderRequestId={orderRequestId}&reason=rejected");
             }
 
+            var now = AppTime.NowVnUnspecified();
+            var validation = ValidateQuotePaymentWindow(req, now);
+            if (!validation.ok)
+                return BadRequest(new { message = validation.message, orderRequestId });
+
             var checkoutUrl = await _dealService.AcceptAndCreatePayOsLinkAsync(orderRequestId);
             return Redirect(checkoutUrl);
         }
@@ -567,8 +572,20 @@ namespace AMMS.API.Controllers
             if (req == null)
                 return (false, $"order_request_id={orderRequestId} not found");
 
+            var now = AppTime.NowVnUnspecified();
+
+            var validation = ValidateQuotePaymentWindow(req, now);
+            if (!validation.ok)
+            {
+                if (!(req.order_id != null &&
+                      string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return (false, validation.message);
+                }
+            }
+
             if (req.order_id != null &&
-    string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase))
+                string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase))
             {
                 var alreadyPaid = await _db.payments
                     .AsNoTracking()
@@ -612,10 +629,15 @@ namespace AMMS.API.Controllers
             if (est == null)
                 return (false, "Cost estimate not found for paid payment");
 
-            var expiredAt = est.created_at.AddHours(24);
+            // IMPORTANT: không dùng est.created_at nữa
+            if (!req.quote_expires_at.HasValue)
+                return (false, "Quote expiry time not found");
 
-            if (AppTime.NowVnUnspecified() > expiredAt.ToUniversalTime())
-                return (false, $"Quote expired at {expiredAt:o}, ignore payment.");
+            if (now > req.quote_expires_at.Value &&
+                !(req.order_id != null && string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase)))
+            {
+                return (false, $"Quote expired at {req.quote_expires_at:yyyy-MM-dd HH:mm:ss}, ignore payment.");
+            }
 
             if (req.accepted_estimate_id == null)
                 req.accepted_estimate_id = est.estimate_id;
@@ -627,7 +649,6 @@ namespace AMMS.API.Controllers
             if (resolvedQuoteId > 0)
                 req.quote_id = resolvedQuoteId;
 
-            // Chỉ sau khi validate thành công mới update các estimate / quote khác
             await _db.cost_estimates
                 .Where(x => x.order_request_id == orderRequestId)
                 .ExecuteUpdateAsync(setters => setters
@@ -671,8 +692,6 @@ namespace AMMS.API.Controllers
                 hasTasks = await _db.tasks.AsNoTracking()
                     .AnyAsync(t => t.prod_id == prod.prod_id, ct);
             }
-
-            var now = AppTime.NowVnUnspecified();
 
             if (prod == null || !hasTasks)
             {
@@ -818,6 +837,19 @@ namespace AMMS.API.Controllers
                     });
                 }
 
+                var now = AppTime.NowVnUnspecified();
+                var validation = ValidateQuotePaymentWindow(req, now);
+                if (!validation.ok)
+                {
+                    return BadRequest(new
+                    {
+                        message = validation.message,
+                        request_id,
+                        verified_at = req.verified_at,
+                        quote_expires_at = req.quote_expires_at
+                    });
+                }
+
                 var est = await _db.cost_estimates
                     .AsNoTracking()
                     .FirstOrDefaultAsync(x => x.estimate_id == estimate_id && x.order_request_id == request_id, ct);
@@ -832,14 +864,8 @@ namespace AMMS.API.Controllers
                 if (quote == null)
                     return BadRequest(new { message = "Quote not found" });
 
-                var nowUtc = AppTime.NowVnUnspecified();
-                var expiredAtUtc = quote.created_at.AddHours(24);
-
-                if (nowUtc > expiredAtUtc)
-                    return BadRequest(new { message = "Quote expired" });
-
                 var dto = await _dealService.CreateOrReuseDepositLinkAsync(request_id, estimate_id, quote_id, ct);
-                dto.expired_at = expiredAtUtc;
+                dto.expired_at = req.quote_expires_at;
                 dto.status ??= "PENDING";
 
                 return Ok(dto);
@@ -894,6 +920,29 @@ namespace AMMS.API.Controllers
                 return NotFound(new { message = "Order request not found" });
 
             return Ok(dto);
+        }
+
+        private static bool IsPayableStatus(string? status)
+        {
+            return string.Equals(status, "Verified", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status, "Accepted", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static (bool ok, string message) ValidateQuotePaymentWindow(order_request req, DateTime now)
+        {
+            if (!IsPayableStatus(req.process_status))
+                return (false, "Only request with process_status = Verified can start payment");
+
+            if (!req.verified_at.HasValue)
+                return (false, "Request has not been manager-approved yet");
+
+            if (!req.quote_expires_at.HasValue)
+                return (false, "Quote expiry time has not been initialized");
+
+            if (now > req.quote_expires_at.Value)
+                return (false, $"Quote expired at {req.quote_expires_at:yyyy-MM-dd HH:mm:ss}");
+
+            return (true, "");
         }
     }
 }

@@ -39,7 +39,8 @@
 
         public string reason { get; set; } = "";
         public string note { get; set; } = "";
-
+        public DateTime? verified_at { get; set; }
+        public DateTime? quote_expires_at { get; set; }
         public List<CostEstimateDetailDto> cost_estimate { get; set; } = new();
     }
 
