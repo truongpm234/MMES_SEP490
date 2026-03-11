@@ -23,6 +23,8 @@ public partial class production
 
     public int? product_type_id { get; set; }
 
+    public string? note { get; set; }
+
     public virtual user? manager { get; set; }
 
     public virtual order? order { get; set; }

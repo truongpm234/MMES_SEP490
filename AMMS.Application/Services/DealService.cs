@@ -494,11 +494,16 @@ namespace AMMS.Application.Services
       </table>
 
       <div style='margin-top: 30px; border-top: 1px solid #f1f5f9; padding-top: 20px; text-align: center;'>
-         <p style='color: #64748b; font-size: 13px; line-height: 1.5; margin: 0;'>
-            Đơn hàng của bạn đang được xử lý. <br>
-            Bạn có thể tra cứu tiến trình đơn hàng thông qua <a href='{fe}/look-up' style='color: #2563eb; text-decoration: none; font-weight: 600;'>Link</a>.
-         </p>
-      </div>
+   <p style='color: #64748b; font-size: 13px; line-height: 1.5; margin: 0 0 8px 0;'>
+      Đơn hàng của bạn đang được xử lý.
+   </p>
+   <p style='color: #64748b; font-size: 13px; line-height: 1.5; margin: 0 0 8px 0;'>
+      Bạn có thể tra cứu tiến trình đơn hàng bằng cách copy đường dẫn bên dưới và dán vào trình duyệt:
+   </p>
+   <p style='color: #0f172a; font-size: 12px; line-height: 1.6; margin: 0; background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; word-break:break-all; user-select:all; -webkit-user-select:all;'>
+      {fe}/look-up
+   </p>
+</div>
 
     </div>
     
