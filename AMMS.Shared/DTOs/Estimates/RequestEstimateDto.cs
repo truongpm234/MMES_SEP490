@@ -9,6 +9,7 @@ namespace AMMS.Shared.DTOs.Estimates
     public class RequestEstimateDto
     {
         public int order_request_id { get; set; }
+        public int? previous_estimate_id { get; set; }
         public string? customer_name { get; set; }
         public string? customer_phone { get; set; }
         public string? customer_email { get; set; }

@@ -46,6 +46,7 @@
     public class CostEstimateDetailDto
     {
         public int estimate_id { get; set; }
+        public int? previous_estimate_id { get; set; }
         public decimal final_total_cost { get; set; }
         public decimal deposit_amount { get; set; }
         public bool is_active { get; set; }

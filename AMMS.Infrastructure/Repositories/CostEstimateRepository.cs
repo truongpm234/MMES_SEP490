@@ -93,6 +93,7 @@ namespace AMMS.Infrastructure.Repositories
                 select new RequestEstimateDto
                 {
                     order_request_id = r.order_request_id,
+                    previous_estimate_id = ce.previous_estimate_id,
                     customer_name = r.customer_name,
                     customer_phone = r.customer_phone,
                     customer_email = r.customer_email,

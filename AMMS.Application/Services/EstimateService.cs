@@ -67,11 +67,27 @@ namespace AMMS.Application.Services
             if (orderReq == null)
                 throw new Exception("Order request not found");
 
+            cost_estimate? previousEstimate = null;
+
+            if (req.previous_estimate_id.HasValue)
+            {
+                previousEstimate = await _estimateRepo.GetByIdAsync(req.previous_estimate_id.Value);
+                if (previousEstimate == null)
+                    throw new ArgumentException("previous_estimate_id not found");
+
+                if (previousEstimate.order_request_id != req.order_request_id)
+                    throw new ArgumentException("previous_estimate_id must belong to the same order_request_id");
+            }
+
             var now = AppTime.NowVnUnspecified();
 
             var entity = new cost_estimate
             {
                 order_request_id = req.order_request_id,
+
+                // mới thêm
+                previous_estimate_id = previousEstimate?.estimate_id,
+
                 created_at = ToUnspecified(req.created_at ?? now),
                 is_active = true,
                 estimated_finish_date = ToUnspecified(req.estimated_finish_date ?? now),
@@ -79,27 +95,24 @@ namespace AMMS.Application.Services
                 desired_delivery_date = ToUnspecified(req.desired_delivery_date ?? (orderReq.delivery_date ?? now)),
             };
 
-            // helper
             static void SetIfHasValue<T>(T? value, Action<T> setter) where T : struct
             {
                 if (value.HasValue) setter(value.Value);
             }
+
             static void SetIfNotNull(string? value, Action<string> setter)
             {
                 if (value != null) setter(value);
             }
 
-            // ----- PAPER -----
             SetIfHasValue(req.paper_cost, v => entity.paper_cost = v);
             SetIfHasValue(req.paper_sheets_used, v => entity.paper_sheets_used = v);
             SetIfHasValue(req.paper_unit_price, v => entity.paper_unit_price = v);
 
-            // ----- INK -----
             SetIfHasValue(req.ink_cost, v => entity.ink_cost = v);
             SetIfHasValue(req.ink_weight_kg, v => entity.ink_weight_kg = v);
             SetIfHasValue(req.ink_rate_per_m2, v => entity.ink_rate_per_m2 = v);
 
-            // ----- COATING GLUE -----
             SetIfHasValue(req.coating_glue_cost, v => entity.coating_glue_cost = v);
             SetIfHasValue(req.coating_glue_weight_kg, v => entity.coating_glue_weight_kg = v);
             SetIfHasValue(req.coating_glue_rate_per_m2, v => entity.coating_glue_rate_per_m2 = v);
@@ -108,42 +121,33 @@ namespace AMMS.Application.Services
             SetIfNotNull(req.coating_type, v => entity.coating_type = v);
             SetIfNotNull(req.wave_type, v => entity.wave_type = v);
 
-            // ----- MOUNTING GLUE -----
             SetIfHasValue(req.mounting_glue_cost, v => entity.mounting_glue_cost = v);
             SetIfHasValue(req.mounting_glue_weight_kg, v => entity.mounting_glue_weight_kg = v);
             SetIfHasValue(req.mounting_glue_rate_per_m2, v => entity.mounting_glue_rate_per_m2 = v);
 
-            // ----- LAMINATION -----
             SetIfHasValue(req.lamination_cost, v => entity.lamination_cost = v);
             SetIfHasValue(req.lamination_weight_kg, v => entity.lamination_weight_kg = v);
             SetIfHasValue(req.lamination_rate_per_m2, v => entity.lamination_rate_per_m2 = v);
 
-            // ----- MATERIAL / OVERHEAD -----
             SetIfHasValue(req.material_cost, v => entity.material_cost = v);
-            //SetIfHasValue(req.overhead_percent, v => entity.overhead_percent = v);
-            //SetIfHasValue(req.overhead_cost, v => entity.overhead_cost = v);
             SetIfHasValue(req.base_cost, v => entity.base_cost = v);
 
-            // ----- RUSH -----
             if (req.is_rush.HasValue) entity.is_rush = req.is_rush.Value;
             SetIfHasValue(req.rush_percent, v => entity.rush_percent = v);
             SetIfHasValue(req.rush_amount, v => entity.rush_amount = v);
             SetIfHasValue(req.days_early, v => entity.days_early = v);
 
-            // ----- SUBTOTAL / DISCOUNT / FINAL -----
             SetIfHasValue(req.subtotal, v => entity.subtotal = v);
             SetIfHasValue(req.discount_percent, v => entity.discount_percent = v);
             SetIfHasValue(req.discount_amount, v => entity.discount_amount = v);
             SetIfHasValue(req.final_total_cost, v => entity.final_total_cost = v);
 
-            // ----- SHEETS / AREA -----
             SetIfHasValue(req.sheets_required, v => entity.sheets_required = v);
             SetIfHasValue(req.sheets_waste, v => entity.sheets_waste = v);
             SetIfHasValue(req.sheets_total, v => entity.sheets_total = v);
             SetIfHasValue(req.n_up, v => entity.n_up = v);
             SetIfHasValue(req.total_area_m2, v => entity.total_area_m2 = v);
 
-            // ----- DESIGN -----
             SetIfHasValue(req.design_cost, v => entity.design_cost = v);
             SetIfNotNull(req.cost_note, v => entity.cost_note = v);
 

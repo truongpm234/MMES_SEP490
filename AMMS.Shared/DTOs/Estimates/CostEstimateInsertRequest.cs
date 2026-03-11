@@ -9,6 +9,7 @@ namespace AMMS.Shared.DTOs.Estimates
     public class CostEstimateInsertRequest
     {
         public int order_request_id { get; set; }
+        public int? previous_estimate_id { get; set; }
 
         // ----- Giấy -----
         public decimal? paper_cost { get; set; }

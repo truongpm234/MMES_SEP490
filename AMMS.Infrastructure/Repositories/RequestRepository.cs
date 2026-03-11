@@ -687,6 +687,7 @@ namespace AMMS.Infrastructure.Repositories
                     return new CostEstimateDetailDto
                     {
                         estimate_id = ce.estimate_id,
+                        previous_estimate_id = ce.previous_estimate_id,
                         final_total_cost = ce.final_total_cost,
                         deposit_amount = ce.deposit_amount,
                         is_active = ce.is_active,
@@ -783,6 +784,7 @@ namespace AMMS.Infrastructure.Repositories
                 .Select(e => new CostEstimateCompareDto
                 {
                     estimate_id = e.estimate_id,
+                    previous_estimate_id = e.previous_estimate_id,
                     is_active = e.is_active,
                     paper_cost = e.paper_cost,
                     ink_cost = e.ink_cost,

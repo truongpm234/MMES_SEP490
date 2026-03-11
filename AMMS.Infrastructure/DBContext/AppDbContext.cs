@@ -423,6 +423,7 @@ public partial class AppDbContext : DbContext
         modelBuilder.Entity<cost_estimate>(entity =>
         {
             entity.HasKey(e => e.estimate_id).HasName("cost_estimate_pkey");
+
             entity.Property(e => e.paper_cost).HasPrecision(18, 2);
             entity.Property(e => e.paper_sheets_used).HasDefaultValue(0);
             entity.Property(e => e.paper_unit_price).HasPrecision(18, 2).HasDefaultValue(0);
@@ -449,29 +450,49 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.discount_percent).HasPrecision(5, 2).HasDefaultValue(0);
             entity.Property(e => e.discount_amount).HasPrecision(18, 2).HasDefaultValue(0);
             entity.Property(e => e.final_total_cost).HasPrecision(18, 2).HasDefaultValue(0);
+
             entity.Property(e => e.created_at)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP")
                 .HasColumnType("timestamp without time zone");
+
             entity.Property(e => e.estimated_finish_date)
                 .HasColumnType("timestamp without time zone");
+
             entity.Property(e => e.desired_delivery_date)
                 .HasColumnType("timestamp without time zone");
+
             entity.Property(e => e.sheets_required).HasDefaultValue(0);
             entity.Property(e => e.sheets_waste).HasDefaultValue(0);
             entity.Property(e => e.sheets_total).HasDefaultValue(0);
             entity.Property(e => e.total_area_m2).HasPrecision(18, 4).HasDefaultValue(0);
+
             entity.HasOne(d => d.order_request)
                 .WithMany()
                 .HasForeignKey(d => d.order_request_id)
                 .OnDelete(DeleteBehavior.Cascade)
                 .HasConstraintName("fk_cost_estimate_order_request");
+
             entity.Property(x => x.deposit_amount)
-            .HasColumnName("deposit_amount")
-            .HasColumnType("numeric(18,2)")
-            .HasComputedColumnSql("ROUND(final_total_cost * 0.30, 0)", stored: true)
-            .ValueGeneratedOnAddOrUpdate();
+                .HasColumnName("deposit_amount")
+                .HasColumnType("numeric(18,2)")
+                .HasComputedColumnSql("ROUND(final_total_cost * 0.30, 0)", stored: true)
+                .ValueGeneratedOnAddOrUpdate();
+
             entity.Property(x => x.deposit_amount).Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
             entity.Property(x => x.deposit_amount).Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Ignore);
+
+            entity.Property(e => e.previous_estimate_id)
+                .HasColumnName("previous_estimate_id");
+
+            entity.HasAlternateKey(e => new { e.estimate_id, e.order_request_id })
+                .HasName("uq_cost_estimate_estimate_id_order_request_id");
+
+            entity.HasOne(e => e.previous_estimate)
+                .WithMany(e => e.revised_estimates)
+                .HasForeignKey(e => new { e.previous_estimate_id, e.order_request_id })
+                .HasPrincipalKey(e => new { e.estimate_id, e.order_request_id })
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("fk_cost_estimate_previous_estimate_same_request");
         });
 
         modelBuilder.Entity<supplier_material>(entity =>

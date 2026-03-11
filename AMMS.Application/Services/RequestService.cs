@@ -748,12 +748,15 @@ namespace AMMS.Application.Services
             await _requestRepo.SaveChangesAsync();
 
             var clonedEstimateIds = new List<int>();
+            var clonedEstimateMap = new Dictionary<int, cost_estimate>();
 
-            foreach (var est in activeEstimates)
+            foreach (var est in activeEstimates.OrderBy(x => x.estimate_id))
             {
                 var clonedEstimate = new cost_estimate
                 {
                     order_request_id = clonedRequest.order_request_id,
+
+                    previous_estimate_id = null,
 
                     paper_cost = est.paper_cost,
                     paper_sheets_used = est.paper_sheets_used,
@@ -832,7 +835,24 @@ namespace AMMS.Application.Services
                 await _estimateRepo.SaveChangesAsync();
 
                 clonedEstimateIds.Add(clonedEstimate.estimate_id);
+                clonedEstimateMap[est.estimate_id] = clonedEstimate;
             }
+
+            foreach (var oldEst in activeEstimates)
+            {
+                if (!oldEst.previous_estimate_id.HasValue)
+                    continue;
+
+                if (!clonedEstimateMap.TryGetValue(oldEst.estimate_id, out var newEst))
+                    continue;
+
+                if (!clonedEstimateMap.TryGetValue(oldEst.previous_estimate_id.Value, out var newPrevEst))
+                    continue;
+
+                newEst.previous_estimate_id = newPrevEst.estimate_id;
+            }
+
+            await _estimateRepo.SaveChangesAsync();
 
             await _rt.PublishRequestChangedAsync(new(
                 request_id: clonedRequest.order_request_id,
