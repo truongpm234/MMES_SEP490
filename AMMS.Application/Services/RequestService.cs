@@ -294,6 +294,7 @@ namespace AMMS.Application.Services
                             RequestId = requestId
                         };
                     }
+                    var normalizedProcessCsv = await NormalizeProductionProcessCsvAsync(productTypeId.Value, est.production_processes);
 
                     var newOrder = new order
                     {
@@ -325,7 +326,7 @@ namespace AMMS.Application.Services
                         design_url = req.design_file_path,
                         product_type_id = productTypeId,
                         paper_code = est.paper_code,
-                        production_process = est.production_processes,
+                        production_process = normalizedProcessCsv,
                         paper_name = est.paper_name,
                         glue_type = est.coating_type,
                         wave_type = est.wave_type,
@@ -870,6 +871,25 @@ namespace AMMS.Application.Services
                 cloned_estimate_ids = clonedEstimateIds,
                 message = "Cloned request successfully"
             };
+        }
+
+        private async Task<string> NormalizeProductionProcessCsvAsync(
+    int productTypeId,
+    string? rawCsv,
+    CancellationToken ct = default)
+        {
+            var allSteps = await _db.product_type_processes
+                .AsNoTracking()
+                .Where(x => x.product_type_id == productTypeId && (x.is_active ?? true))
+                .OrderBy(x => x.seq_num)
+                .ToListAsync(ct);
+
+            var selected = ProductionProcessSelectionHelper.ResolveFixedRoute(
+                allSteps,
+                x => x.process_code,
+                rawCsv);
+
+            return ProductionProcessSelectionHelper.BuildCsv(selected, x => x.process_code);
         }
     }
 }
