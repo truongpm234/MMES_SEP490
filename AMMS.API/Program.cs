@@ -300,7 +300,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "AMMS API V1");
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "MES API");
     c.RoutePrefix = "swagger";
     c.DefaultModelsExpandDepth(-1);
     c.DisplayRequestDuration();

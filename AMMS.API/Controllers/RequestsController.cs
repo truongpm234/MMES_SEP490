@@ -323,7 +323,7 @@ namespace AMMS.API.Controllers
             if (req == null)
                 return NotFound(new { message = "Order request not found" });
 
-            // 2) Không cho reject nếu đã Accepted
+            // 2) chanự reject nếu accept rồi
             if (string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase))
                 return BadRequest(new { message = "Order has already been accepted, cannot reject." });
 
@@ -339,7 +339,7 @@ namespace AMMS.API.Controllers
             if (string.IsNullOrWhiteSpace(phone))
                 return BadRequest(new { message = "Customer phone is missing, cannot verify OTP." });
 
-            // 5) Verify OTP qua SMS service
+            // 5) Verify OTP qua SMS
             var verifyReq = new VerifyOtpSmsRequest(phone, dto.otp);
 
             var verifyRes = await _smsOtp.VerifyOtpAsync(verifyReq, ct);
@@ -629,7 +629,6 @@ namespace AMMS.API.Controllers
             if (est == null)
                 return (false, "Cost estimate not found for paid payment");
 
-            // IMPORTANT: không dùng est.created_at nữa
             if (!req.quote_expires_at.HasValue)
                 return (false, "Quote expiry time not found");
 
