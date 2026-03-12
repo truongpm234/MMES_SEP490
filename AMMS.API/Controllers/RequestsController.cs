@@ -924,13 +924,13 @@ namespace AMMS.API.Controllers
         private static bool IsPayableStatus(string? status)
         {
             return string.Equals(status, "Verified", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(status, "Accepted", StringComparison.OrdinalIgnoreCase);
+                || string.Equals(status, "Waiting", StringComparison.OrdinalIgnoreCase);
         }
 
         private static (bool ok, string message) ValidateQuotePaymentWindow(order_request req, DateTime now)
         {
             if (!IsPayableStatus(req.process_status))
-                return (false, "Only request with process_status = Verified can start payment");
+                return (false, "Only request with process_status is verified or waiting can start payment");
 
             if (!req.verified_at.HasValue)
                 return (false, "Request has not been manager-approved yet");
