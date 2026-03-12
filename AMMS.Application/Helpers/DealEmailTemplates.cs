@@ -102,7 +102,7 @@ namespace AMMS.Application.Helpers
             var discountAmount = est.discount_amount;
             var deposit = est.deposit_amount;
 
-            var expiredAt = q.created_at.AddHours(24);
+            var expiredAt = ResolveQuoteExpiredAt(req, q);
             bool isCustomerCopy = !string.IsNullOrEmpty(orderDetailUrl);
 
             string FormatVND(decimal? amount) => string.Format("{0:N0} đ", amount ?? 0).Replace(",", ".");
@@ -331,7 +331,7 @@ namespace AMMS.Application.Helpers
             var left = pairs[0];
             var right = pairs.Count > 1 ? pairs[1] : ((cost_estimate est, quote q, string? checkoutUrl)?)null;
 
-            var expiredAt = left.q.created_at.AddHours(24);
+            var expiredAt = ResolveQuoteExpiredAt(req, left.q);
             var expiryBox = QuoteExpiryNotice(expiredAt, includeAutoReject: true);
 
             var leftHtml = QuoteEmailInner(req, left.est, left.q, left.checkoutUrl, showAction: false);
@@ -339,8 +339,6 @@ namespace AMMS.Application.Helpers
                 ? QuoteEmailInner(req, right.Value.est, right.Value.q, right.Value.checkoutUrl, showAction: false)
                 : "";
 
-            // Nếu có checkoutUrl -> email khách hàng
-            // Nếu tất cả checkoutUrl đều null -> email copy consultant
             var isCustomerCopy = pairs.Any(x => !string.IsNullOrWhiteSpace(x.checkoutUrl));
 
             string sharedAction = "";
@@ -479,13 +477,24 @@ namespace AMMS.Application.Helpers
 <div style='{wrap}'>
   <p style='{title}'>⏳ Lưu ý quan trọng về thời hạn báo giá</p>
   <p style='{text}'>
-    Báo giá này có hiệu lực đến <b>{expiredAt:dd/MM/yyyy HH:mm}</b> (trong vòng <b>24 giờ</b> kể từ thời điểm gửi).
+    Báo giá này có hiệu lực đến <b>{expiredAt:dd/MM/yyyy HH:mm}</b>.
     {autoRejectLine}
   </p>
   <p style='{small}'>
     Sau khi hết hạn, bạn vẫn có thể yêu cầu tạo báo giá mới — chi phí và thời gian giao hàng có thể thay đổi theo thời điểm.
   </p>
 </div>";
+        }
+
+        private static DateTime ResolveQuoteExpiredAt(order_request req, quote q)
+        {
+            if (req.quote_expires_at.HasValue)
+                return req.quote_expires_at.Value;
+
+            if (req.verified_at.HasValue)
+                return req.verified_at.Value.AddDays(7);
+
+            return q.created_at.AddDays(7);
         }
     }
 }

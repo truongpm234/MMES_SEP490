@@ -187,5 +187,22 @@ namespace AMMS.Infrastructure.Repositories
                     setters.SetProperty(x => x.is_active, false),
                     ct);
         }
+
+        public async Task NormalizeActiveDraftEstimatesAsync(int orderRequestId, int currentEstimateId, CancellationToken ct = default)
+        {
+            var keepIds = await _db.cost_estimates
+                .AsNoTracking()
+                .Where(x => x.order_request_id == orderRequestId &&
+                            (x.is_active || x.estimate_id == currentEstimateId))
+                .OrderByDescending(x => x.estimate_id)
+                .Select(x => x.estimate_id)
+                .Take(2)
+                .ToListAsync(ct);
+
+            await _db.cost_estimates
+                .Where(x => x.order_request_id == orderRequestId)
+                .ExecuteUpdateAsync(setters =>
+                    setters.SetProperty(x => x.is_active, x => keepIds.Contains(x.estimate_id)), ct);
+        }
     }
 }

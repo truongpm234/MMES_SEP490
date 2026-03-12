@@ -91,7 +91,7 @@ namespace AMMS.Application.Services
                 created_at = ToUnspecified(req.created_at ?? now),
                 is_active = true,
                 estimated_finish_date = ToUnspecified(req.estimated_finish_date ?? now),
-                production_processes = req.production_processes.Trim(),
+                production_processes = req.production_processes?.Trim(),
                 desired_delivery_date = ToUnspecified(req.desired_delivery_date ?? (orderReq.delivery_date ?? now)),
             };
 
@@ -219,7 +219,7 @@ namespace AMMS.Application.Services
 
             await _estimateRepo.AddAsync(entity);
             await _estimateRepo.SaveChangesAsync();
-
+            await _estimateRepo.NormalizeActiveDraftEstimatesAsync(entity.order_request_id, entity.estimate_id, ct);
             return entity.estimate_id;
         }
 
