@@ -40,8 +40,8 @@ namespace AMMS.Application.Services
             return Task.FromResult(result);
         }
 
-        public Task<PagedResultLite<ProducingOrderCardDto>> GetProducingOrdersAsync(int page, int pageSize, CancellationToken ct = default)
-           => _repo.GetProducingOrdersAsync(page, pageSize, ct);
+        public Task<PagedResultLite<ProducingOrderCardDto>> GetProducingOrdersAsync(int page, int pageSize, int? roleId, CancellationToken ct = default)
+           => _repo.GetProducingOrdersAsync(page, pageSize, roleId, ct);
 
         public async Task<ProductionProgressResponse> GetProgressAsync(int prodId)
         {

@@ -67,13 +67,16 @@ namespace AMMS.API.Controllers
             return Ok(data);
         }
 
+        [Authorize]
         [HttpGet("get-all-production")]
         public async Task<IActionResult> GetProducingOrders(
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 10,
             CancellationToken ct = default)
         {
-            var result = await _service.GetProducingOrdersAsync(page, pageSize, ct);
+            var roleId = GetRoleId();
+
+            var result = await _service.GetProducingOrdersAsync(page, pageSize, roleId, ct);
             return Ok(result);
         }
 

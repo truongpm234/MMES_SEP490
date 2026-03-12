@@ -2,6 +2,7 @@
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Common;
+using AMMS.Shared.DTOs.Helpers;
 using AMMS.Shared.DTOs.Productions;
 using Microsoft.EntityFrameworkCore;
 
@@ -40,7 +41,11 @@ namespace AMMS.Infrastructure.Repositories
         public Task<production?> GetByIdAsync(int prodId)
             => _db.productions.FirstOrDefaultAsync(x => x.prod_id == prodId);
 
-        public async Task<PagedResultLite<ProducingOrderCardDto>> GetProducingOrdersAsync(int page, int pageSize, CancellationToken ct = default)
+        public async Task<PagedResultLite<ProducingOrderCardDto>> GetProducingOrdersAsync(
+    int page,
+    int pageSize,
+    int? roleId,
+    CancellationToken ct = default)
         {
             NormalizePaging(ref page, ref pageSize);
             var skip = (page - 1) * pageSize;
@@ -170,24 +175,40 @@ namespace AMMS.Infrastructure.Repositories
                     r.first_item_production_process
                 );
 
-                var stages = steps
+                var visibleSteps = ProductionSHelper.FilterStepsByRole(steps, roleId);
+
+                if (visibleSteps.Count == 0)
+                    continue;
+
+                var visibleSeqs = visibleSteps
+                    .Select(x => x.SeqNum)
+                    .ToHashSet();
+
+                var visibleTasks = tasks
+                    .Where(x => x.SeqNum.HasValue && visibleSeqs.Contains(x.SeqNum.Value))
+                    .OrderBy(x => x.SeqNum ?? int.MaxValue)
+                    .ToList();
+
+                var stages = visibleSteps
                     .Select(s => s.ProcessName)
                     .Where(s => !string.IsNullOrWhiteSpace(s))
                     .ToList();
 
-                var currentSeq = GetCurrentSeq(tasks);
+                var currentSeq = GetCurrentSeq(visibleTasks);
 
                 string? currentStage = null;
                 if (currentSeq.HasValue)
                 {
-                    currentStage = steps.FirstOrDefault(x => x.SeqNum == currentSeq.Value)?.ProcessName;
+                    currentStage = visibleSteps
+                        .FirstOrDefault(x => x.SeqNum == currentSeq.Value)?
+                        .ProcessName;
                 }
-                else if (tasks.Count > 0 && tasks.All(x => x.EndTime != null))
+                else if (visibleTasks.Count > 0 && visibleTasks.All(x => x.EndTime != null))
                 {
                     currentStage = stages.LastOrDefault();
                 }
 
-                var progress = ComputeProgressByStages(steps, currentSeq, tasks);
+                var progress = ComputeProgressByStages(visibleSteps, currentSeq, visibleTasks);
 
                 result.Add(new ProducingOrderCardDto
                 {

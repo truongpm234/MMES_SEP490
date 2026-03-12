@@ -15,7 +15,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task AddAsync(production p);
         Task SaveChangesAsync();
         Task<production?> GetByIdAsync(int prodId);
-        Task<PagedResultLite<ProducingOrderCardDto>> GetProducingOrdersAsync( int page, int pageSize, CancellationToken ct = default);
+        Task<PagedResultLite<ProducingOrderCardDto>> GetProducingOrdersAsync( int page, int pageSize, int? roleId, CancellationToken ct = default);
         Task<ProductionProgressResponse> GetProgressAsync(int prodId);
         Task<ProductionDetailDto?> GetProductionDetailByOrderIdAsync(int orderId, CancellationToken ct = default);
         Task<ProductionWasteReportDto?> GetProductionWasteAsync(int prodId, CancellationToken ct = default);
