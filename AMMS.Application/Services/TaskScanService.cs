@@ -17,6 +17,7 @@ namespace AMMS.Application.Services
         private readonly ITaskLogRepository _logRepo;
         private readonly IProductionRepository _prodRepo;
         private readonly IMachineRepository _machineRepo;
+        private readonly IProductionSchedulingService _scheduling;
         private readonly IHubContext<RealtimeHub> _hub;
 
         public TaskScanService(
@@ -25,7 +26,9 @@ namespace AMMS.Application.Services
             ITaskRepository taskRepo,
             ITaskLogRepository logRepo,
             IProductionRepository productionRepo,
-            IMachineRepository machineRepo, IHubContext<RealtimeHub> hub)
+            IMachineRepository machineRepo,
+            IProductionSchedulingService scheduling,
+            IHubContext<RealtimeHub> hub)
         {
             _db = db;
             _tokenSvc = tokenSvc;
@@ -33,6 +36,7 @@ namespace AMMS.Application.Services
             _logRepo = logRepo;
             _prodRepo = productionRepo;
             _machineRepo = machineRepo;
+            _scheduling = scheduling;
             _hub = hub;
         }
 
@@ -61,10 +65,13 @@ namespace AMMS.Application.Services
 
                     if (!string.Equals(t.status, "Ready", StringComparison.OrdinalIgnoreCase) &&
                         !string.Equals(t.status, "InProgress", StringComparison.OrdinalIgnoreCase))
+                    {
                         throw new Exception($"Task status '{t.status}' is not scannable");
+                    }
 
-                    var now = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
+                    var now = AppTime.NowVnUnspecified();
 
+                    // release machine of current task
                     if (!string.IsNullOrWhiteSpace(t.machine))
                         await _machineRepo.ReleaseAsync(t.machine!, release: 1);
 
@@ -81,33 +88,6 @@ namespace AMMS.Application.Services
                     };
 
                     await _logRepo.AddAsync(log);
-
-                    var next = await _taskRepo.GetNextTaskAsync(t.prod_id.Value, t.seq_num.Value);
-                    if (next != null && string.Equals(next.status, "Unassigned", StringComparison.OrdinalIgnoreCase))
-                    {
-                        next.status = "Ready";
-                        next.start_time ??= now;
-
-                        // ✅ nếu chưa có máy thì auto chọn theo process_code
-                        if (string.IsNullOrWhiteSpace(next.machine))
-                        {
-                            var pcode = await _db.product_type_processes.AsNoTracking()
-                                .Where(x => x.process_id == next.process_id)
-                                .Select(x => x.process_code)
-                                .FirstOrDefaultAsync();
-
-                            pcode = (pcode ?? "").Trim().ToUpperInvariant();
-                            if (!string.IsNullOrWhiteSpace(pcode))
-                            {
-                                var best = await _machineRepo.FindBestMachineByProcessCodeAsync(pcode, CancellationToken.None);
-                                next.machine = best?.machine_code;
-                            }
-                        }
-
-                        if (!string.IsNullOrWhiteSpace(next.machine))
-                            await _machineRepo.AllocateAsync(next.machine!, need: 1);
-                    }
-
 
                     await _taskRepo.SaveChangesAsync();
                     await _logRepo.SaveChangesAsync();
@@ -127,8 +107,8 @@ namespace AMMS.Application.Services
                             .AsTracking()
                             .FirstOrDefaultAsync(o => o.order_id == prod.order_id.Value);
 
-                        if (order != null
-                            && !string.Equals(order.status, "Finished", StringComparison.OrdinalIgnoreCase))
+                        if (order != null &&
+                            !string.Equals(order.status, "Finished", StringComparison.OrdinalIgnoreCase))
                         {
                             order.status = "Finished";
                             await _db.SaveChangesAsync();
@@ -136,32 +116,27 @@ namespace AMMS.Application.Services
                     }
 
                     await tx.CommitAsync();
+
+                    // Sau khi finish xong mới dispatch task kế tiếp / task đang chờ máy
+                    try { await _scheduling.DispatchDueTasksAsync(); } catch { }
+
                     await _hub.Clients
-                    .Group($"prod-{t.prod_id}")
-                    .SendAsync("ProdUpdated", new
-                    {
-                        prodId = t.prod_id,
-                        taskId = t.task_id,
-                        status = "Finished"
-                    });
+                        .Group($"prod-{t.prod_id}")
+                        .SendAsync("ProdUpdated", new
+                        {
+                            prodId = t.prod_id,
+                            taskId = t.task_id,
+                            status = "Finished"
+                        });
 
                     if (prod?.order_id != null)
                     {
-
-                        //await _hub.Clients
-                        //   .Group($"order-{prod.order_id}")
-                        //   .SendAsync("OrderUpdated", new
-                        //   {
-                        //       orderId = prod.order_id,
-                        //       status = prod.status
-                        //   });
                         await _hub.Clients.All.SendAsync("OrderUpdated", new
                         {
                             orderId = prod.order_id,
                             status = prod.status
                         });
                     }
-
 
                     return new ScanTaskResult
                     {
@@ -177,6 +152,7 @@ namespace AMMS.Application.Services
                 }
             });
         }
+
         public async Task<int> SuggestQtyGoodAsync(int taskId, CancellationToken ct = default)
         {
             return await _taskRepo.SuggestQtyGoodAsync(taskId, ct);

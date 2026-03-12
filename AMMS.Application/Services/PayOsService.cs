@@ -178,5 +178,28 @@ namespace AMMS.Application.Services
             foreach (var b in hash) sb.Append(b.ToString("x2"));
             return sb.ToString();
         }
+
+        public async Task ConfirmWebhookAsync(CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(_opt.WebhookUrl))
+                throw new InvalidOperationException("PayOS:WebhookUrl is missing.");
+
+            using var msg = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"{_opt.BaseUrl.TrimEnd('/')}/confirm-webhook");
+
+            msg.Headers.Add("x-client-id", _opt.ClientId);
+            msg.Headers.Add("x-api-key", _opt.ApiKey);
+            msg.Content = JsonContent.Create(new
+            {
+                webhookUrl = _opt.WebhookUrl
+            });
+
+            var res = await _http.SendAsync(msg, ct);
+            var raw = await res.Content.ReadAsStringAsync(ct);
+
+            if (!res.IsSuccessStatusCode)
+                throw new PayOsException($"Confirm webhook failed: {(int)res.StatusCode} - {raw}");
+        }
     }
 }

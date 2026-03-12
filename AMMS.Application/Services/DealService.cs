@@ -133,9 +133,8 @@ namespace AMMS.Application.Services
                     job.SendAsync(consultantEmail!, subjectConsultant, htmlConsultant));
             }
 
-            req.process_status = "Waiting";
-            await _requestRepo.SaveChangesAsync();
             var oldStatus = req.process_status;
+
             req.process_status = "Waiting";
             await _requestRepo.SaveChangesAsync();
 
@@ -190,55 +189,29 @@ namespace AMMS.Application.Services
 
         public async Task<PayOsDepositInfoDto> PrepareDepositPaymentAsync(int orderRequestId, CancellationToken ct = default)
         {
-            var req = await _requestRepo.GetByIdAsync(orderRequestId) ?? throw new InvalidOperationException("Order request not found");
-            var est = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId) ?? throw new InvalidOperationException("Cost estimate not found");
+            var req = await _requestRepo.GetByIdAsync(orderRequestId)
+                ?? throw new InvalidOperationException("Order request not found");
+
+            var est = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId)
+                ?? throw new InvalidOperationException("Cost estimate not found");
 
             var expiredAt = est.created_at.AddHours(24);
             if (DateTime.UtcNow > expiredAt.ToUniversalTime())
-            {
                 throw new InvalidOperationException("Báo giá đã hết hạn, không thể tạo link thanh toán.");
-            }
 
-            var deposit = est.deposit_amount;
-            if (deposit <= 0) throw new InvalidOperationException("Deposit amount is zero.");
-
-            var orderCode = (long)orderRequestId;
-            var feBase = _config["Deal:BaseUrlFe"] ?? "https://sep490-fe.vercel.app";
-            var returnUrl = $"{feBase}/request-detail/{orderRequestId}";
-            var cancelUrl = returnUrl;
-            var description = $"AM{orderRequestId:D6}";
-
-            PayOsResultDto result;
-
-            var existingLink = await _payOs.GetPaymentLinkInformationAsync(orderCode, ct);
-            if (existingLink != null && (existingLink.status == "PENDING" || existingLink.status == "PAID"))
-            {
-                result = existingLink;
-            }
-            else
-            {
-                result = await _payOs.CreatePaymentLinkAsync(
-                    orderCode: (int)orderCode,
-                    amount: (int)deposit / 100,
-                    description: description,
-                    buyerName: req.customer_name ?? "",
-                    buyerEmail: req.customer_email ?? "",
-                    buyerPhone: req.customer_phone ?? "",
-                    returnUrl: returnUrl,
-                    cancelUrl: cancelUrl,
-                    ct: ct);
-            }
+            var payos = await CreateOrReuseDepositLinkAsync(orderRequestId, est.estimate_id, req.quote_id, ct);
 
             return new PayOsDepositInfoDto
             {
-                order_code = orderCode,
-                checkout_url = result.check_out_url,
-                deposit_amount = deposit,
+                order_code = payos.order_code ?? 0,
+                checkout_url = payos.check_out_url,
+                deposit_amount = est.deposit_amount,
                 expire_at = expiredAt,
-                qr_code = result.qr_code,
-                account_number = result.account_number,
-                account_name = result.account_name,
-                bin = result.bin
+                qr_code = payos.qr_code,
+                account_number = payos.account_number,
+                account_name = payos.account_name,
+                bin = payos.bin,
+                status = payos.status
             };
         }
 
@@ -526,11 +499,16 @@ namespace AMMS.Application.Services
       </table>
 
       <div style='margin-top: 30px; border-top: 1px solid #f1f5f9; padding-top: 20px; text-align: center;'>
-         <p style='color: #64748b; font-size: 13px; line-height: 1.5; margin: 0;'>
-            Đơn hàng của bạn đang được xử lý. <br>
-            Bạn có thể tra cứu tiến trình đơn hàng thông qua <a href='{fe}/look-up' style='color: #2563eb; text-decoration: none; font-weight: 600;'>Link</a>.
-         </p>
-      </div>
+   <p style='color: #64748b; font-size: 13px; line-height: 1.5; margin: 0 0 8px 0;'>
+      Đơn hàng của bạn đang được xử lý.
+   </p>
+   <p style='color: #64748b; font-size: 13px; line-height: 1.5; margin: 0 0 8px 0;'>
+      Bạn có thể tra cứu tiến trình đơn hàng bằng cách copy đường dẫn bên dưới và dán vào trình duyệt:
+   </p>
+   <p style='color: #0f172a; font-size: 12px; line-height: 1.6; margin: 0; background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; word-break:break-all; user-select:all; -webkit-user-select:all;'>
+      {fe}/look-up
+   </p>
+</div>
 
     </div>
     
@@ -561,20 +539,34 @@ namespace AMMS.Application.Services
                 throw new InvalidOperationException("Request has been Accepted. Cannot create payment link.");
 
             var est = await _estimateRepo.GetByIdAsync(estimateId)
-          ?? throw new InvalidOperationException("Cost estimate not found");
+              ?? throw new InvalidOperationException("Cost estimate not found");
 
             if (est.order_request_id != requestId)
                 throw new InvalidOperationException("Estimate does not belong to this request");
 
             var pending = await _payment.GetLatestPendingByRequestIdAndEstimateIdAsync(requestId, estimateId, ct);
-            if (pending != null && !string.IsNullOrWhiteSpace(pending.payos_raw))
-                return PayOsRawMapper.FromPayment(pending);
+            if (pending != null)
+            {
+                var info = await _payOs.GetPaymentLinkInformationAsync(pending.order_code, ct);
+
+                if (info != null)
+                {
+                    var st = (info.status ?? "").ToUpperInvariant();
+
+                    if (st == "PENDING" || st == "PROCESSING" || st == "PAID" || st == "SUCCESS")
+                    {
+                        return info;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(pending.payos_raw))
+                    return PayOsRawMapper.FromPayment(pending);
+            }
 
             var backendUrl = _config["Deal:BaseUrl"]!;
             var feBase = _config["Deal:BaseUrlFe"] ?? "https://sep490-fe.vercel.app";
 
-            var amount = (int)Math.Round(est.deposit_amount, 0) / 100;
-            //var description = $"AM{requestId:D6}";
+            var amount = (int)Math.Round(est.deposit_amount, 0);
 
             const int maxAttempt = 9;
             Exception? last = null;
@@ -612,6 +604,7 @@ namespace AMMS.Application.Services
                         currency = "VND",
                         status = "PENDING",
                         payos_payment_link_id = payos.payment_link_id,
+                        payos_transaction_id = payos.transaction_id,
                         payos_raw = payos.raw_json,
                         created_at = now,
                         updated_at = now,

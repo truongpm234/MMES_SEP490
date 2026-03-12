@@ -63,5 +63,9 @@ namespace AMMS.Application.Services
             var now = DateTime.UtcNow;
             return await _repo.StartProductionByOrderIdAsync(orderId, now, ct);
         }
+        public async Task<bool> SetProductionDeliveryAsync(int orderId, CancellationToken ct = default)
+        {
+            return await _repo.SetProductionDeliveryByOrderIdAsync(orderId, ct);
+        }
     }
 }

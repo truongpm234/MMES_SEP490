@@ -181,7 +181,6 @@ namespace AMMS.Infrastructure.Repositories
             var p = (processCode ?? "").Trim().ToUpperInvariant();
             if (string.IsNullOrWhiteSpace(p)) return null;
 
-            // Load candidates
             var list = await _db.machines
                 .AsNoTracking()
                 .Where(m => m.is_active && m.process_code != null && m.process_code != "")

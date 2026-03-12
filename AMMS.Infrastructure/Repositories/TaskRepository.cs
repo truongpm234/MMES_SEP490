@@ -72,6 +72,9 @@ namespace AMMS.Infrastructure.Repositories
             var sheetsTotal = row.sheets_total ?? 0;
             var sheetsRequired = row.sheets_required ?? 0;
 
+            if (pcode == "DAN")
+                return SafeInt(orderQty, 1);
+
             return SafeInt(
                 sheetsTotal,
                 fallback: SafeInt(sheetsRequired, fallback: SafeInt(orderQty, 1))

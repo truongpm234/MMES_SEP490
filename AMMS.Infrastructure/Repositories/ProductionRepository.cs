@@ -22,7 +22,7 @@ namespace AMMS.Infrastructure.Repositories
                 from pr in _db.productions.AsNoTracking()
                 join o in _db.orders.AsNoTracking() on pr.order_id equals o.order_id
                 where pr.start_date != null
-                      && pr.end_date == null 
+                      && pr.end_date == null
                       && o.delivery_date != null
                 orderby o.delivery_date
                 select o.delivery_date
@@ -45,7 +45,6 @@ namespace AMMS.Infrastructure.Repositories
             NormalizePaging(ref page, ref pageSize);
             var skip = (page - 1) * pageSize;
 
-            // 1) Base rows: productions + orders + first item + customer name
             var baseRows = await (
                 from pr in _db.productions.AsNoTracking()
                 join o in _db.orders.AsNoTracking() on pr.order_id equals o.order_id
@@ -54,7 +53,7 @@ namespace AMMS.Infrastructure.Repositories
                 from q in qj.DefaultIfEmpty()
 
                 join r in _db.order_requests.AsNoTracking()
-                on q.order_request_id equals r.order_request_id into rj
+                    on q.order_request_id equals r.order_request_id into rj
                 from r in rj.DefaultIfEmpty()
 
                 where pr.start_date != null
@@ -87,7 +86,6 @@ namespace AMMS.Infrastructure.Repositories
                         .OrderBy(i => i.item_id)
                         .Select(i => (int?)i.quantity)
                         .FirstOrDefault()
-
                 }
             )
             .Skip(skip)
@@ -110,7 +108,6 @@ namespace AMMS.Infrastructure.Repositories
 
             var prodIds = baseRows.Select(x => x.prod_id).ToList();
 
-            // 2) Load tasks by prod_id (để biết đang ở seq nào)
             var taskRows = await _db.tasks
                 .AsNoTracking()
                 .Where(t => t.prod_id != null && prodIds.Contains(t.prod_id.Value))
@@ -165,33 +162,13 @@ namespace AMMS.Infrastructure.Repositories
                 var ptId = r.product_type_id ?? 0;
 
                 stepsByProductType.TryGetValue(ptId, out var steps);
-
                 steps ??= new List<StepRow>();
 
-                HashSet<string>? selected = null;
-
-                var csv = (r.first_item_production_process ?? "").Trim();
-                if (!string.IsNullOrWhiteSpace(csv))
-                {
-                    selected = csv.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                        .Select(x => x.Trim().ToUpperInvariant())
-                        .Where(x => !string.IsNullOrWhiteSpace(x))
-                        .ToHashSet();
-                }
-
-                steps ??= new List<StepRow>();
-
-                if (selected != null && selected.Count > 0)
-                {
-                    steps = steps
-                        .Where(s =>
-                        {
-                            var code = (s.ProcessCode ?? "").Trim().ToUpperInvariant();
-                            return !string.IsNullOrWhiteSpace(code) && selected.Contains(code);
-                        })
-                        .OrderBy(s => s.SeqNum)
-                        .ToList();
-                }
+                steps = ResolveFixedRoute(
+                    steps.OrderBy(s => s.SeqNum).ToList(),
+                    x => x.ProcessCode,
+                    r.first_item_production_process
+                );
 
                 var stages = steps
                     .Select(s => s.ProcessName)
@@ -247,13 +224,20 @@ namespace AMMS.Infrastructure.Repositories
 
             var total = tasks.Count;
             if (total <= 0)
-                return new ProductionProgressResponse { prod_id = prodId, total_steps = 0, finished_steps = 0, progress_percent = 0 };
+                return new ProductionProgressResponse
+                {
+                    prod_id = prodId,
+                    total_steps = 0,
+                    finished_steps = 0,
+                    progress_percent = 0
+                };
 
-            // task nào có log Finished
+            var taskIds = tasks.Select(x => x.task_id).ToList();
+
             var finishedTaskIds = await _db.task_logs
                 .AsNoTracking()
                 .Where(l => l.task_id != null
-                    && tasks.Select(x => x.task_id).Contains(l.task_id.Value)
+                    && taskIds.Contains(l.task_id.Value)
                     && l.action_type == "Finished")
                 .Select(l => l.task_id!.Value)
                 .Distinct()
@@ -288,7 +272,7 @@ namespace AMMS.Infrastructure.Repositories
                 from q in qj.DefaultIfEmpty()
 
                 where pr.order_id == orderId
-                orderby pr.start_date ?? pr.end_date ?? o.order_date 
+                orderby pr.start_date ?? pr.end_date ?? o.order_date
                 select new
                 {
                     pr,
@@ -356,15 +340,7 @@ namespace AMMS.Infrastructure.Repositories
                     {
                         sheetsRequired = estimate.sheets_required;
                         sheetsTotal = estimate.sheets_total;
-
-                        if (estimate.n_up != null && estimate.n_up > 0)
-                        {
-                            nUp = (int)estimate.n_up;
-                        }
-                        else
-                        {
-                            nUp = 1;
-                        }
+                        nUp = estimate.n_up > 0 ? estimate.n_up : 1;
                     }
                 }
             }
@@ -377,14 +353,14 @@ namespace AMMS.Infrastructure.Repositories
 
             int? numberOfPlates = orderReq?.number_of_plates;
             int? orderItemId = header.first_item?.item_id;
-            List<bom> bomRows = new();
 
             if (orderItemId.HasValue)
             {
-                bomRows = await _db.boms.AsNoTracking()
+                _ = await _db.boms.AsNoTracking()
                     .Where(b => b.order_item_id == orderItemId.Value)
                     .ToListAsync(ct);
             }
+
             var prodId = header.pr.prod_id;
 
             var tasks = await _db.tasks.AsNoTracking()
@@ -400,12 +376,12 @@ namespace AMMS.Infrastructure.Repositories
                     t.start_time,
                     t.end_time,
                     t.planned_start_time,
-                    t.planned_end_time,  
+                    t.planned_end_time,
                     t.process_id
                 })
                 .ToListAsync(ct);
 
-            var lastTask = tasks.OrderByDescending(t => t.seq_num ?? 0).FirstOrDefault();           
+            var lastTask = tasks.OrderByDescending(t => t.seq_num ?? 0).FirstOrDefault();
             if (lastTask != null
                 && string.Equals(lastTask.status, "Finished", StringComparison.OrdinalIgnoreCase)
                 && lastTask.end_time != null
@@ -457,36 +433,28 @@ namespace AMMS.Infrastructure.Repositories
                     .ToListAsync(ct);
             }
 
-            HashSet<string>? selected = null;
-            var production_processes = header.first_item?.production_process;
-            if (!string.IsNullOrWhiteSpace(production_processes))
-            {
-                selected = production_processes.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                    .Select(x => x.Trim().ToUpperInvariant())
-                    .ToHashSet();
-            }
+            steps = ResolveFixedRoute(
+                steps.OrderBy(x => x.seq_num).ToList(),
+                x => x.process_code,
+                header.first_item?.production_process
+            );
 
             var stages = new List<ProductionStageDto>();
-
             StageOutputRef? prevOutput = null;
 
             foreach (var s in steps)
             {
                 var pcode = (s.process_code ?? "").Trim().ToUpperInvariant();
-                if (selected != null && selected.Count > 0 && !string.IsNullOrWhiteSpace(pcode))
-                {
-                    if (!selected.Contains(pcode)) continue;
-                }
 
                 var task = tasks.FirstOrDefault(t => t.process_id == s.process_id)
                            ?? tasks.FirstOrDefault(t => (t.seq_num ?? -1) == s.seq_num);
 
                 var stageLogs = task == null
                     ? new List<TaskLogDto>()
-                    : logsByTaskId(logs, task.task_id);
+                    : LogsByTaskId(logs, task.task_id);
 
                 var qtyGood = stageLogs.Sum(x => x.qty_good);
-                var qtyBad = stageLogs.Sum(x => x.qty_bad);
+                var qtyBad = 0;
                 var denom = qtyGood + qtyBad;
                 var wastePct = denom <= 0 ? 0m : Math.Round((qtyBad * 100m) / denom, 2);
 
@@ -527,7 +495,6 @@ namespace AMMS.Infrastructure.Repositories
                 };
 
                 stages.Add(stage);
-
                 prevOutput = io.nextOutput;
             }
 
@@ -587,7 +554,6 @@ namespace AMMS.Infrastructure.Repositories
             {
                 var tlogs = logs.Where(x => x.task_id == t.task_id).ToList();
                 var good = tlogs.Sum(x => x.qty_good);
-                var denom = good;
 
                 string pname = t.name;
                 string? pcode = null;
@@ -626,6 +592,7 @@ namespace AMMS.Infrastructure.Repositories
                 stages = stageRows.OrderBy(x => x.seq_num).ToList()
             };
         }
+
         public async Task<bool> TryCloseProductionIfCompletedAsync(int prodId, DateTime now, CancellationToken ct = default)
         {
             var prod = await _db.productions.FirstOrDefaultAsync(p => p.prod_id == prodId, ct);
@@ -644,7 +611,10 @@ namespace AMMS.Infrastructure.Repositories
 
             if (!allFinished) return false;
 
-            var finishedAt = tasks.Where(t => t.end_time != null).Select(t => t.end_time!.Value).DefaultIfEmpty(now).Max();
+            var finishedAt = tasks.Where(t => t.end_time != null)
+                .Select(t => t.end_time!.Value)
+                .DefaultIfEmpty(now)
+                .Max();
 
             prod.end_date = finishedAt;
             prod.status = "Finished";
@@ -681,31 +651,79 @@ namespace AMMS.Infrastructure.Repositories
             return true;
         }
 
+        public async Task<bool> SetProductionDeliveryByOrderIdAsync(int orderId, CancellationToken ct = default)
+        {
+            var prod = await _db.productions
+                .FirstOrDefaultAsync(p => p.order_id == orderId, ct);
+
+            if (prod == null)
+                return false;
+
+            prod.status = "Delivery";
+
+            await _db.SaveChangesAsync(ct);
+            return true;
+        }
+
+        public Task SaveChangesAsync(CancellationToken ct = default)
+            => _db.SaveChangesAsync(ct);
+
+        private static string NormalizeProcessCode(string? code)
+            => (code ?? "").Trim().ToUpperInvariant();
+
+        private static HashSet<string> ParseSelectedProcessCodes(string? csv)
+        {
+            if (string.IsNullOrWhiteSpace(csv))
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            return csv.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => NormalizeProcessCode(x))
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static List<T> ResolveFixedRoute<T>(
+    List<T> allSteps,
+    Func<T, string?> processCodeSelector,
+    string? selectedProcessesCsv)
+        {
+            if (allSteps == null || allSteps.Count == 0)
+                return new List<T>();
+
+            var selected = ParseSelectedProcessCodes(selectedProcessesCsv);
+            if (selected.Count == 0)
+                return allSteps;
+
+            var filtered = allSteps
+                .Where(x => selected.Contains(NormalizeProcessCode(processCodeSelector(x))))
+                .ToList();
+
+            return filtered.Count > 0 ? filtered : allSteps;
+        }
+
         private static (List<StageMaterialDto> inputs, StageMaterialDto output, StageOutputRef nextOutput) BuildStageIO(
-    string processCode,
-    string processName,
-    ProductionDetailDto detail,
-    StageOutputRef? prevOutput,          // ✅ NEW: output của công đoạn trước
-    int sheetsRequired,
-    int sheetsTotal,
-    int nUp,
-    int qtyGood,
-    int? numberOfPlates,
-    decimal estInkWeightKg)
+            string processCode,
+            string processName,
+            ProductionDetailDto detail,
+            StageOutputRef? prevOutput,
+            int sheetsRequired,
+            int sheetsTotal,
+            int nUp,
+            int qtyGood,
+            int? numberOfPlates,
+            decimal estInkWeightKg)
         {
             var inputs = new List<StageMaterialDto>();
-            var code = (processCode ?? "").Trim().ToUpperInvariant();
+            var code = NormalizeProcessCode(processCode);
 
             string sizeSuffix =
                 detail.length_mm.HasValue && detail.width_mm.HasValue && detail.height_mm.HasValue
                     ? $" ({detail.length_mm}×{detail.width_mm}×{detail.height_mm})mm"
                     : string.Empty;
 
-            // base qty fallback
             var baseSheets = sheetsTotal > 0 ? sheetsTotal : (sheetsRequired > 0 ? sheetsRequired : detail.quantity);
             if (baseSheets <= 0) baseSheets = 1;
 
-            // ========= RALO (giữ như bạn đang ổn) =========
             if (code == "RALO" || code == "RA_LO")
             {
                 inputs.Add(new StageMaterialDto
@@ -737,14 +755,43 @@ namespace AMMS.Infrastructure.Repositories
                 return (inputs, output, next);
             }
 
-            // ========= Các công đoạn còn lại =========
-            // Input = output của công đoạn trước (nếu có), nếu chưa có thì fallback theo product
+            if (code == "DAN")
+            {
+                var danQty = qtyGood > 0 ? qtyGood : (detail.quantity > 0 ? detail.quantity : 1);
+
+                inputs.Add(new StageMaterialDto
+                {
+                    name = "Phôi đã bế",
+                    code = prevOutput?.Code ?? "BE",
+                    quantity = detail.quantity > 0 ? detail.quantity : danQty,
+                    unit = "sp"
+                });
+
+                var output = new StageMaterialDto
+                {
+                    name = $"Thành phẩm {processName}".Trim(),
+                    code = processCode,
+                    quantity = detail.quantity > 0 ? detail.quantity : danQty,
+                    unit = "sp"
+                };
+
+                var next = new StageOutputRef
+                {
+                    Name = output.name ?? "",
+                    Code = output.code,
+                    Unit = output.unit ?? "sp",
+                    Quantity = output.quantity
+                };
+
+                return (inputs, output, next);
+            }
+
             var inputName = prevOutput?.Name ?? (detail.product_name ?? "Bán thành phẩm");
             var inputCode = prevOutput?.Code;
             var inputUnit = prevOutput?.Unit ?? "tờ";
 
             var inputQty = (qtyGood > 0)
-                ? (decimal)qtyGood
+                ? qtyGood
                 : (prevOutput?.Quantity > 0 ? prevOutput.Quantity : baseSheets);
 
             if (inputQty <= 0) inputQty = baseSheets;
@@ -757,7 +804,6 @@ namespace AMMS.Infrastructure.Repositories
                 unit = inputUnit
             });
 
-            // IN: thêm kẽm + mực
             if (code == "IN")
             {
                 if (numberOfPlates.GetValueOrDefault() > 0)
@@ -765,7 +811,7 @@ namespace AMMS.Infrastructure.Repositories
                     inputs.Add(new StageMaterialDto
                     {
                         name = "Kẽm in",
-                        quantity = numberOfPlates!.Value,
+                        quantity = numberOfPlates.Value,
                         unit = "bản"
                     });
                 }
@@ -781,9 +827,8 @@ namespace AMMS.Infrastructure.Repositories
                 }
             }
 
-            // ✅ Output name: "Thành phẩm " + processName
-            var outQty = qtyGood > 0 ? qtyGood : (int)Math.Round(inputQty);
-            if (outQty <= 0) outQty = (int)Math.Round(inputQty);
+            var outQty = qtyGood > 0 ? qtyGood : inputQty;
+            if (outQty <= 0) outQty = inputQty;
 
             var outputDefault = new StageMaterialDto
             {
@@ -804,13 +849,14 @@ namespace AMMS.Infrastructure.Repositories
             return (inputs, outputDefault, nextOutput);
         }
 
-        static List<TaskLogDto> logsByTaskId(List<TaskLogDto> all, int taskId)
+        private static List<TaskLogDto> LogsByTaskId(List<TaskLogDto> all, int taskId)
         {
             return all
                 .Where(x => x.task_id == taskId)
                 .OrderBy(x => x.log_time)
                 .ToList();
         }
+
         private static int? GetCurrentSeq(List<TaskRow> tasks)
         {
             var inProg = tasks.FirstOrDefault(x => x.StartTime != null && x.EndTime == null);
@@ -835,15 +881,14 @@ namespace AMMS.Infrastructure.Repositories
 
             if (!currentSeq.HasValue) return 0m;
 
-            // tìm index của current stage trong steps
             var idx = steps.FindIndex(s => s.SeqNum == currentSeq.Value);
             if (idx < 0) idx = 0;
 
             var completedBefore = idx;
-
             var percent = completedBefore * 100m / total;
             return Math.Round(percent, 1);
         }
+
         private static void NormalizePaging(ref int page, ref int pageSize)
         {
             if (page <= 0) page = 1;

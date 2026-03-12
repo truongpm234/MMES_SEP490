@@ -95,6 +95,13 @@ public partial class cost_estimate
     [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
     public decimal deposit_amount { get; private set; }
 
+    [Column("previous_estimate_id")]
+    public int? previous_estimate_id { get; set; }
+
+    public virtual cost_estimate? previous_estimate { get; set; }
+
+    public virtual ICollection<cost_estimate> revised_estimates { get; set; } = new List<cost_estimate>();
+
     public virtual ICollection<cost_estimate_process> process_costs { get; set; } = new List<cost_estimate_process>();
 
     public virtual order_request order_request { get; set; } = null!;

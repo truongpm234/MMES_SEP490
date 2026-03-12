@@ -21,6 +21,8 @@ namespace AMMS.Infrastructure.Interfaces
         Task<ProductionWasteReportDto?> GetProductionWasteAsync(int prodId, CancellationToken ct = default);
         Task<bool> TryCloseProductionIfCompletedAsync(int prodId, DateTime now, CancellationToken ct = default);
         Task<bool> StartProductionByOrderIdAsync(int orderId, DateTime now, CancellationToken ct = default);
+        Task<bool> SetProductionDeliveryByOrderIdAsync(int orderId, CancellationToken ct = default);
+        Task SaveChangesAsync(CancellationToken ct = default);
 
     }
 }

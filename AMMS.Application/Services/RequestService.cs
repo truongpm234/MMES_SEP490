@@ -136,11 +136,11 @@ namespace AMMS.Application.Services
             entity.print_width_mm = req.print_width_mm ?? entity.print_width_mm;
             entity.print_height_mm = req.print_height_mm ?? entity.print_height_mm;
             entity.is_send_design = req.is_send_design ?? entity.is_send_design;
+
             if (ce != null && !string.IsNullOrWhiteSpace(req.production_processes))
             {
                 ce.production_processes = req.production_processes.Trim();
             }
-            entity.process_status = "Pending";
 
             if (ce != null)
             {
@@ -153,6 +153,12 @@ namespace AMMS.Application.Services
                 if (!string.IsNullOrWhiteSpace(req.coating_type))
                     ce.coating_type = req.coating_type.Trim();
             }
+
+            entity.process_status = "Pending";
+            entity.verified_at = null;
+            entity.quote_expires_at = null;
+            entity.accepted_estimate_id = null;
+
             await _requestRepo.UpdateAsync(entity);
             await _requestRepo.SaveChangesAsync();
 
@@ -164,7 +170,6 @@ namespace AMMS.Application.Services
                 UpdatedAt = AppTime.NowVnUnspecified()
             };
         }
-
 
         public async Task CancelAsync(int id, string? reason, CancellationToken ct = default)
         {
@@ -269,7 +274,6 @@ namespace AMMS.Application.Services
                         };
                     }
 
-                    // ===== map product_type_id from req.product_type (code) =====
                     var ptCode = (req.product_type ?? "").Trim();
                     if (string.IsNullOrWhiteSpace(ptCode))
                     {
@@ -296,6 +300,7 @@ namespace AMMS.Application.Services
                             RequestId = requestId
                         };
                     }
+                    var normalizedProcessCsv = await NormalizeProductionProcessCsvAsync(productTypeId.Value, est.production_processes);
 
                     var newOrder = new order
                     {
@@ -337,7 +342,7 @@ namespace AMMS.Application.Services
                         design_url = req.design_file_path,
                         product_type_id = productTypeId,
                         paper_code = est.paper_code,
-                        production_process = est.production_processes,
+                        production_process = normalizedProcessCsv,
                         paper_name = est.paper_name,
                         glue_type = est.coating_type,
                         wave_type = est.wave_type,
@@ -354,7 +359,6 @@ namespace AMMS.Application.Services
                     await _orderRepo.AddOrderItemAsync(newItem);
                     await _orderRepo.SaveChangesAsync();
 
-                    // ===== BOM =====
                     material? paperMaterial = null;
                     if (!string.IsNullOrWhiteSpace(est.paper_code))
                         paperMaterial = await _materialRepo.GetByCodeAsync(est.paper_code!);
@@ -462,9 +466,6 @@ namespace AMMS.Application.Services
                     }
 
                     newOrder.is_enough = isEnough;
-                    _orderRepo.Update(newOrder);
-                    await _orderRepo.SaveChangesAsync();
-
                     _orderRepo.Update(newOrder);
                     await _orderRepo.SaveChangesAsync();
 
@@ -605,9 +606,10 @@ namespace AMMS.Application.Services
             var req = await _requestRepo.GetByIdAsync(dto.request_id);
             if (req == null) throw new InvalidOperationException("Order request not found");
 
+            var oldStatus = req.process_status;
+
             var st = (dto.status ?? "").Trim();
 
-            // Normalize
             st = st.Equals("verified", StringComparison.OrdinalIgnoreCase) ? "Verified" :
                  st.Equals("processing", StringComparison.OrdinalIgnoreCase) ? "Processing" :
                  st.Equals("declined", StringComparison.OrdinalIgnoreCase) ? "Declined" :
@@ -616,23 +618,36 @@ namespace AMMS.Application.Services
             if (st is not ("Processing" or "Verified" or "Declined"))
                 throw new ArgumentException("status must be Processing | Verified | Declined");
 
-            if ((st == "Verified" || st == "Declined") && !string.Equals(req.process_status, "Processing", StringComparison.OrdinalIgnoreCase))
+            if ((st == "Verified" || st == "Declined") &&
+                !string.Equals(req.process_status, "Processing", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("Request must be Processing before manager decision");
             }
+
+            var now = AppTime.NowVnUnspecified();
 
             req.process_status = st;
 
             if (dto.note != null)
                 req.note = dto.note;
+
+            if (st == "Verified")
+            {
+                req.verified_at = now;
+                req.quote_expires_at = now.AddDays(7);
+            }
+            else
+            {
+                req.verified_at = null;
+                req.quote_expires_at = null;
+            }
+
             if (st == "Declined")
             {
+                req.accepted_estimate_id = null;
                 await _estimateRepo.DeactivateAllByRequestIdAsync(dto.request_id, ct);
             }
 
-            await _requestRepo.SaveChangesAsync();
-
-            var oldStatus = req.process_status;
             await _requestRepo.SaveChangesAsync();
 
             await _rt.PublishRequestChangedAsync(new(
@@ -640,7 +655,7 @@ namespace AMMS.Application.Services
                 old_status: oldStatus,
                 new_status: req.process_status,
                 action: (st == "Verified") ? "manager_verified" : "manager_declined",
-                changed_at: AppTime.NowVnUnspecified(),
+                changed_at: now,
                 changed_by: null
             ));
         }
@@ -687,12 +702,18 @@ namespace AMMS.Application.Services
             req.consultant_note = normalizedNote;
 
             req.process_status = "Processing";
+
+            req.verified_at = null;
+            req.quote_expires_at = null;
+            req.accepted_estimate_id = null;
+
             await _requestRepo.SaveChangesAsync();
+
             await _rt.PublishRequestNoteChangedAsync(new(
-        request_id: req.order_request_id,
-        consultant_note: req.consultant_note,
-        changed_at: AppTime.NowVnUnspecified()
-    ));
+                request_id: req.order_request_id,
+                consultant_note: req.consultant_note,
+                changed_at: AppTime.NowVnUnspecified()
+            ));
 
             await _rt.PublishRequestChangedAsync(new(
                 request_id: req.order_request_id,
@@ -708,6 +729,205 @@ namespace AMMS.Application.Services
         {
             if (requestId <= 0) return null;
             return await _requestRepo.GetActiveEstimatesInProcessAsync(requestId, ct);
+        }
+
+        public async Task<CloneRequestResponseDto> CloneRequestAsync(int requestId, CancellationToken ct = default)
+        {
+            if (requestId <= 0)
+                throw new ArgumentException("request_id is required");
+
+            var source = await _requestRepo.GetByIdAsync(requestId);
+            if (source == null)
+                throw new InvalidOperationException("Order request not found");
+
+            var activeEstimates = await _requestRepo.GetActiveEstimatesWithProcessesByRequestIdAsync(requestId, ct);
+
+            var now = AppTime.NowVnUnspecified();
+
+            var clonedRequest = new order_request
+            {
+                customer_name = source.customer_name,
+                customer_phone = source.customer_phone,
+                customer_email = source.customer_email,
+                delivery_date = source.delivery_date,
+                product_name = source.product_name,
+                quantity = source.quantity,
+                description = source.description,
+                design_file_path = source.design_file_path,
+                order_request_date = now,
+                detail_address = source.detail_address,
+
+                process_status = "Pending",
+
+                product_type = source.product_type,
+                number_of_plates = source.number_of_plates,
+
+                order_id = null,
+                quote_id = null,
+                accepted_estimate_id = null,
+
+                product_length_mm = source.product_length_mm,
+                product_width_mm = source.product_width_mm,
+                product_height_mm = source.product_height_mm,
+                glue_tab_mm = source.glue_tab_mm,
+                bleed_mm = source.bleed_mm,
+                is_one_side_box = source.is_one_side_box,
+                print_width_mm = source.print_width_mm,
+                print_height_mm = source.print_height_mm,
+                is_send_design = source.is_send_design,
+
+                note = null,
+                reason = null,
+                verified_at = null,
+                quote_expires_at = null,
+                consultant_note = source.consultant_note
+            };
+
+            await _requestRepo.AddAsync(clonedRequest);
+            await _requestRepo.SaveChangesAsync();
+
+            var clonedEstimateIds = new List<int>();
+            var clonedEstimateMap = new Dictionary<int, cost_estimate>();
+
+            foreach (var est in activeEstimates.OrderBy(x => x.estimate_id))
+            {
+                var clonedEstimate = new cost_estimate
+                {
+                    order_request_id = clonedRequest.order_request_id,
+
+                    previous_estimate_id = null,
+
+                    paper_cost = est.paper_cost,
+                    paper_sheets_used = est.paper_sheets_used,
+                    paper_unit_price = est.paper_unit_price,
+
+                    ink_cost = est.ink_cost,
+                    ink_weight_kg = est.ink_weight_kg,
+                    ink_rate_per_m2 = est.ink_rate_per_m2,
+
+                    coating_glue_cost = est.coating_glue_cost,
+                    coating_glue_weight_kg = est.coating_glue_weight_kg,
+                    coating_glue_rate_per_m2 = est.coating_glue_rate_per_m2,
+                    coating_type = est.coating_type,
+
+                    mounting_glue_cost = est.mounting_glue_cost,
+                    mounting_glue_weight_kg = est.mounting_glue_weight_kg,
+                    mounting_glue_rate_per_m2 = est.mounting_glue_rate_per_m2,
+
+                    lamination_cost = est.lamination_cost,
+                    lamination_weight_kg = est.lamination_weight_kg,
+                    lamination_rate_per_m2 = est.lamination_rate_per_m2,
+
+                    material_cost = est.material_cost,
+                    base_cost = est.base_cost,
+
+                    is_rush = est.is_rush,
+                    rush_percent = est.rush_percent,
+                    rush_amount = est.rush_amount,
+                    days_early = est.days_early,
+
+                    subtotal = est.subtotal,
+                    discount_percent = est.discount_percent,
+                    discount_amount = est.discount_amount,
+                    final_total_cost = est.final_total_cost,
+
+                    estimated_finish_date = est.estimated_finish_date,
+                    desired_delivery_date = est.desired_delivery_date,
+                    created_at = now,
+
+                    sheets_required = est.sheets_required,
+                    sheets_waste = est.sheets_waste,
+                    sheets_total = est.sheets_total,
+                    n_up = est.n_up,
+                    total_area_m2 = est.total_area_m2,
+
+                    design_cost = est.design_cost,
+                    cost_note = est.cost_note,
+
+                    is_active = true,
+
+                    paper_code = est.paper_code,
+                    paper_name = est.paper_name,
+                    wave_type = est.wave_type,
+                    production_processes = est.production_processes
+                };
+
+                if (est.process_costs != null && est.process_costs.Count > 0)
+                {
+                    foreach (var pc in est.process_costs)
+                    {
+                        clonedEstimate.process_costs.Add(new cost_estimate_process
+                        {
+                            process_code = pc.process_code,
+                            process_name = pc.process_name,
+                            quantity = pc.quantity,
+                            unit = pc.unit,
+                            unit_price = pc.unit_price,
+                            total_cost = pc.total_cost,
+                            note = pc.note,
+                            created_at = now
+                        });
+                    }
+                }
+
+                await _estimateRepo.AddAsync(clonedEstimate);
+                await _estimateRepo.SaveChangesAsync();
+
+                clonedEstimateIds.Add(clonedEstimate.estimate_id);
+                clonedEstimateMap[est.estimate_id] = clonedEstimate;
+            }
+
+            foreach (var oldEst in activeEstimates)
+            {
+                if (!oldEst.previous_estimate_id.HasValue)
+                    continue;
+
+                if (!clonedEstimateMap.TryGetValue(oldEst.estimate_id, out var newEst))
+                    continue;
+
+                if (!clonedEstimateMap.TryGetValue(oldEst.previous_estimate_id.Value, out var newPrevEst))
+                    continue;
+
+                newEst.previous_estimate_id = newPrevEst.estimate_id;
+            }
+
+            await _estimateRepo.SaveChangesAsync();
+
+            await _rt.PublishRequestChangedAsync(new(
+                request_id: clonedRequest.order_request_id,
+                old_status: null,
+                new_status: clonedRequest.process_status,
+                action: "cloned_from_request",
+                changed_at: now,
+                changed_by: null
+            ));
+
+            return new CloneRequestResponseDto
+            {
+                source_request_id = requestId,
+                cloned_request_id = clonedRequest.order_request_id,
+                cloned_estimate_ids = clonedEstimateIds,
+                message = "Cloned request successfully"
+            };
+        }
+
+        private async Task<string> NormalizeProductionProcessCsvAsync(
+    int productTypeId,
+    string? rawCsv,
+    CancellationToken ct = default)
+        {
+            var allSteps = await _db.product_type_processes
+                .AsNoTracking()
+                .Where(x => x.product_type_id == productTypeId && (x.is_active ?? true))
+                .OrderBy(x => x.seq_num)
+                .ToListAsync(ct);
+
+            var selected = ProductionProcessSelectionHelper.ResolveFixedRoute(
+                allSteps,
+                x => x.process_code,
+                rawCsv);
+
+            return ProductionProcessSelectionHelper.BuildCsv(selected, x => x.process_code);
         }
     }
 }
