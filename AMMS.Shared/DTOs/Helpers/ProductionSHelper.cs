@@ -11,7 +11,7 @@ namespace AMMS.Shared.DTOs.Helpers
     {
         private static readonly HashSet<int> FullAccessRoleIds = new()
 {
-    6 // production_manager
+    4,6 // production_manager
 };
 
         public static readonly Dictionary<int, string> RoleIdToProcess = new()
