@@ -3,21 +3,19 @@ using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Enums;
 using AMMS.Shared.DTOs.Productions;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using AMMS.Shared.DTOs.Socket;
 
 namespace AMMS.Application.Services
 {
     public class ProductionService : IProductionService
     {
         private readonly IProductionRepository _repo;
+        private readonly IRealtimePublisher _hub;
 
-        public ProductionService(IProductionRepository repo)
+        public ProductionService(IProductionRepository repo, IRealtimePublisher hub)
         {
             _repo = repo;
+            _hub = hub;
         }
         public async Task<NearestDeliveryResponse> GetNearestDeliveryAsync()
         {
@@ -61,6 +59,8 @@ namespace AMMS.Application.Services
         public async Task<bool> StartProductionByOrderIdAsync(int orderId, CancellationToken ct = default)
         {
             var now = DateTime.UtcNow;
+            var evt = new RequestChangedEvent(orderId, "Scheduled", "Ready", "Start", DateTime.Now, "production_manager");
+            await _hub.PublishRequestChangedAsync(evt);
             return await _repo.StartProductionByOrderIdAsync(orderId, now, ct);
         }
         public async Task<bool> SetProductionDeliveryAsync(int orderId, CancellationToken ct = default)
