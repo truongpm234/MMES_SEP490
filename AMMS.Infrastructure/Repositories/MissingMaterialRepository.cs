@@ -184,9 +184,10 @@ namespace AMMS.Infrastructure.Repositories
                         }
 
                         usageDict.TryGetValue(g.Key.MaterialId, out var usage30);
-                        var safetyQty = Math.Round(usage30 * 0.30m, 4); // ✅ safety giữ nguyên
+                        var safetyQty = Math.Round(usage30 * 0.30m, 4);
 
-                        var needed = Math.Round(requiredQty + safetyQty, 4);
+                        var needed = Math.Round(requiredQty + safetyQty, 0, MidpointRounding.AwayFromZero);
+
                         var available = Math.Round(g.Max(x => x.StockQty), 4);
 
                         // ✅ base missing theo BOM/stock
