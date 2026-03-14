@@ -78,6 +78,10 @@ namespace AMMS.Shared.DTOs.Estimates
         public int? print_height_mm { get; set; }
         public int? print_width_mm { get; set; }
 
+        //Hop dong
+        public string? contract_file_path { get; set; }
+        public DateTime? contract_uploaded_at { get; set; }
+
         // ----- Chi tiết công đoạn (cost_estimate_process) -----
         public List<CostEstimateProcessDto>? process_costs { get; set; }
     }

@@ -22,7 +22,9 @@ namespace AMMS.Infrastructure.Interfaces
         Task<List<RequestEstimateDto>> GetAllEstimatesFlatByRequestIdAsync(int requestId, CancellationToken ct = default);
         Task<List<cost_estimate>> GetAllByOrderRequestIdAsync(int orderRequestId, CancellationToken ct = default);
         Task<int> DeactivateAllByRequestIdAsync(int orderRequestId, CancellationToken ct = default);
-
+        Task NormalizeActiveDraftEstimatesAsync(int orderRequestId, int currentEstimateId, CancellationToken ct = default);
+        Task<cost_estimate?> GetTrackingByIdAsync(int estimateId, CancellationToken ct = default);
+        Task<bool> EstimateBelongsToRequestAsync(int estimateId, int requestId, CancellationToken ct = default);
     }
 }
 

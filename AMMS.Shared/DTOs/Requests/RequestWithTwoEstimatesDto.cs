@@ -14,6 +14,7 @@ namespace AMMS.Shared.DTOs.Requests
         public string? customer_email { get; set; }
         public DateTime? delivery_date { get; set; }
         public string? consultant_note { get; set; }
+        public string? message_to_customer { get; set; }
 
         public string product_name { get; set; } = "";
         public int quantity { get; set; }
@@ -70,5 +71,7 @@ namespace AMMS.Shared.DTOs.Requests
         public string? coating_type { get; set; }
         public string? wave_type { get; set; }
         public string? cost_note { get; set; }
+        public string? contract_file_path { get; set; }
+        public DateTime? contract_uploaded_at { get; set; }
     }
 }

@@ -2,8 +2,8 @@
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Common;
-using AMMS.Shared.DTOs.Helpers;
 using AMMS.Shared.DTOs.Productions;
+using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
 
 namespace AMMS.Infrastructure.Repositories
@@ -41,11 +41,7 @@ namespace AMMS.Infrastructure.Repositories
         public Task<production?> GetByIdAsync(int prodId)
             => _db.productions.FirstOrDefaultAsync(x => x.prod_id == prodId);
 
-        public async Task<PagedResultLite<ProducingOrderCardDto>> GetProducingOrdersAsync(
-    int page,
-    int pageSize,
-    int? roleId,
-    CancellationToken ct = default)
+        public async Task<PagedResultLite<ProducingOrderCardDto>> GetProducingOrdersAsync(int page, int pageSize, int? roleId, CancellationToken ct = default)
         {
             NormalizePaging(ref page, ref pageSize);
             var skip = (page - 1) * pageSize;
@@ -113,17 +109,20 @@ namespace AMMS.Infrastructure.Repositories
 
             var prodIds = baseRows.Select(x => x.prod_id).ToList();
 
-            var taskRows = await _db.tasks
-                .AsNoTracking()
-                .Where(t => t.prod_id != null && prodIds.Contains(t.prod_id.Value))
+            var taskRows = await _db.tasks.AsNoTracking().Where(t => t.prod_id != null && prodIds.Contains(t.prod_id.Value))
                 .Select(t => new TaskRow
-                {
-                    ProdId = t.prod_id!.Value,
-                    SeqNum = t.seq_num,
-                    StartTime = t.start_time,
-                    EndTime = t.end_time
-                })
-                .ToListAsync(ct);
+    {
+        TaskId = t.task_id,
+        ProdId = t.prod_id!.Value,
+        ProcessId = t.process_id,
+        SeqNum = t.seq_num,
+        Status = t.status,
+        StartTime = t.start_time,
+        EndTime = t.end_time,
+        PlannedStartTime = t.planned_start_time,
+        PlannedEndTime = t.planned_end_time
+    })
+    .ToListAsync(ct);
 
             var tasksByProd = taskRows
                 .GroupBy(x => x.ProdId)
@@ -140,15 +139,17 @@ namespace AMMS.Infrastructure.Repositories
                 .ToList();
 
             var stepRows = await _db.product_type_processes
-                .AsNoTracking()
-                .Where(p => productTypeIds.Contains(p.product_type_id) && (p.is_active ?? true))
-                .Select(p => new StepRow
-                {
-                    ProductTypeId = p.product_type_id,
-                    SeqNum = p.seq_num,
-                    ProcessName = p.process_name,
-                    ProcessCode = p.process_code
-                }).ToListAsync(ct);
+    .AsNoTracking()
+    .Where(p => productTypeIds.Contains(p.product_type_id) && (p.is_active ?? true))
+    .Select(p => new StepRow
+    {
+        ProductTypeId = p.product_type_id,
+        ProcessId = p.process_id,
+        SeqNum = p.seq_num,
+        ProcessName = p.process_name,
+        ProcessCode = p.process_code
+    })
+    .ToListAsync(ct);
 
             var stepsByProductType = stepRows
                 .GroupBy(x => x.ProductTypeId)
@@ -180,33 +181,86 @@ namespace AMMS.Infrastructure.Repositories
                 if (visibleSteps.Count == 0)
                     continue;
 
-                var visibleSeqs = visibleSteps
-                    .Select(x => x.SeqNum)
-                    .ToHashSet();
+                var stageStatuses = visibleSteps
+                    .Select(step =>
+                    {
+                        var task = tasks.FirstOrDefault(t => t.ProcessId == step.ProcessId)
+                                   ?? tasks.FirstOrDefault(t => t.SeqNum == step.SeqNum);
 
-                var visibleTasks = tasks
-                    .Where(x => x.SeqNum.HasValue && visibleSeqs.Contains(x.SeqNum.Value))
-                    .OrderBy(x => x.SeqNum ?? int.MaxValue)
+                        return new ProductionStageStatusDto
+                        {
+                            task_id = task?.TaskId,
+                            process_id = step.ProcessId,
+                            seq_num = step.SeqNum,
+                            process_code = step.ProcessCode,
+                            process_name = step.ProcessName,
+                            status = ResolveTaskStageStatus(task),
+                            start_time = task?.StartTime,
+                            end_time = task?.EndTime,
+                            planned_start_time = task?.PlannedStartTime,
+                            planned_end_time = task?.PlannedEndTime,
+                            is_current = false
+                        };
+                    })
+                    .OrderBy(x => x.seq_num ?? int.MaxValue)
                     .ToList();
 
-                var stages = visibleSteps
-                    .Select(s => s.ProcessName)
-                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                var visibleTasks = tasks
+                    .Where(t =>
+                        visibleSteps.Any(s =>
+                            (t.ProcessId.HasValue && t.ProcessId == s.ProcessId) ||
+                            (t.SeqNum.HasValue && t.SeqNum == s.SeqNum)))
+                    .OrderBy(t => t.SeqNum ?? int.MaxValue)
                     .ToList();
 
                 var currentSeq = GetCurrentSeq(visibleTasks);
 
                 string? currentStage = null;
+                string? currentStageStatus = null;
+
                 if (currentSeq.HasValue)
                 {
-                    currentStage = visibleSteps
-                        .FirstOrDefault(x => x.SeqNum == currentSeq.Value)?
-                        .ProcessName;
+                    var currentStageItem = stageStatuses
+                        .FirstOrDefault(x => x.seq_num == currentSeq.Value);
+
+                    if (currentStageItem != null)
+                    {
+                        currentStage = currentStageItem.process_name;
+                        currentStageStatus = currentStageItem.status;
+                        currentStageItem.is_current = true;
+                    }
                 }
                 else if (visibleTasks.Count > 0 && visibleTasks.All(x => x.EndTime != null))
                 {
-                    currentStage = stages.LastOrDefault();
+                    var lastStage = stageStatuses
+                        .OrderBy(x => x.seq_num ?? int.MaxValue)
+                        .LastOrDefault();
+
+                    if (lastStage != null)
+                    {
+                        currentStage = lastStage.process_name;
+                        currentStageStatus = lastStage.status;
+                        lastStage.is_current = true;
+                    }
                 }
+                else
+                {
+                    var firstStage = stageStatuses
+                        .OrderBy(x => x.seq_num ?? int.MaxValue)
+                        .FirstOrDefault();
+
+                    if (firstStage != null)
+                    {
+                        currentStage = firstStage.process_name;
+                        currentStageStatus = firstStage.status;
+                        firstStage.is_current = true;
+                    }
+                }
+
+                var stages = visibleSteps
+                    .Select(s => s.ProcessName)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .ToList();
 
                 var progress = ComputeProgressByStages(visibleSteps, currentSeq, visibleTasks);
 
@@ -220,9 +274,13 @@ namespace AMMS.Infrastructure.Repositories
                     delivery_date = r.delivery_date,
                     progress_percent = progress,
                     current_stage = currentStage,
-                    stages = stages,
+
                     status = r.order_status,
-                    production_status = r.production_status
+                    production_status = r.production_status,
+
+                    stage_status = currentStageStatus,
+                    stages = stages,
+                    stage_statuses = stageStatuses
                 });
             }
 
@@ -915,6 +973,23 @@ namespace AMMS.Infrastructure.Repositories
             if (page <= 0) page = 1;
             if (pageSize <= 0) pageSize = 10;
             if (pageSize > 200) pageSize = 200;
+        }
+
+        private static string ResolveTaskStageStatus(TaskRow? task)
+        {
+            if (task == null)
+                return "Unassigned";
+
+            if (!string.IsNullOrWhiteSpace(task.Status))
+                return task.Status!;
+
+            if (task.EndTime != null)
+                return "Finished";
+
+            if (task.StartTime != null)
+                return "InProcessing";
+
+            return "Unassigned";
         }
     }
 }

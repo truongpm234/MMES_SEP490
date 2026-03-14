@@ -71,6 +71,8 @@ namespace AMMS.Infrastructure.Repositories
                             deposit_amount = ce != null ? ce.deposit_amount : null,
                             verified_at = r.verified_at,
                             quote_expires_at = r.quote_expires_at,
+                            message_to_customer = r.message_to_customer,
+                            production_processes = ce != null ? ce.production_processes : null
                         };
 
             return await query.FirstOrDefaultAsync();
@@ -681,6 +683,7 @@ namespace AMMS.Infrastructure.Repositories
                 note = SafeText(request.note),
                 verified_at = request.verified_at,
                 quote_expires_at = request.quote_expires_at,
+                message_to_customer = SafeText(request.message_to_customer),
                 cost_estimate = estimates.Select(ce =>
                 {
                     var discountAmount = ce.discount_amount < 0m ? 0m : ce.discount_amount;
@@ -723,7 +726,8 @@ namespace AMMS.Infrastructure.Repositories
                         mounting_glue_cost = ce.mounting_glue_cost,
                         lamination_cost = ce.lamination_cost,
                         material_cost = ce.material_cost,
-
+                        contract_file_path = ce.contract_file_path,
+                        contract_uploaded_at = ce.contract_uploaded_at,
                         base_cost = ce.base_cost,
                         design_cost = ce.design_cost,
                         subtotal = ce.subtotal,
@@ -773,7 +777,8 @@ namespace AMMS.Infrastructure.Repositories
                     is_one_side_box = r.is_one_side_box,
                     print_width_mm = r.print_width_mm,
                     print_height_mm = r.print_height_mm,
-                    is_send_design = r.is_send_design
+                    is_send_design = r.is_send_design,
+                    message_to_customer = r.message_to_customer
                 })
                 .FirstOrDefaultAsync(ct);
 
@@ -805,6 +810,7 @@ namespace AMMS.Infrastructure.Repositories
                     final_total_cost = e.final_total_cost,
                     deposit_amount = e.deposit_amount,
                     created_at = e.created_at,
+                    
                     estimated_finish_date = e.estimated_finish_date,
                     desired_delivery_date = e.desired_delivery_date,
                     sheets_required = e.sheets_required,
@@ -818,7 +824,9 @@ namespace AMMS.Infrastructure.Repositories
                     paper_name = e.paper_name,
                     coating_type = e.coating_type,
                     wave_type = e.wave_type,
-                    cost_note = e.cost_note
+                    cost_note = e.cost_note,
+                    contract_file_path = e.contract_file_path,
+                    contract_uploaded_at = e.contract_uploaded_at
                 })
                 .ToListAsync(ct);
 

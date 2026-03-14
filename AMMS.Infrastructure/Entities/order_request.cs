@@ -69,6 +69,8 @@ public partial class order_request
     [Column("quote_expire_at")]
     public DateTime? quote_expires_at { get; set; }
 
+    public string? message_to_customer { get; set; }
+
     public virtual quote? quote { get; set; }
 
     public virtual order? order { get; set; }

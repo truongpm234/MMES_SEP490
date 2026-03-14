@@ -186,6 +186,7 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.quote_expires_at).HasColumnName("quote_expire_at").HasColumnType("timestamp without time zone");
             entity.Property(e => e.product_name).HasMaxLength(200);
             entity.Property(e => e.product_type).HasMaxLength(50);
+            entity.Property(e => e.message_to_customer).HasColumnName("message_to_customer");
             entity.Property(e => e.number_of_plates).HasDefaultValue(0);
             entity.HasOne(d => d.order)
                 .WithMany()
@@ -467,7 +468,12 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.sheets_waste).HasDefaultValue(0);
             entity.Property(e => e.sheets_total).HasDefaultValue(0);
             entity.Property(e => e.total_area_m2).HasPrecision(18, 4).HasDefaultValue(0);
-
+            entity.Property(e => e.contract_file_path)
+                .HasColumnName("contract_file_path")
+                .HasMaxLength(1000);
+            entity.Property(e => e.contract_uploaded_at)
+                .HasColumnName("contract_uploaded_at")
+                .HasColumnType("timestamp without time zone");
             entity.HasOne(d => d.order_request)
                 .WithMany()
                 .HasForeignKey(d => d.order_request_id)

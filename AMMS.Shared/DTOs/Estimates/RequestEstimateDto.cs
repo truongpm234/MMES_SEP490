@@ -60,8 +60,8 @@ namespace AMMS.Shared.DTOs.Estimates
         public decimal lamination_weight_kg { get; set; }
         public decimal lamination_rate_per_m2 { get; set; }
         public decimal material_cost { get; set; }
-        //public decimal overhead_percent { get; set; }
-        //public decimal overhead_cost { get; set; }
+        public string? contract_file_path { get; set; }
+        public DateTime? contract_uploaded_at { get; set; }
         public decimal base_cost { get; set; }
         public bool is_rush { get; set; }
         public decimal rush_percent { get; set; }

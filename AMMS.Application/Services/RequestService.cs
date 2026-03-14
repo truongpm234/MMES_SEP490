@@ -144,6 +144,9 @@ namespace AMMS.Application.Services
 
             if (ce != null)
             {
+                if (!string.IsNullOrWhiteSpace(req.paper_code))
+                    ce.paper_code = req.paper_code.Trim();
+
                 if (!string.IsNullOrWhiteSpace(req.paper_name))
                     ce.paper_name = req.paper_name.Trim();
 
@@ -679,30 +682,28 @@ namespace AMMS.Application.Services
                 throw new InvalidOperationException($"Cannot submit when process_status = {req.process_status}");
             }
 
-            var latest2Ids = await _db.cost_estimates
+            var keepIds = await _db.cost_estimates
                 .AsNoTracking()
-                .Where(x => x.order_request_id == input.request_id)
+                .Where(x => x.order_request_id == input.request_id && x.is_active)
                 .OrderByDescending(x => x.estimate_id)
                 .Select(x => x.estimate_id)
                 .Take(2)
                 .ToListAsync();
 
-            if (latest2Ids.Count == 0)
-                throw new InvalidOperationException("No cost estimate found for this request");
+            if (keepIds.Count == 0)
+                throw new InvalidOperationException("No active estimate found. Please create or revise estimate before submit.");
 
             await _db.cost_estimates
                 .Where(x => x.order_request_id == input.request_id)
                 .ExecuteUpdateAsync(setters =>
-                    setters.SetProperty(x => x.is_active, x => latest2Ids.Contains(x.estimate_id)));
+                    setters.SetProperty(x => x.is_active, x => keepIds.Contains(x.estimate_id)));
 
             var normalizedNote = string.IsNullOrWhiteSpace(input.consultant_note)
                 ? null
                 : input.consultant_note.Trim();
 
             req.consultant_note = normalizedNote;
-
             req.process_status = "Processing";
-
             req.verified_at = null;
             req.quote_expires_at = null;
             req.accepted_estimate_id = null;
@@ -909,6 +910,25 @@ namespace AMMS.Application.Services
                 cloned_estimate_ids = clonedEstimateIds,
                 message = "Cloned request successfully"
             };
+        }
+
+        public async Task UpdateConsultantMessageToCustomerAsync(int requestId, string? message, CancellationToken ct = default)
+        {
+            if (requestId <= 0)
+                throw new ArgumentException("request_id is required");
+
+            var req = await _requestRepo.GetByIdAsync(requestId);
+            if (req == null)
+                throw new InvalidOperationException("Order request not found");
+
+            if (!string.Equals(req.process_status, "Verified", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Only Verified request can update consultant message to customer");
+
+            req.message_to_customer = string.IsNullOrWhiteSpace(message)
+                ? null
+                : message.Trim();
+
+            await _requestRepo.SaveChangesAsync();
         }
 
         private async Task<string> NormalizeProductionProcessCsvAsync(

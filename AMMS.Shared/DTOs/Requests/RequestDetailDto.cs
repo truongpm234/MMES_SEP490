@@ -39,6 +39,7 @@
 
         public string reason { get; set; } = "";
         public string note { get; set; } = "";
+        public string? message_to_customer { get; set; }
         public DateTime? verified_at { get; set; }
         public DateTime? quote_expires_at { get; set; }
         public List<CostEstimateDetailDto> cost_estimate { get; set; } = new();
@@ -86,7 +87,8 @@
         public decimal discount_amount { get; set; }
         public decimal vat_percent { get; set; }
         public decimal vat_amount { get; set; }
-
+        public string? contract_file_path { get; set; }
+        public DateTime? contract_uploaded_at { get; set; }
         public List<ProcessCostDetailDto> process_cost { get; set; } = new();
     }
 
