@@ -20,8 +20,6 @@ namespace AMMS.Application.Helpers
             };
         }
 
-        // SỬA 1:
-        // Đổi nội dung cho phù hợp khi đặt ở cuối email báo giá
         private static string QuoteIntro(order_request req)
         {
             var customerName = string.IsNullOrWhiteSpace(req.customer_name)
@@ -81,8 +79,6 @@ namespace AMMS.Application.Helpers
 </div>";
         }
 
-        // SỬA 2:
-        // Bỏ actionBlock ra khỏi QuoteEmailInner để chủ động đặt link checkout ở trên và lời nhắn ở dưới
         private static string QuoteEmailInner(order_request req, cost_estimate est)
         {
             var delivery = req.delivery_date?.ToString("dd/MM/yyyy") ?? "N/A";
@@ -271,8 +267,6 @@ namespace AMMS.Application.Helpers
 </div>";
         }
 
-        // SỬA 3:
-        // Đưa link checkout lên trên form báo giá, đưa lời nhắn cảm ơn xuống dưới cùng
         public static string QuoteEmail(order_request req, cost_estimate est, quote q, string orderDetailUrl)
         {
             var topCopyBlock = SecurePlainUrlBlock(orderDetailUrl);
@@ -305,8 +299,6 @@ namespace AMMS.Application.Helpers
 </html>";
         }
 
-        // SỬA 4:
-        // Với email so sánh 2 báo giá: đưa link checkout lên trên, đưa lời nhắn xuống cuối
         public static string QuoteEmailCompare(order_request req, List<(cost_estimate est, quote q, string? checkoutUrl)> pairs)
         {
             if (pairs == null || pairs.Count == 0)

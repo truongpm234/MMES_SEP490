@@ -164,6 +164,8 @@ namespace AMMS.Infrastructure.Repositories
                     design_cost = ce.design_cost,
                     cost_note = ce.cost_note,
                     deposit_amount = ce.deposit_amount,
+                    contract_file_path = ce.contract_file_path,
+                    contract_uploaded_at = ce.contract_uploaded_at
                 };
 
             return await q.ToListAsync(ct);
@@ -203,6 +205,19 @@ namespace AMMS.Infrastructure.Repositories
                 .Where(x => x.order_request_id == orderRequestId)
                 .ExecuteUpdateAsync(setters =>
                     setters.SetProperty(x => x.is_active, x => keepIds.Contains(x.estimate_id)), ct);
+        }
+
+        public async Task<cost_estimate?> GetTrackingByIdAsync(int estimateId, CancellationToken ct = default)
+        {
+            return await _db.cost_estimates
+                .FirstOrDefaultAsync(x => x.estimate_id == estimateId, ct);
+        }
+
+        public async Task<bool> EstimateBelongsToRequestAsync(int estimateId, int requestId, CancellationToken ct = default)
+        {
+            return await _db.cost_estimates
+                .AsNoTracking()
+                .AnyAsync(x => x.estimate_id == estimateId && x.order_request_id == requestId, ct);
         }
     }
 }

@@ -723,7 +723,8 @@ namespace AMMS.Infrastructure.Repositories
                         mounting_glue_cost = ce.mounting_glue_cost,
                         lamination_cost = ce.lamination_cost,
                         material_cost = ce.material_cost,
-
+                        contract_file_path = ce.contract_file_path,
+                        contract_uploaded_at = ce.contract_uploaded_at,
                         base_cost = ce.base_cost,
                         design_cost = ce.design_cost,
                         subtotal = ce.subtotal,
@@ -805,6 +806,7 @@ namespace AMMS.Infrastructure.Repositories
                     final_total_cost = e.final_total_cost,
                     deposit_amount = e.deposit_amount,
                     created_at = e.created_at,
+                    
                     estimated_finish_date = e.estimated_finish_date,
                     desired_delivery_date = e.desired_delivery_date,
                     sheets_required = e.sheets_required,
@@ -818,7 +820,9 @@ namespace AMMS.Infrastructure.Repositories
                     paper_name = e.paper_name,
                     coating_type = e.coating_type,
                     wave_type = e.wave_type,
-                    cost_note = e.cost_note
+                    cost_note = e.cost_note,
+                    contract_file_path = e.contract_file_path,
+                    contract_uploaded_at = e.contract_uploaded_at
                 })
                 .ToListAsync(ct);
 

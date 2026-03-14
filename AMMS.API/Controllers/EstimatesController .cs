@@ -90,5 +90,69 @@ namespace AMMS.API.Controllers
             var res = await _service.BuildPreviewAsync(requestId, ct);
             return Ok(res);
         }
+
+        [HttpPost("upload-contract")]
+        [RequestSizeLimit(50_000_000)]
+        public async Task<IActionResult> UploadContract(
+            [FromForm] UploadEstimateContractRequest req,
+            CancellationToken ct)
+        {
+            try
+            {
+                if (req.request_id <= 0)
+                    return BadRequest(new { message = "request_id must be > 0" });
+
+                if (req.estimate_id <= 0)
+                    return BadRequest(new { message = "estimate_id must be > 0" });
+
+                if (req.file == null || req.file.Length == 0)
+                    return BadRequest(new { message = "file is required" });
+
+                var allowedExtensions = new[] { ".pdf", ".doc", ".docx" };
+                var ext = Path.GetExtension(req.file.FileName)?.ToLowerInvariant();
+
+                if (string.IsNullOrWhiteSpace(ext) || !allowedExtensions.Contains(ext))
+                {
+                    return BadRequest(new
+                    {
+                        message = "Only .pdf, .doc, .docx files are allowed"
+                    });
+                }
+
+                await using var stream = req.file.OpenReadStream();
+
+                var url = await _service.UploadContractFileAsync(
+                    req.request_id,
+                    req.estimate_id,
+                    stream,
+                    req.file.FileName,
+                    req.file.ContentType ?? "application/octet-stream",
+                    ct);
+
+                return Ok(new
+                {
+                    message = "Upload contract file successfully",
+                    request_id = req.request_id,
+                    estimate_id = req.estimate_id,
+                    contract_file_path = url
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Upload contract file failed",
+                    detail = ex.Message
+                });
+            }
+        }
     }
 }

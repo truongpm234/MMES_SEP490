@@ -12,10 +12,12 @@ namespace AMMS.Application.Services
     {
         private readonly ICostEstimateRepository _estimateRepo;
         private readonly IQuoteRepository _quoteRepo;
-        public EstimateService(ICostEstimateRepository costEstimateRepository, IQuoteRepository quoteRepo)
+        private readonly IUploadFileService _uploadFileService;
+        public EstimateService(ICostEstimateRepository costEstimateRepository, IQuoteRepository quoteRepo, IUploadFileService uploadFileService)
         {
             _estimateRepo = costEstimateRepository;
             _quoteRepo = quoteRepo;
+            _uploadFileService = uploadFileService;
         }
 
         public async Task UpdateFinalCostAsync(int orderRequestId, decimal? finalCostInput)
@@ -84,15 +86,14 @@ namespace AMMS.Application.Services
             var entity = new cost_estimate
             {
                 order_request_id = req.order_request_id,
-
-                // mới thêm
                 previous_estimate_id = previousEstimate?.estimate_id,
-
                 created_at = ToUnspecified(req.created_at ?? now),
                 is_active = true,
                 estimated_finish_date = ToUnspecified(req.estimated_finish_date ?? now),
                 production_processes = req.production_processes?.Trim(),
                 desired_delivery_date = ToUnspecified(req.desired_delivery_date ?? (orderReq.delivery_date ?? now)),
+                contract_file_path = string.IsNullOrWhiteSpace(req.contract_file_path) ? null : req.contract_file_path.Trim(),
+                contract_uploaded_at = string.IsNullOrWhiteSpace(req.contract_file_path) ? null : AppTime.NowVnUnspecified(),
             };
 
             static void SetIfHasValue<T>(T? value, Action<T> setter) where T : struct
@@ -239,6 +240,48 @@ namespace AMMS.Application.Services
         public async Task<QuoteEmailComparePreviewResponse> BuildPreviewAsync(int requestId, CancellationToken ct = default)
         {
             return await _quoteRepo.BuildPreviewAsync(requestId, ct);
+        }
+
+        public async Task<string> UploadContractFileAsync(int requestId, int estimateId, Stream fileStream, string fileName, string contentType, CancellationToken ct = default)
+        {
+            if (requestId <= 0)
+                throw new ArgumentException("request_id must be > 0");
+
+            if (estimateId <= 0)
+                throw new ArgumentException("estimate_id must be > 0");
+
+            if (fileStream == null)
+                throw new ArgumentException("file is required");
+
+            if (string.IsNullOrWhiteSpace(fileName))
+                throw new ArgumentException("fileName is required");
+
+            var orderReq = await _estimateRepo.GetOrderRequestTrackingAsync(requestId, ct);
+            if (orderReq == null)
+                throw new InvalidOperationException("Order request not found");
+
+            var estimate = await _estimateRepo.GetTrackingByIdAsync(estimateId, ct);
+            if (estimate == null)
+                throw new InvalidOperationException("Cost estimate not found");
+
+            if (estimate.order_request_id != requestId)
+                throw new InvalidOperationException("Estimate does not belong to request_id");
+
+            var safeFileName = Path.GetFileName(fileName);
+            var module = $"contracts/request_{requestId}/estimate_{estimateId}";
+
+            var uploadedUrl = await _uploadFileService.UploadAsync(
+                fileStream,
+                safeFileName,
+                contentType,
+                module);
+
+            estimate.contract_file_path = uploadedUrl;
+            estimate.contract_uploaded_at = AppTime.NowVnUnspecified();
+
+            await _estimateRepo.SaveChangesAsync();
+
+            return uploadedUrl;
         }
     }
 }

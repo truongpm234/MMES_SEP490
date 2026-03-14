@@ -86,7 +86,8 @@
         public decimal discount_amount { get; set; }
         public decimal vat_percent { get; set; }
         public decimal vat_amount { get; set; }
-
+        public string? contract_file_path { get; set; }
+        public DateTime? contract_uploaded_at { get; set; }
         public List<ProcessCostDetailDto> process_cost { get; set; } = new();
     }
 

@@ -70,5 +70,7 @@ namespace AMMS.Shared.DTOs.Requests
         public string? coating_type { get; set; }
         public string? wave_type { get; set; }
         public string? cost_note { get; set; }
+        public string? contract_file_path { get; set; }
+        public DateTime? contract_uploaded_at { get; set; }
     }
 }
