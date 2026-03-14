@@ -37,5 +37,6 @@ namespace AMMS.Application.Interfaces
         Task SubmitEstimateForApprovalAsync(SubmitForApprovalRequestDto input);
         Task<RequestWithTwoEstimatesDto?> GetCompareQuotesAsync(int requestId, CancellationToken ct = default);
         Task<CloneRequestResponseDto> CloneRequestAsync(int requestId, CancellationToken ct = default);
+        Task UpdateConsultantMessageToCustomerAsync(int requestId, string? message, CancellationToken ct = default);
     }
 }

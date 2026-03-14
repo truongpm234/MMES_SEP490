@@ -186,6 +186,7 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.quote_expires_at).HasColumnName("quote_expire_at").HasColumnType("timestamp without time zone");
             entity.Property(e => e.product_name).HasMaxLength(200);
             entity.Property(e => e.product_type).HasMaxLength(50);
+            entity.Property(e => e.message_to_customer).HasColumnName("message_to_customer");
             entity.Property(e => e.number_of_plates).HasDefaultValue(0);
             entity.HasOne(d => d.order)
                 .WithMany()

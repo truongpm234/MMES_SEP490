@@ -921,6 +921,43 @@ namespace AMMS.API.Controllers
             return Ok(dto);
         }
 
+        [HttpPut("consultant-message-to-customer")]
+        public async Task<IActionResult> UpdateConsultantMessageToCustomer([FromBody] UpdateConsultantMessageToCustomerDto dto, CancellationToken ct)
+        {
+            try
+            {
+                if (dto == null)
+                    return BadRequest(new { message = "Request body is required" });
+
+                if (dto.request_id <= 0)
+                    return BadRequest(new { message = "request_id must be greater than 0" });
+
+                await _service.UpdateConsultantMessageToCustomerAsync(dto.request_id, dto.message, ct);
+
+                return Ok(new
+                {
+                    message = "Updated consultant message to customer successfully",
+                    request_id = dto.request_id
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "An unexpected error occurred",
+                    detail = ex.Message
+                });
+            }
+        }
+
         private static bool IsPayableStatus(string? status)
         {
             return string.Equals(status, "Verified", StringComparison.OrdinalIgnoreCase)

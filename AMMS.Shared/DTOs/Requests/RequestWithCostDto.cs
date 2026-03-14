@@ -41,6 +41,7 @@ namespace AMMS.Shared.DTOs.Requests
         public int? print_height_mm { get; set; }
         public bool? is_send_design { get; set; }
         public string? reason { get; set; }
+        public string? message_to_customer { get; set; }
         public decimal? final_total_cost { get; set; }
         public decimal? deposit_amount { get; set; }
     }

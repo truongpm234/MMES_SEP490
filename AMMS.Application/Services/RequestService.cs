@@ -901,6 +901,25 @@ namespace AMMS.Application.Services
             };
         }
 
+        public async Task UpdateConsultantMessageToCustomerAsync(int requestId, string? message, CancellationToken ct = default)
+        {
+            if (requestId <= 0)
+                throw new ArgumentException("request_id is required");
+
+            var req = await _requestRepo.GetByIdAsync(requestId);
+            if (req == null)
+                throw new InvalidOperationException("Order request not found");
+
+            if (!string.Equals(req.process_status, "Verified", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Only Verified request can update consultant message to customer");
+
+            req.message_to_customer = string.IsNullOrWhiteSpace(message)
+                ? null
+                : message.Trim();
+
+            await _requestRepo.SaveChangesAsync();
+        }
+
         private async Task<string> NormalizeProductionProcessCsvAsync(
     int productTypeId,
     string? rawCsv,
