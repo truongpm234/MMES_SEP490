@@ -20,6 +20,8 @@ namespace AMMS.Application.Helpers
             };
         }
 
+        // SỬA 1:
+        // Đổi nội dung cho phù hợp khi đặt ở cuối email báo giá
         private static string QuoteIntro(order_request req)
         {
             var customerName = string.IsNullOrWhiteSpace(req.customer_name)
@@ -27,32 +29,32 @@ namespace AMMS.Application.Helpers
                 : req.customer_name!.Trim();
 
             return $@"
-<div style='background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);border:1px solid #dbe7f3;border-radius:16px;padding:22px 24px;margin-bottom:18px;box-shadow:0 10px 28px rgba(15,23,42,0.06);font-family:Roboto, Arial, Helvetica, sans-serif;line-height:1.78;color:#334155;'>
+<div style='margin-top:18px;background:linear-gradient(135deg,#fff7ed 0%,#eff6ff 100%);border:1px solid #dbe7f3;border-radius:16px;padding:22px 24px;box-shadow:0 10px 28px rgba(15,23,42,0.06);font-family:Roboto, Arial, Helvetica, sans-serif;line-height:1.78;color:#334155;'>
+  <div style='display:inline-block;background:linear-gradient(90deg,#f97316 0%,#2563eb 100%);color:#ffffff;font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;padding:6px 12px;border-radius:999px;margin-bottom:12px;'>
+    MES CARE
+  </div>
+
   <div style='font-size:20px;font-weight:800;color:#1e3a8a;margin-bottom:10px;letter-spacing:0.2px;'>
-    Báo giá đơn hàng
+    Cảm ơn Quý khách đã xem báo giá
   </div>
 
   <p style='margin:0 0 12px 0;font-size:14px;'>
-    Kính gửi <b>{customerName}</b>,
+    Kính gửi <b>quý khách hàng</b>,
   </p>
 
   <p style='margin:0 0 12px 0;font-size:14px;'>
-    Trước hết, chúng tôi xin gửi lời cảm ơn chân thành đến Quý khách vì đã quan tâm, tin tưởng
-    và lựa chọn đồng hành cùng doanh nghiệp trong nhu cầu tư vấn và đặt hàng. Sự ủng hộ của Quý khách
-    là động lực để đội ngũ MES không ngừng hoàn thiện chất lượng phục vụ, tối ưu quy trình sản xuất
-    và nâng cao trải nghiệm trong từng đơn hàng.
-  </p>
-  <p style='margin:0 0 12px 0;font-size:14px;'>
-    Chúng tôi luôn hướng tới việc cung cấp cho Quý khách giải pháp phù hợp, minh bạch về chi phí
-    và đảm bảo tốt về tiến độ thực hiện. Trong trường hợp Quý khách cần điều chỉnh phương án,
-    thay đổi quy cách, cập nhật số lượng hoặc cần được tư vấn thêm trước khi xác nhận,
-    đội ngũ của chúng tôi luôn sẵn sàng hỗ trợ để cùng Quý khách lựa chọn phương án tối ưu nhất.
+    Chúng tôi chân thành cảm ơn Quý khách đã dành thời gian tham khảo nội dung báo giá ở trên.
+    Toàn bộ thông tin về sản phẩm, vật liệu, quy cách, số lượng và chi phí đã được trình bày
+    để Quý khách thuận tiện kiểm tra trước khi xác nhận.
   </p>
 
-  <p style='margin:0;font-size:14px;'>
-    Một lần nữa, xin chân thành cảm ơn Quý khách đã dành thời gian làm việc cùng chúng tôi.
-    Kính mời Quý khách tham khảo nội dung báo giá bên dưới để thuận tiện cho việc xác nhận,
-    phản hồi hoặc tiếp tục trao đổi khi cần thiết.
+  <p style='margin:0 0 12px 0;font-size:14px;'>
+    Nếu Quý khách cần điều chỉnh phương án, thay đổi loại giấy, cập nhật quy cách, số lượng
+    hoặc cần tư vấn thêm để lựa chọn phương án phù hợp hơn, đội ngũ của chúng tôi luôn sẵn sàng hỗ trợ.
+  </p>
+
+  <p style='margin:0;font-size:14px;color:#0f172a;font-weight:600;'>
+    Một lần nữa, xin chân thành cảm ơn Quý khách đã tin tưởng và đồng hành cùng MES.
   </p>
 </div>";
         }
@@ -64,18 +66,24 @@ namespace AMMS.Application.Helpers
 
             var safeUrl = System.Net.WebUtility.HtmlEncode(url);
 
-            var copyBox = "margin:10px auto 0 auto;max-width:640px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;padding:10px 12px;text-align:left;";
-            var copyTitle = "font-size:12px;color:#475569;font-weight:800;margin:0 0 6px 0;";
+            var copyBox = "margin:0 0 16px 0;max-width:100%;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:12px;padding:12px 14px;text-align:left;";
+            var copyTitle = "font-size:12px;color:#475569;font-weight:800;margin:0 0 8px 0;";
+            var copyDesc = "font-size:12px;color:#334155;line-height:1.6;margin:0 0 8px 0;";
             var copyUrl = "font-size:12px;color:#0f172a;word-break:break-all;line-height:1.6;margin:0;font-family:Roboto, Arial, Helvetica, sans-serif;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;user-select:all;-webkit-user-select:all;";
 
             return $@"
 <div style='{copyBox}'>
-  <p style='{copyTitle}'>Nếu đường link trên không hoạt động, hãy copy link bên dưới và dán vào trình duyệt:</p>
+  <p style='{copyTitle}'>🔗 Đường dẫn xác nhận báo giá</p>
+  <p style='{copyDesc}'>
+    Vui lòng copy đường dẫn bên dưới và dán vào tab mới của trình duyệt để tiếp tục xác nhận báo giá.
+  </p>
   <p style='{copyUrl}'>{safeUrl}</p>
 </div>";
         }
 
-        private static string QuoteEmailInner(order_request req, cost_estimate est, quote q, string? orderDetailUrl, bool showAction)
+        // SỬA 2:
+        // Bỏ actionBlock ra khỏi QuoteEmailInner để chủ động đặt link checkout ở trên và lời nhắn ở dưới
+        private static string QuoteEmailInner(order_request req, cost_estimate est)
         {
             var delivery = req.delivery_date?.ToString("dd/MM/yyyy") ?? "N/A";
             var requestDateText = req.order_request_date?.ToString("dd/MM/yyyy HH:mm") ?? "N/A";
@@ -101,9 +109,6 @@ namespace AMMS.Application.Helpers
             var discountPercent = est.discount_percent;
             var discountAmount = est.discount_amount;
             var deposit = est.deposit_amount;
-
-            var expiredAt = ResolveQuoteExpiredAt(req, q);
-            bool isCustomerCopy = !string.IsNullOrEmpty(orderDetailUrl);
 
             string FormatVND(decimal? amount) => string.Format("{0:N0} đ", amount ?? 0).Replace(",", ".");
 
@@ -140,9 +145,6 @@ namespace AMMS.Application.Helpers
             var depositLeft = "color:#166534;font-weight:900;font-size:13px;";
             var depositRight = "color:#166534;font-weight:900;font-size:16px;text-align:right;";
 
-            var warnBox = "background:#f1f5f9;border:1px dashed #94a3b8;border-radius:10px;padding:10px 12px;display:inline-block;";
-            var warnText = "color:#475569;font-weight:800;font-size:12px;";
-
             var otherFeesRow = otherFees > 0
                 ? $"<tr><td style='{line}'>Chi phí khác</td><td style='{money}'>{FormatVND(otherFees)}</td></tr>"
                 : "";
@@ -158,30 +160,6 @@ namespace AMMS.Application.Helpers
   <td style='{moneyRed};border-bottom:1px dashed #cbd5e1;'>- {FormatVND(discountAmount)}</td>
 </tr>"
                 : "";
-
-            var expiryNoteHtml = QuoteExpiryNotice(expiredAt, includeAutoReject: true);
-
-            string actionBlock = "";
-            if (showAction)
-            {
-                if (isCustomerCopy)
-                {
-                    var copyUrlBlock = SecurePlainUrlBlock(orderDetailUrl);
-
-                    actionBlock = $@"
-{copyUrlBlock}
-
-{expiryNoteHtml}";
-                }
-                else
-                {
-                    actionBlock = $@"
-<div style='text-align:center;margin-top:14px;'>
-  <div style='{warnBox}'><span style='{warnText}'>⚠ Email copy cho tư vấn viên.</span></div>
-</div>
-{expiryNoteHtml}";
-                }
-            }
 
             var rightColLayout = $@"
 <div style='display:flex; flex-direction:column; justify-content:space-between; height:100%;'>
@@ -289,16 +267,18 @@ namespace AMMS.Application.Helpers
         </td>
       </tr>
     </table>
-
-    {actionBlock}
   </div>
 </div>";
         }
 
+        // SỬA 3:
+        // Đưa link checkout lên trên form báo giá, đưa lời nhắn cảm ơn xuống dưới cùng
         public static string QuoteEmail(order_request req, cost_estimate est, quote q, string orderDetailUrl)
         {
-            var intro = QuoteIntro(req);
-            var inner = QuoteEmailInner(req, est, q, orderDetailUrl, showAction: true);
+            var topCopyBlock = SecurePlainUrlBlock(orderDetailUrl);
+            var inner = QuoteEmailInner(req, est);
+            var expiryBox = QuoteExpiryNotice(ResolveQuoteExpiredAt(req, q), includeAutoReject: true);
+            var closingNote = QuoteIntro(req);
 
             return $@"
 <!DOCTYPE html>
@@ -313,8 +293,10 @@ namespace AMMS.Application.Helpers
 </head>
 <body style='background-color:#f7fafc;padding:30px 0;font-family:Roboto, Arial, Helvetica, sans-serif;'>
   <div style='max-width:700px;margin:0 auto;'>
-    {intro}
+    {topCopyBlock}
     {inner}
+    {expiryBox}
+    {closingNote}
     <div style='background:linear-gradient(180deg,#edf2f7 0%,#e2e8f0 100%);padding:15px;text-align:center;font-size:12px;color:#64748b;border-radius:12px;margin-top:14px;'>
       Email này được gửi tự động từ hệ thống MES.
     </div>
@@ -323,6 +305,8 @@ namespace AMMS.Application.Helpers
 </html>";
         }
 
+        // SỬA 4:
+        // Với email so sánh 2 báo giá: đưa link checkout lên trên, đưa lời nhắn xuống cuối
         public static string QuoteEmailCompare(order_request req, List<(cost_estimate est, quote q, string? checkoutUrl)> pairs)
         {
             if (pairs == null || pairs.Count == 0)
@@ -331,12 +315,11 @@ namespace AMMS.Application.Helpers
             var left = pairs[0];
             var right = pairs.Count > 1 ? pairs[1] : ((cost_estimate est, quote q, string? checkoutUrl)?)null;
 
-            var expiredAt = ResolveQuoteExpiredAt(req, left.q);
-            var expiryBox = QuoteExpiryNotice(expiredAt, includeAutoReject: true);
+            var expiryBox = QuoteExpiryNotice(ResolveQuoteExpiredAt(req, left.q), includeAutoReject: true);
 
-            var leftHtml = QuoteEmailInner(req, left.est, left.q, left.checkoutUrl, showAction: false);
+            var leftHtml = QuoteEmailInner(req, left.est);
             var rightHtml = right.HasValue
-                ? QuoteEmailInner(req, right.Value.est, right.Value.q, right.Value.checkoutUrl, showAction: false)
+                ? QuoteEmailInner(req, right.Value.est)
                 : "";
 
             var isCustomerCopy = pairs.Any(x => !string.IsNullOrWhiteSpace(x.checkoutUrl));
@@ -344,10 +327,7 @@ namespace AMMS.Application.Helpers
             string sharedAction = "";
             if (!string.IsNullOrWhiteSpace(left.checkoutUrl))
             {
-                sharedAction = $@"
-<div style='margin-top:16px;'>
-  {SecurePlainUrlBlock(left.checkoutUrl)}
-</div>";
+                sharedAction = SecurePlainUrlBlock(left.checkoutUrl);
             }
 
             string compareLayoutHtml;
@@ -390,7 +370,7 @@ namespace AMMS.Application.Helpers
 </table>";
             }
 
-            var introHtml = isCustomerCopy ? QuoteIntro(req) : "";
+            var closingNoteHtml = isCustomerCopy ? QuoteIntro(req) : "";
 
             return $@"
 <!DOCTYPE html>
@@ -406,16 +386,14 @@ namespace AMMS.Application.Helpers
 <body style='margin:0;background-color:#f7fafc;padding:30px 0;font-family:Roboto, Arial, Helvetica, sans-serif;'>
   <div style='max-width:1100px;margin:0 auto;padding:0 12px;'>
 
-    {introHtml}
-
     <div style='margin-bottom:18px;text-align:center;color:#0f172a;font-weight:800;font-size:18px;letter-spacing:0.2px;'>
       BÁO GIÁ ĐƠN HÀNG AM{req.order_request_id:D6}
     </div>
 
-    {compareLayoutHtml}
-
     {sharedAction}
+    {compareLayoutHtml}
     {expiryBox}
+    {closingNoteHtml}
 
     <div style='background:linear-gradient(180deg,#edf2f7 0%,#e2e8f0 100%);padding:15px;text-align:center;font-size:12px;color:#64748b;margin-top:16px;border-radius:12px;'>
       Email này được gửi tự động từ hệ thống MES.
