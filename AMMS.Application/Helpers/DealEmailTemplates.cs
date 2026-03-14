@@ -33,7 +33,7 @@ namespace AMMS.Application.Helpers
   </div>
 
   <div style='font-size:20px;font-weight:800;color:#1e3a8a;margin-bottom:10px;letter-spacing:0.2px;'>
-    Cảm ơn Quý khách đã xem báo giá
+    Cảm ơn Quý khách đã tin tưởng và sử dụng dịch vụ của chúng tôi
   </div>
 
   <p style='margin:0 0 12px 0;font-size:14px;'>
@@ -73,13 +73,13 @@ namespace AMMS.Application.Helpers
 <div style='{copyBox}'>
   <p style='{copyTitle}'>🔗 Đường dẫn xác nhận báo giá</p>
   <p style='{copyDesc}'>
-    Vui lòng copy đường dẫn bên dưới và dán vào tab mới của trình duyệt để tiếp tục xác nhận báo giá.
+    Xin cảm ơn quý khách hàng đã tin tưởng và sử dụng dịch vụ của chúng tôi. Vui lòng copy đường dẫn bên dưới và dán vào tab mới của trình duyệt để tiếp tục xác nhận báo giá.
   </p>
   <p style='{copyUrl}'>{safeUrl}</p>
 </div>";
         }
 
-        private static string QuoteEmailInner(order_request req, cost_estimate est)
+        private static string QuoteEmailInner(order_request req, cost_estimate est, string? messageToCustomer)
         {
             var delivery = req.delivery_date?.ToString("dd/MM/yyyy") ?? "N/A";
             var requestDateText = req.order_request_date?.ToString("dd/MM/yyyy HH:mm") ?? "N/A";
@@ -115,8 +115,8 @@ namespace AMMS.Application.Helpers
             var tdValueNoWrap = tdValue + "white-space:nowrap;font-size:12px;";
             var tdValueLink = "color:#2563eb;font-size:13px;font-weight:800;padding:7px 0;border-bottom:1px solid #eef2f7;text-align:right;vertical-align:top;word-break:break-word;";
 
-            var card = "background:#ffffff;border:1px solid #cbd5e1;border-radius:12px;overflow:hidden;box-shadow:0 6px 20px rgba(15,23,42,0.08);";
-            var header = "background:linear-gradient(90deg,#1e4f86 0%,#1d3f73 100%);padding:18px 20px;";
+            var card = "background:#ffffff; border:1px solid #e2e8f0; border-radius:16px; overflow:hidden; box-shadow:0 10px 25px rgba(0,0,0,0.05); margin-bottom:20px;";
+            var header = "background:linear-gradient(90deg,#1e3a8a 0%,#2563eb 100%); padding:20px;";
             var badge = "display:inline-block;background:rgba(255,255,255,0.18);color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;font-weight:700;";
             var h1 = "color:#ffffff;font-size:18px;font-weight:800;margin:4px 0 0 0;letter-spacing:0.2px;";
             var smallTop = "color:#cfe6ff;font-size:11px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;";
@@ -158,119 +158,133 @@ namespace AMMS.Application.Helpers
                 : "";
 
             var rightColLayout = $@"
-<div style='display:flex; flex-direction:column; justify-content:space-between; height:100%;'>
-  <table width='100%' height='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse; height:100%;'>
+<div>
+  <div style='{sectionTitleGreen}'>Tổng thanh toán</div>
+  <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
     <tr>
-      <td valign='top'>
-        <div style='{sectionTitleGreen}'>Tổng thanh toán</div>
-        <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
-          <tr>
-            <td style='{totalLabel}'>Tạm tính</td>
-            <td style='{totalValue}'>{FormatVND(subtotal)}</td>
-          </tr>
-          {discountRow}
-          <tr>
-            <td style='{finalRowLeft}'>THÀNH TIỀN</td>
-            <td style='{finalRowRight}'>{FormatVND(finalTotal)}</td>
-          </tr>
-          <tr>
-            <td colspan='2' style='{vatNote}'>(Đã bao gồm VAT)</td>
-          </tr>
-        </table>
-      </td>
+      <td style='{totalLabel}'>Tạm tính</td>
+      <td style='{totalValue}'>{FormatVND(subtotal)}</td>
+    </tr>
+    {discountRow}
+    <tr>
+      <td style='{finalRowLeft}'>THÀNH TIỀN</td>
+      <td style='{finalRowRight}'>{FormatVND(finalTotal)}</td>
     </tr>
     <tr>
-      <td valign='bottom' style='height:100%; vertical-align:bottom;'>
-        <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:separate;border-spacing:0; margin-top:16px;'>
-          <tr>
-            <td style='{depositBoxCell}'>
-              <table width='100%' cellpadding='0' cellspacing='0' border='0'>
-                <tr>
-                  <td style='{depositLeft}'>Cần cọc:</td>
-                  <td style='{depositRight}'>{FormatVND(deposit)}</td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-        </table>
-      </td>
+      <td colspan='2' style='{vatNote}'>(Đã bao gồm VAT)</td>
     </tr>
   </table>
 </div>";
+            var depositBoxHtml = $@"
+<table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;margin-top:18px;'>
+  <tr>
+    <td align='right'>
+      <table width='280' cellpadding='0' cellspacing='0' border='0' style='border-collapse:separate;border-spacing:0;'>
+        <tr>
+          <td style='{depositBoxCell}'>
+            <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
+              <tr>
+                <td style='{depositLeft}'>Cần cọc:</td>
+                <td style='{depositRight}'>{FormatVND(deposit)}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>";
+            string messageBoxHtml = "";
+            if (!string.IsNullOrWhiteSpace(messageToCustomer))
+            {
+                var msgBoxStyle = "margin: 0 0 20px 0; background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #3b82f6; border-radius: 12px; padding: 16px;";
+                var msgTitleStyle = "color: #0369a1; font-size: 13px; font-weight: 800; text-transform: uppercase; margin-bottom: 8px; display: block; letter-spacing: 0.5px;";
+                var msgContentStyle = "color: #1e293b; font-size: 14px; line-height: 1.6; margin: 0; font-style: italic;";
 
+                messageBoxHtml = $@"
+        <div style='{msgBoxStyle}'>
+            <span style='{msgTitleStyle}'>💬 Lời nhắn từ chuyên viên tư vấn:</span>
+            <p style='{msgContentStyle}'>""{messageToCustomer.Trim()}""</p>
+        </div>";
+            }
             return $@"
 <div style='{font}{card}'>
-  <div style='{header}'>
-    <table width='100%' cellpadding='0' cellspacing='0' border='0'>
-      <tr>
-        <td style='vertical-align:top;'>
-          <div style='{smallTop}'>MES SYSTEM</div>
-          <div style='{h1}'>BÁO GIÁ (E{est.estimate_id})</div>
-        </td>
-        <td align='right' style='vertical-align:top;'>
-          <span style='{badge}'>AM{req.order_request_id:D6}</span>
-        </td>
-      </tr>
-    </table>
-  </div>
+    <div style='{header}'>
+        <table width='100%' cellpadding='0' cellspacing='0' border='0'>
+            <tr>
+                <td style='vertical-align:top;'>
+                    <div style='{smallTop}'>MES SYSTEM</div>
+                    <div style='{h1}'>BÁO GIÁ (E{est.estimate_id})</div>
+                </td>
+                <td align='right' style='vertical-align:top;'>
+                    <span style='{badge}'>AM{req.order_request_id:D6}</span>
+                </td>
+            </tr>
+        </table>
+    </div>
 
-  <div style='{bodyPad}'>
-    <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
-      <tr>
-        <td width='50%' style='vertical-align:top;padding-right:10px;'>
-          <div style='{sectionTitleBlue}'>Thông tin đơn hàng</div>
-          <table style='{tableFixed}' cellpadding='0' cellspacing='0' border='0'>
-            <tr><td style='{tdLabel}'>Ngày yêu cầu</td><td style='{tdValue}'>{requestDateText}</td></tr>
-            <tr><td style='{tdLabel}'>Người yêu cầu</td><td style='{tdValue};text-transform:uppercase'>{req.customer_name}</td></tr>
-            <tr><td style='{tdLabel}'>Số điện thoại</td><td style='{tdValue}'>{req.customer_phone}</td></tr>
-            <tr><td style='{tdLabel}'>Email</td><td style='{tdValueLink}'>{req.customer_email}</td></tr>
-          </table>
-        </td>
+    <div style='{bodyPad}background-color: #ffffff;'>
+        
+        {messageBoxHtml}
 
-        <td width='50%' style='vertical-align:top;padding-left:10px;'>
-          <div style='{sectionTitleOrange}'>Bảng kê chi phí</div>
-          <div style='{boxCost}'>
-            <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
-              <tr><td style='{line}'>Nguyên vật liệu</td><td style='{money}'>{FormatVND(materialCost)}</td></tr>
-              <tr><td style='{line}'>Chi phí nhân công</td><td style='{money}'>{FormatVND(laborCost)}</td></tr>
-              {otherFeesRow}
-              {rushAmountRow}
+        <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
+            <tr>
+                <td width='50%' style='vertical-align:top;padding-right:12px;'>
+                    <div style='{sectionTitleBlue}'>Thông tin đơn hàng</div>
+                    <table style='{tableFixed}' cellpadding='0' cellspacing='0' border='0'>
+                        <tr><td style='{tdLabel}'>Ngày yêu cầu</td><td style='{tdValue}'>{requestDateText}</td></tr>
+                        <tr><td style='{tdLabel}'>Người yêu cầu</td><td style='{tdValue};text-transform:uppercase'>{req.customer_name}</td></tr>
+                        <tr><td style='{tdLabel}'>Số điện thoại</td><td style='{tdValue}'>{req.customer_phone}</td></tr>
+                        <tr><td style='{tdLabel}'>Email</td><td style='{tdValueLink}'>{req.customer_email}</td></tr>
+                    </table>
+                </td>
+
+                <td width='50%' style='vertical-align:top;padding-left:12px;'>
+                    <div style='{sectionTitleOrange}'>Bảng kê chi phí</div>
+                    <div style='{boxCost}'>
+                        <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
+                            <tr><td style='{line}'>Nguyên vật liệu</td><td style='{money}'>{FormatVND(materialCost)}</td></tr>
+                            <tr><td style='{line}'>Chi phí nhân công</td><td style='{money}'>{FormatVND(laborCost)}</td></tr>
+                            {otherFeesRow}
+                            {rushAmountRow}
+                        </table>
+                    </div>
+                </td>
+            </tr>
+        </table>
+
+        <div style='height:20px;'></div>
+
+<table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
+    <tr>
+        <td width='50%' valign='top' style='padding-right:12px;'>
+            <div style='{sectionTitleBlue}'>Chi tiết sản phẩm</div>
+            <table style='{tableFixed}' cellpadding='0' cellspacing='0' border='0'>
+                <tr><td style='{tdLabel}'>Sản phẩm</td><td style='{tdValue}'>{productName}</td></tr>
+                <tr><td style='{tdLabel}'>Số lượng</td><td style='{tdValue}'>{quantity:N0}</td></tr>
+                <tr><td style='{tdLabel}'>Loại giấy</td><td style='{tdValue}'>{paperName}</td></tr>
+                <tr><td style='{tdLabel}'>Phủ</td><td style='{tdValue}'>{coatingType}</td></tr>
+                <tr><td style='{tdLabel}'>Sóng</td><td style='{tdValue}'>{waveType}</td></tr>
+                <tr><td style='{tdLabel}'>Thiết kế</td><td style='{tdValueNoWrap}'>{designType}</td></tr>
+                <tr><td style='{tdLabel}'>Giao dự kiến</td><td style='{tdValue}'>{delivery}</td></tr>
             </table>
-          </div>
-        </td>
-      </tr>
-    </table>
-
-    <div style='height:14px;'></div>
-
-    <table width='100%' height='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse; height:100%;'>
-      <tr>
-        <td width='50%' valign='top' style='padding-right:10px; height:100%;'>
-          <div style='{sectionTitleBlue}'>Chi tiết sản phẩm</div>
-          <table style='{tableFixed}' cellpadding='0' cellspacing='0' border='0'>
-            <tr><td style='{tdLabel}'>Sản phẩm</td><td style='{tdValue}'>{productName}</td></tr>
-            <tr><td style='{tdLabel}'>Số lượng</td><td style='{tdValue}'>{quantity:N0}</td></tr>
-            <tr><td style='{tdLabel}'>Loại giấy</td><td style='{tdValue}'>{paperName}</td></tr>
-            <tr><td style='{tdLabel}'>Phủ</td><td style='{tdValue}'>{coatingType}</td></tr>
-            <tr><td style='{tdLabel}'>Sóng</td><td style='{tdValue}'>{waveType}</td></tr>
-            <tr><td style='{tdLabel}'>Thiết kế</td><td style='{tdValueNoWrap}'>{designType}</td></tr>
-            <tr><td style='{tdLabel}'>Giao dự kiến</td><td style='{tdValue}'>{delivery}</td></tr>
-          </table>
         </td>
 
-        <td width='50%' valign='top' style='padding-left:10px; height:100%;'>
-          {rightColLayout}
+        <td width='50%' valign='top' style='padding-left:12px;'>
+            {rightColLayout}
         </td>
-      </tr>
-    </table>
-  </div>
+    </tr>
+</table>
+
+{depositBoxHtml}
+    </div>
 </div>";
         }
 
         public static string QuoteEmail(order_request req, cost_estimate est, quote q, string orderDetailUrl)
         {
             var topCopyBlock = SecurePlainUrlBlock(orderDetailUrl);
-            var inner = QuoteEmailInner(req, est);
+            var inner = QuoteEmailInner(req, est, req.message_to_customer);
             var expiryBox = QuoteExpiryNotice(ResolveQuoteExpiredAt(req, q), includeAutoReject: true);
             var closingNote = QuoteIntro(req);
 
@@ -309,9 +323,9 @@ namespace AMMS.Application.Helpers
 
             var expiryBox = QuoteExpiryNotice(ResolveQuoteExpiredAt(req, left.q), includeAutoReject: true);
 
-            var leftHtml = QuoteEmailInner(req, left.est);
+            var leftHtml = QuoteEmailInner(req, left.est, req.message_to_customer);
             var rightHtml = right.HasValue
-                ? QuoteEmailInner(req, right.Value.est)
+                ? QuoteEmailInner(req, right.Value.est, req.message_to_customer)
                 : "";
 
             var isCustomerCopy = pairs.Any(x => !string.IsNullOrWhiteSpace(x.checkoutUrl));
