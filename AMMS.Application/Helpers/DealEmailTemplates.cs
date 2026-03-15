@@ -7,7 +7,7 @@ namespace AMMS.Application.Helpers
     {
         private static string VND(decimal v)
             => string.Format(new CultureInfo("vi-VN"), "{0:N0} ₫", v);
-        private const string EmailFontFamily = "'Segoe UI', Tahoma, Arial, Helvetica, sans-serif";
+        private const string EmailFontFamily = "Arial, Helvetica, sans-serif";
         private static string MapCoatingType(string? coatingType)
         {
             var v = (coatingType ?? "").Trim().ToUpperInvariant();
@@ -163,38 +163,38 @@ namespace AMMS.Application.Helpers
 
             string FormatVND(decimal? amount) => string.Format("{0:N0} đ", amount ?? 0).Replace(",", ".");
 
-            var font = $"font-family:{EmailFontFamily}; line-height:1.35;";
+            var font = $"font-family:{EmailFontFamily}; line-height:1.45;";
             var tableFixed = "width:100%;border-collapse:collapse;table-layout:fixed;";
             var tdLabel = "width:130px;white-space:nowrap;color:#64748b;font-size:13px;padding:7px 0;border-bottom:1px solid #eef2f7;vertical-align:top;";
-            var tdValue = "color:#0f172a;font-size:13px;font-weight:700;padding:7px 0;border-bottom:1px solid #eef2f7;text-align:right;vertical-align:top;word-break:break-word;";
-            var tdValueNoWrap = tdValue + "white-space:nowrap;font-size:12px;";
-            var tdValueLink = "color:#2563eb;font-size:13px;font-weight:800;padding:7px 0;border-bottom:1px solid #eef2f7;text-align:right;vertical-align:top;word-break:break-word;";
+            var tdValue = "color:#0f172a;font-size:13px;font-weight:700;padding:7px 0;border-bottom:1px solid #eef2f7;text-align:right;vertical-align:top;word-break:break-word;overflow-wrap:anywhere;";
+            var tdValueWrap = "color:#0f172a;font-size:12px;font-weight:600;padding:7px 0;border-bottom:1px solid #eef2f7;text-align:right;vertical-align:top;white-space:normal;word-break:break-word;overflow-wrap:anywhere;line-height:1.45;";
+            var tdValueLink = "color:#2563eb;font-size:13px;font-weight:700;padding:7px 0;border-bottom:1px solid #eef2f7;text-align:right;vertical-align:top;word-break:break-word;overflow-wrap:anywhere;";
 
             var card = "background:#ffffff; border:1px solid #e2e8f0; border-radius:16px; overflow:hidden; box-shadow:0 10px 25px rgba(0,0,0,0.05); margin-bottom:20px;";
             var header = "background:linear-gradient(90deg,#1e3a8a 0%,#2563eb 100%); padding:20px;";
             var badge = "display:inline-block;background:rgba(255,255,255,0.18);color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;font-weight:700;";
-            var h1 = "color:#ffffff;font-size:18px;font-weight:800;margin:4px 0 0 0;letter-spacing:0.2px;";
-            var smallTop = "color:#cfe6ff;font-size:11px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;";
+            var h1 = "color:#ffffff;font-size:18px;font-weight:700;margin:4px 0 0 0;letter-spacing:0.2px;";
+            var smallTop = "color:#cfe6ff;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;";
             var bodyPad = "padding:18px 18px 16px 18px;";
 
-            var sectionTitleBlue = "font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;color:#2563eb;border-bottom:2px solid #bfdbfe;padding-bottom:6px;margin:0 0 10px 0;";
-            var sectionTitleOrange = "font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;color:#d97706;border-bottom:2px solid #fde68a;padding-bottom:6px;margin:0 0 10px 0;";
-            var sectionTitleGreen = "font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;color:#16a34a;border-bottom:2px solid #bbf7d0;padding-bottom:6px;margin:0 0 10px 0;";
+            var sectionTitleBlue = "font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:#2563eb;border-bottom:2px solid #bfdbfe;padding-bottom:6px;margin:0 0 10px 0;";
+            var sectionTitleOrange = "font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:#d97706;border-bottom:2px solid #fde68a;padding-bottom:6px;margin:0 0 10px 0;";
+            var sectionTitleGreen = "font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:#16a34a;border-bottom:2px solid #bbf7d0;padding-bottom:6px;margin:0 0 10px 0;";
 
             var boxCost = "background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px;";
             var line = "padding:6px 0;font-size:13px;color:#334155;";
-            var money = "padding:6px 0;font-size:13px;color:#0f172a;font-weight:800;text-align:right;";
-            var moneyRed = "padding:6px 0;font-size:13px;color:#dc2626;font-weight:900;text-align:right;";
+            var money = "padding:6px 0;font-size:13px;color:#0f172a;font-weight:700;text-align:right;";
+            var moneyRed = "padding:6px 0;font-size:13px;color:#dc2626;font-weight:700;text-align:right;";
 
             var totalLabel = "color:#64748b;font-size:13px;padding:6px 0;";
-            var totalValue = "color:#0f172a;font-size:13px;font-weight:800;text-align:right;padding:6px 0;";
-            var finalRowLeft = "font-weight:900;color:#0f172a;font-size:14px;padding-top:10px;";
-            var finalRowRight = "font-weight:900;color:#1d4ed8;font-size:18px;text-align:right;padding-top:10px;";
+            var totalValue = "color:#0f172a;font-size:13px;font-weight:700;text-align:right;padding:6px 0;";
+            var finalRowLeft = "font-weight:700;color:#0f172a;font-size:14px;padding-top:10px;";
+            var finalRowRight = "font-weight:700;color:#1d4ed8;font-size:18px;text-align:right;padding-top:10px;";
             var vatNote = "text-align:right;font-size:11px;color:#ef4444;padding-top:4px;";
 
             var depositBoxCell = "background:#ecfdf5;border:1px solid #86efac;border-radius:10px;padding:12px;";
-            var depositLeft = "color:#166534;font-weight:900;font-size:13px;";
-            var depositRight = "color:#166534;font-weight:900;font-size:16px;text-align:right;";
+            var depositLeft = "color:#166534;font-weight:700;font-size:13px;";
+            var depositRight = "color:#166534;font-weight:700;font-size:16px;text-align:right;";
 
             var otherFeesRow = otherFees > 0
                 ? $"<tr><td style='{line}'>Chi phí khác</td><td style='{money}'>{FormatVND(otherFees)}</td></tr>"
