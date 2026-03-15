@@ -295,12 +295,12 @@ namespace AMMS.Application.Services
         private async Task<production> GetOrCreateProductionAsync(int orderId, int productTypeId, int? managerId, DateTime now)
         {
             var order = await _db.orders
-                .FromSqlInterpolated($@"
-            SELECT *
-            FROM orders
-            WHERE order_id = {orderId}
-            FOR UPDATE")
-                .FirstAsync();
+    .FromSqlInterpolated($@"
+        SELECT *
+        FROM ""AMMS_DB"".""orders""
+        WHERE order_id = {orderId}
+        FOR UPDATE")
+    .FirstAsync();
 
             production? prod = null;
 

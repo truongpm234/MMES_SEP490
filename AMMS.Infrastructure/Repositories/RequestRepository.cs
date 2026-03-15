@@ -871,7 +871,7 @@ namespace AMMS.Infrastructure.Repositories
             return await _db.order_requests
                 .FromSqlInterpolated($@"
             SELECT *
-            FROM order_request
+            FROM ""AMMS_DB"".""order_request""
             WHERE order_request_id = {orderRequestId}
             FOR UPDATE")
                 .FirstOrDefaultAsync(ct);
