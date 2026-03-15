@@ -1,19 +1,18 @@
 ﻿using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
-using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Email;
-using MailKit.Net.Smtp;
-using MailKit.Security;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using MimeKit;
-using SendGrid;
-using SendGrid.Helpers.Mail;
+using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Mail;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace AMMS.Application.Services
 {
@@ -23,19 +22,31 @@ namespace AMMS.Application.Services
         private readonly IMemoryCache _cache;
         private readonly IConfiguration _config;
         private readonly IHttpClientFactory _httpFactory;
+        private readonly ILogger<EmailService> _logger;
 
-        public EmailService(IOptions<SendGridSettings> options, IConfiguration config, IMemoryCache cache, IHttpClientFactory httpClient)
+        private static readonly JsonSerializerOptions JsonOptions = new()
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        };
+
+        public EmailService(
+            IOptions<SendGridSettings> options,
+            IConfiguration config,
+            IMemoryCache cache,
+            IHttpClientFactory httpClient,
+            ILogger<EmailService> logger)
         {
             _settings = options.Value;
             _config = config;
             _cache = cache;
             _httpFactory = httpClient;
+            _logger = logger;
         }
 
         public async Task SendAsync(string toEmail, string subject, string htmlContent)
         {
-            var apiKey = _config["Unosend:ApiKey"];
-            var fromEmail = _config["EmailSender:FromEmail"] ?? _settings.FromEmail;
+            var apiKey = _config["Unosend:ApiKey"]?.Trim();
+            var fromEmail = (_config["EmailSender:FromEmail"] ?? _settings.FromEmail)?.Trim();
 
             if (string.IsNullOrWhiteSpace(apiKey))
                 throw new InvalidOperationException("Thiếu Unosend:ApiKey");
@@ -46,27 +57,94 @@ namespace AMMS.Application.Services
             if (string.IsNullOrWhiteSpace(toEmail))
                 throw new ArgumentException("toEmail is required");
 
-            var payload = new
+            if (string.IsNullOrWhiteSpace(subject))
+                throw new ArgumentException("subject is required");
+
+            if (string.IsNullOrWhiteSpace(htmlContent))
+                throw new ArgumentException("htmlContent is required");
+
+            var payload = new UnosendSendEmailRequest
             {
-                from = fromEmail,
-                to = new[] { toEmail },
-                subject,
-                html = htmlContent
+                from = NormalizeSingleEmail(fromEmail),
+                to = NormalizeEmailList(toEmail),
+                subject = subject.Trim(),
+                html = htmlContent.Trim(),
+                text = HtmlToPlainText(htmlContent)
             };
 
-            var json = JsonSerializer.Serialize(payload);
+            if (payload.to.Length == 0)
+                throw new ArgumentException("No valid recipient email found");
+
+            var json = JsonSerializer.Serialize(payload, JsonOptions);
             var http = _httpFactory.CreateClient("Unosend");
 
             using var req = new HttpRequestMessage(HttpMethod.Post, "emails");
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             req.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            using var resp = await http.SendAsync(req);
+            _logger.LogInformation(
+                "Sending email directly via Unosend. From={From}; To={To}; Subject={Subject}",
+                payload.from,
+                string.Join(",", payload.to),
+                payload.subject
+            );
+
+            using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
             var respText = await resp.Content.ReadAsStringAsync();
 
-            if (!resp.IsSuccessStatusCode)
-                throw new HttpRequestException($"Unosend API failed: {(int)resp.StatusCode} - {respText}", null, resp.StatusCode);
+            if (resp.IsSuccessStatusCode)
+                return;
+
+            _logger.LogError(
+                "Unosend send failed. Status={Status}; Response={Response}; To={To}; Subject={Subject}",
+                (int)resp.StatusCode,
+                respText,
+                string.Join(",", payload.to),
+                payload.subject
+            );
+
+            throw new InvalidOperationException(
+                $"Unosend API failed: {(int)resp.StatusCode} - {respText}");
+        }
+
+        private sealed class UnosendSendEmailRequest
+        {
+            public string from { get; set; } = null!;
+            public string[] to { get; set; } = Array.Empty<string>();
+            public string subject { get; set; } = null!;
+            public string html { get; set; } = null!;
+            public string text { get; set; } = null!;
+        }
+
+        private static string NormalizeSingleEmail(string email)
+            => new MailAddress(email.Trim()).Address;
+
+        private static string[] NormalizeEmailList(string input)
+        {
+            return input
+                .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => new MailAddress(x).Address)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
+        private static string HtmlToPlainText(string html)
+        {
+            if (string.IsNullOrWhiteSpace(html))
+                return string.Empty;
+
+            var text = html;
+            text = Regex.Replace(text, @"<style[\s\S]*?</style>", " ", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"<script[\s\S]*?</script>", " ", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"<br\s*/?>", "\n", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"</p>", "\n", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"<[^>]+>", " ");
+            text = WebUtility.HtmlDecode(text);
+            text = Regex.Replace(text, @"[ \t]+", " ");
+            text = Regex.Replace(text, @"\n{3,}", "\n\n");
+            return text.Trim();
         }
 
         private string CacheKey(string email) => $"OTP::{NormalizeEmail(email)}";
@@ -75,7 +153,7 @@ namespace AMMS.Application.Services
             => email.Trim().ToLowerInvariant();
 
         private int ExpiryMinutes =>
-            int.TryParse(_config["Otp:ExpiryMinutes"], out var m) ? m : 500000;
+            int.TryParse(_config["Otp:ExpiryMinutes"], out var m) ? m : 10;
 
         private int MaxAttempts =>
             int.TryParse(_config["Otp:MaxAttempts"], out var a) ? a : 5;
@@ -135,7 +213,8 @@ namespace AMMS.Application.Services
   <p style='font-size:12px;color:#888'>Nếu bạn không yêu cầu mã này, hãy bỏ qua email.</p>
 </div>";
 
-            await SendAsync(email, "OTP xác thực AMMS", html);
+            var subject = $"OTP xác thực AMMS - {DateTime.Now:ddMMyyyy-HHmmss}";
+            await SendAsync(email, subject, html);
         }
 
         public Task<bool> VerifyOtpAsync(string email, string otp)

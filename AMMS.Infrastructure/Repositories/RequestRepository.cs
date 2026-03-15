@@ -879,5 +879,14 @@ namespace AMMS.Infrastructure.Repositories
                 .FirstOrDefaultAsync(ct);
             return vat ?? 0m;
         }
+        public async Task<bool> TryMarkDealWaitingFromVerifiedAsync(int requestId, CancellationToken ct = default)
+        {
+            var affected = await _db.order_requests
+                .Where(x => x.order_request_id == requestId && x.process_status == "Verified")
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(x => x.process_status, "Waiting"), ct);
+
+            return affected == 1;
+        }
     }
 }

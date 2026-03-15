@@ -14,7 +14,8 @@ using Hangfire;
 using Hangfire.PostgreSql;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
+using System.Net;
+using System.Net.Http.Headers;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Npgsql;
@@ -22,11 +23,20 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-
 var builder = WebApplication.CreateBuilder(args);
-var hangfireConnStr = builder.Configuration.GetConnectionString("HangfireConnection")!;
-var hangfireDataSource = new NpgsqlDataSourceBuilder(hangfireConnStr).Build();
-builder.Services.AddSingleton(hangfireDataSource);
+
+var hangfireConnStr = builder.Configuration.GetConnectionString("HangfireConnection")
+    ?? throw new InvalidOperationException("Missing ConnectionStrings:HangfireConnection");
+
+var hangfireSchema = builder.Configuration["Hangfire:SchemaName"] ?? "hangfire";
+var hangfireRunServer = builder.Configuration.GetValue("Hangfire:RunServer", true);
+var hangfireWorkerCount = builder.Configuration.GetValue("Hangfire:WorkerCount", 2);
+var hangfireQueues = builder.Configuration.GetSection("Hangfire:Queues").Get<string[]>() ?? new[] { "default", "emails" };
+var hangfireSchedulePollingSeconds = builder.Configuration.GetValue("Hangfire:SchedulePollingSeconds", 15);
+var hangfireQueuePollSeconds = builder.Configuration.GetValue("Hangfire:QueuePollSeconds", 15);
+var hangfireInvisibilityTimeoutMinutes = builder.Configuration.GetValue("Hangfire:InvisibilityTimeoutMinutes", 30);
+var hangfireDashboardPath = builder.Configuration["Hangfire:DashboardPath"] ?? "/hangfire";
+
 builder.Services.AddDbContext<AppDbContext>((sp, options) =>
 {
     options.UseNpgsql(
@@ -167,8 +177,6 @@ builder.Services.AddSwaggerGen(c =>
 // Configuration
 builder.Services.Configure<CloudinaryOptions>(
 builder.Configuration.GetSection("Cloudinary"));
-builder.Services.Configure<SendGridSettings>(
-builder.Configuration.GetSection("SendGrid"));
 builder.Services.Configure<PayOsOptions>(builder.Configuration.GetSection("PayOS"));
 builder.Services.Configure<SendGridSettings>(builder.Configuration.GetSection("EmailSender"));
 builder.Services.ConfigureApplicationCookie(options =>
@@ -177,32 +185,44 @@ builder.Services.ConfigureApplicationCookie(options =>
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
     options.Cookie.HttpOnly = true;
 });
+
 builder.Services.AddHangfire(config =>
 {
     config.SetDataCompatibilityLevel(CompatibilityLevel.Version_170)
           .UseSimpleAssemblyNameTypeSerializer()
           .UseRecommendedSerializerSettings()
           .UsePostgreSqlStorage(
-              builder.Configuration.GetConnectionString("HangfireConnection"),
+              hangfireConnStr,
               new PostgreSqlStorageOptions
               {
-                  SchemaName = "hangfire",
+                  SchemaName = hangfireSchema,
                   PrepareSchemaIfNecessary = true,
-                  QueuePollInterval = TimeSpan.FromSeconds(30),
-                  InvisibilityTimeout = TimeSpan.FromMinutes(30),
+                  QueuePollInterval = TimeSpan.FromSeconds(hangfireQueuePollSeconds),
+                  InvisibilityTimeout = TimeSpan.FromMinutes(hangfireInvisibilityTimeoutMinutes),
               });
 });
 
-builder.Services.AddHangfireServer(options =>
+if (hangfireRunServer)
 {
-    options.WorkerCount = 2;
-    options.Queues = new[] { "default" };
-    options.SchedulePollingInterval = TimeSpan.FromSeconds(30);
-});
+    builder.Services.AddHangfireServer(options =>
+    {
+        options.WorkerCount = hangfireWorkerCount;
+        options.Queues = hangfireQueues;
+        options.SchedulePollingInterval = TimeSpan.FromSeconds(hangfireSchedulePollingSeconds);
+    });
+}
+
 builder.Services.AddHttpClient("Unosend", client =>
 {
     client.BaseAddress = new Uri(builder.Configuration["Unosend:BaseUrl"] ?? "https://www.unosend.co/api/v1/");
-    client.Timeout = TimeSpan.FromSeconds(45);
+    client.Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue("Unosend:TimeoutSeconds", 120));
+    client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+})
+.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    AutomaticDecompression = DecompressionMethods.All,
+    PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+    MaxConnectionsPerServer = 10
 });
 
 builder.Services.AddScoped<QuoteExpiryJob>();
@@ -266,35 +286,41 @@ builder.Services.AddScoped<IOrderMaterialService, OrderMaterialService>();
 builder.Services.AddScoped<IProductRepository, ProductRepository>();
 builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddSingleton<IRealtimePublisher, RealtimePublisher>();
+builder.Services.AddSingleton<IEmailBackgroundQueue, EmailBackgroundQueue>();
+builder.Services.AddHostedService<EmailDispatcherHostedService>();
 // Logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Logging.SetMinimumLevel(LogLevel.Information);
 
 var app = builder.Build();
-app.UseHangfireDashboard("/hangfire", new DashboardOptions
+
+app.UseHangfireDashboard(hangfireDashboardPath, new DashboardOptions
 {
     Authorization = new[] { new AllowAllDashboardAuthorizationFilter() }
 });
 
 var vnTz = TimeZoneInfo.FindSystemTimeZoneById("Asia/Ho_Chi_Minh");
 
-app.Lifetime.ApplicationStarted.Register(() =>
+if (hangfireRunServer)
 {
-    try
+    app.Lifetime.ApplicationStarted.Register(() =>
     {
-        RecurringJob.AddOrUpdate<QuoteExpiryJob>(
-            "quote-expiry-daily",
-            job => job.RunAsync(CancellationToken.None),
-            Cron.Hourly(),
-            vnTz
-        );
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogError(ex, "Failed to register Hangfire recurring jobs");
-    }
-});
+        try
+        {
+            RecurringJob.AddOrUpdate<QuoteExpiryJob>(
+                "quote-expiry-hourly",
+                job => job.RunAsync(CancellationToken.None),
+                Cron.Hourly(),
+                vnTz
+            );
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError(ex, "Failed to register Hangfire recurring jobs");
+        }
+    });
+}
 
 
 app.UseSwagger();
