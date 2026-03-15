@@ -659,33 +659,27 @@ namespace AMMS.Application.Services
             if (cache.TryGetValue(machineCode, out var existing))
                 return existing;
 
-            int laneCount = Math.Max(1, m.quantity);
-
-            DateTime normalizedNow;
-            try
-            {
-                normalizedNow = _cal.NormalizeStart(now);
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException(
-                    $"WorkCalendar.NormalizeStart failed. machine={machineCode}, now={now:O}", ex);
-            }
-
+            var laneCount = Math.Max(1, m.quantity);
+            var normalizedNow = _cal.NormalizeStart(now);
             var laneStates = Enumerable.Repeat(normalizedNow, laneCount).ToList();
+
             var machineKey = machineCode.ToUpperInvariant();
 
             var reservations = await _db.tasks
                 .AsNoTracking()
-                .Where(t => t.machine != null && t.machine.Trim().ToUpper() == machineKey)
-                .Where(t =>
-                    !(string.Equals(t.status, "Finished", StringComparison.OrdinalIgnoreCase)
-                      && t.end_time != null
-                      && t.end_time <= now))
+                .Where(t => t.machine != null &&
+                            t.machine.Trim().ToUpper() == machineKey)
+                .Where(t => !(
+                    t.status != null &&
+                    t.status.Trim().ToUpper() == "FINISHED" &&
+                    t.end_time != null &&
+                    t.end_time <= now))
                 .Select(t => new ExistingReservation
                 {
                     Start = t.planned_start_time ?? t.start_time ?? now,
-                    End = t.planned_end_time ?? t.end_time ?? ((t.planned_start_time ?? t.start_time ?? now).AddHours(1))
+                    End = t.planned_end_time
+                          ?? t.end_time
+                          ?? ((t.planned_start_time ?? t.start_time ?? now).AddHours(1))
                 })
                 .OrderBy(x => x.Start)
                 .ToListAsync(ct);
