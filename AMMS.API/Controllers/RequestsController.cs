@@ -231,6 +231,7 @@ namespace AMMS.API.Controllers
             return Ok(new { ok = true });
         }
 
+        [AllowAnonymous]
         [HttpGet("payos/status-by-request-id")]
         public async Task<IActionResult> CheckAndProcessPayOsPayment(
     [FromQuery] int request_id,
@@ -668,10 +669,9 @@ namespace AMMS.API.Controllers
 
                 int orderId;
 
-                // idempotent sau khi đã lock row
                 if (req.order_id == null)
                 {
-                    var convert = await _service.ConvertToOrderAsync(orderRequestId);
+                    var convert = await _service.ConvertToOrderInCurrentTransactionAsync(orderRequestId);
                     if (!convert.Success || convert.OrderId == null)
                     {
                         await tx.RollbackAsync(ct);

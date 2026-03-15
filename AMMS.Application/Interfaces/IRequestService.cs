@@ -39,5 +39,6 @@ namespace AMMS.Application.Interfaces
         Task<CloneRequestResponseDto> CloneRequestAsync(int requestId, CancellationToken ct = default);
         Task UpdateConsultantMessageToCustomerAsync(int requestId, string? message, CancellationToken ct = default);
         Task<order_request?> GetRequestForUpdateAsync(int orderRequestId, CancellationToken ct);
+        Task<ConvertRequestToOrderResponse> ConvertToOrderInCurrentTransactionAsync(int requestId);
     }
 }
