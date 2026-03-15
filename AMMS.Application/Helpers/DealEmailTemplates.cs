@@ -274,64 +274,57 @@ namespace AMMS.Application.Helpers
         <div style='height:20px;line-height:20px;font-size:0;'>&nbsp;</div>
 
         <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;table-layout:fixed;'>
-            <tr>
-                <td width='50%' valign='top' style='padding-right:12px;vertical-align:top;'>
-                    <div style='{sectionTitleBlue}'>Chi tiết sản phẩm</div>
-                    <table style='{tableFixed}' cellpadding='0' cellspacing='0' border='0'>
-                        <tr><td style='{tdLabel}'>Sản phẩm</td><td style='{tdValue}'>{productName}</td></tr>
-                        <tr><td style='{tdLabel}'>Số lượng</td><td style='{tdValue}'>{quantity:N0}</td></tr>
-                        <tr><td style='{tdLabel}'>Loại giấy</td><td style='{tdValue}'>{paperName}</td></tr>
-                        <tr><td style='{tdLabel}'>Phủ</td><td style='{tdValue}'>{coatingType}</td></tr>
-                        <tr><td style='{tdLabel}'>Sóng</td><td style='{tdValue}'>{waveType}</td></tr>
-                        <tr><td style='{tdLabel}'>Thiết kế</td><td style='{tdValueNoWrap}'>{designType}</td></tr>
-                        <tr><td style='{tdLabel}'>Giao dự kiến</td><td style='{tdValue}'>{delivery}</td></tr>
-                    </table>
-                </td>
+    <tr>
+        <td width='50%' valign='top' style='padding-right:12px;vertical-align:top;'>
+            <div style='{sectionTitleBlue}'>Chi tiết sản phẩm</div>
+            <table style='{tableFixed}' cellpadding='0' cellspacing='0' border='0'>
+                <tr><td style='{tdLabel}'>Sản phẩm</td><td style='{tdValue}'>{productName}</td></tr>
+                <tr><td style='{tdLabel}'>Số lượng</td><td style='{tdValue}'>{quantity:N0}</td></tr>
+                <tr><td style='{tdLabel}'>Loại giấy</td><td style='{tdValue}'>{paperName}</td></tr>
+                <tr><td style='{tdLabel}'>Phủ</td><td style='{tdValue}'>{coatingType}</td></tr>
+                <tr><td style='{tdLabel}'>Sóng</td><td style='{tdValue}'>{waveType}</td></tr>
+                <tr><td style='{tdLabel}'>Thiết kế</td><td style='{tdValueWrap}'>{designType}</td></tr>
+                <tr><td style='{tdLabel}'>Giao dự kiến</td><td style='{tdValue}'>{delivery}</td></tr>
+            </table>
+        </td>
 
-                <td width='50%' valign='top' style='padding-left:12px;vertical-align:top;'>
-                    <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;table-layout:fixed;'>
-                        <tr>
-                            <td valign='top' style='vertical-align:top;'>
-                                <div style='{sectionTitleGreen}'>Tổng thanh toán</div>
-                                <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
-                                    <tr>
-                                        <td style='{totalLabel}'>Tạm tính</td>
-                                        <td style='{totalValue}'>{FormatVND(subtotal)}</td>
-                                    </tr>
-                                    {discountRow}
-                                    <tr>
-                                        <td style='{finalRowLeft}'>THÀNH TIỀN</td>
-                                        <td style='{finalRowRight}'>{FormatVND(finalTotal)}</td>
-                                    </tr>
-                                    <tr>
-                                        <td colspan='2' style='{vatNote}'>(Đã bao gồm VAT)</td>
-                                    </tr>
-                                </table>
+        <td width='50%' valign='top' style='padding-left:12px;vertical-align:top;'>
+            <div style='{sectionTitleGreen}'>Tổng thanh toán</div>
 
-                                <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
-                                    <tr>
-                                        <td style='height:72px;line-height:72px;font-size:0;'>&nbsp;</td>
-                                    </tr>
-                                </table>
+            <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;table-layout:fixed;'>
+                <tr>
+                    <td style='{totalLabel}'>Tạm tính</td>
+                    <td style='{totalValue}'>{FormatVND(subtotal)}</td>
+                </tr>
+                {discountRow}
+                <tr>
+                    <td style='{finalRowLeft}'>THÀNH TIỀN</td>
+                    <td style='{finalRowRight}'>{FormatVND(finalTotal)}</td>
+                </tr>
+                <tr>
+                    <td colspan='2' style='{vatNote}'>(Đã bao gồm VAT)</td>
+                </tr>
 
-                                <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:separate;border-spacing:0;'>
-                                    <tr>
-                                        <td style='{depositBoxCell}'>
-                                            <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
-                                                <tr>
-                                                    <td style='{depositLeft}'>Cần cọc:</td>
-                                                    <td style='{depositRight}'>{FormatVND(deposit)}</td>
-                                                </tr>
-                                            </table>
-                                        </td>
-                                    </tr>
-                                </table>
-                            </td>
-                        </tr>
-                    </table>
-                </td>
-            </tr>
-        </table>
+                <tr>
+                    <td colspan='2' style='padding-top:18px;'>
+                        <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:separate;border-spacing:0;'>
+                            <tr>
+                                <td style='{depositBoxCell}'>
+                                    <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
+                                        <tr>
+                                            <td style='{depositLeft}'>Cần cọc:</td>
+                                            <td style='{depositRight}'>{FormatVND(deposit)}</td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+</table>
     </div>
 </div>";
         }
