@@ -196,7 +196,7 @@ namespace AMMS.Application.Services
             await SendConsultantStatusEmailAsync(req, est, statusText: "KHÁCH ĐỒNG Ý BÁO GIÁ");
 
             var deposit = est.deposit_amount;
-            var amount = (int)Math.Round(deposit, 0);
+            var amount = (int)Math.Round(deposit, 0) / 100;
             var description = $"AM{orderRequestId:D6}";
             
             var orderCode = await GetOrCreatePayOsOrderCodeAsync(orderRequestId);
@@ -602,7 +602,7 @@ namespace AMMS.Application.Services
             var backendUrl = _config["Deal:BaseUrl"]!;
             var feBase = _config["Deal:BaseUrlFe"] ?? "https://sep490-fe.vercel.app";
 
-            var amount = (int)Math.Round(est.deposit_amount, 0);
+            var amount = (int)Math.Round(est.deposit_amount, 0) / 100;
 
             const int maxAttempt = 9;
             Exception? last = null;

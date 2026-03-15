@@ -30,8 +30,8 @@ namespace AMMS.API.Controllers
         private readonly AppDbContext _db;
         private readonly ISmsOtpService _smsOtp;
         private readonly IConfiguration _config;
-        private readonly IPaymentsService _payment;
         private readonly IPayOsService _payos;
+        private readonly ILogger<RequestsController> _logger;
         public RequestsController(
             IRequestService service,
             IDealService dealService,
@@ -39,7 +39,7 @@ namespace AMMS.API.Controllers
             AppDbContext db,
             IProductionSchedulingService schedulingService,
             ISmsOtpService smsOtp,
-            IConfiguration config, IPaymentsService payment, IPayOsService payos)
+            IConfiguration config, IPayOsService payos, ILogger<RequestsController> logger)
         {
             _service = service;
             _dealService = dealService;
@@ -48,8 +48,8 @@ namespace AMMS.API.Controllers
             _schedulingService = schedulingService;
             _smsOtp = smsOtp;
             _config = config;
-            _payment = payment;
             _payos = payos;
+            _logger = logger;
         }
         [HttpPost("create-request-by-consultant")]
         [ProducesResponseType(typeof(CreateRequestResponse), StatusCodes.Status201Created)]
@@ -498,6 +498,12 @@ namespace AMMS.API.Controllers
                     paymentRepo,
                     ct);
 
+                if (!processed)
+                {
+                    _logger.LogError(
+                        "PayOsWebhook processed=false. RequestId={RequestId}, OrderCode={OrderCode}, Message={Message}, Raw={Raw}",
+                        orderRequestId, orderCode, message, raw.ToString());
+                }
                 return Ok(new { ok = true, processed, message, orderRequestId, orderCode });
             }
             catch (Exception ex)
@@ -718,6 +724,9 @@ namespace AMMS.API.Controllers
                 }
                 catch (Exception ex)
                 {
+                    _logger.LogError(ex,
+        "ScheduleOrderAsync failed. RequestId={RequestId}, OrderId={OrderId}, ProductTypeId={ProductTypeId}, EstimateId={EstimateId}, QuoteId={QuoteId}, ProductionProcessCsv={ProductionProcessCsv}",
+        orderRequestId, orderId, productTypeId, resolvedEstimateId, resolvedQuoteId, item?.production_process);
                     return (false, "ScheduleOrder failed: " + ex.Message);
                 }
 

@@ -5,6 +5,7 @@ using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Planning;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace AMMS.Application.Services
 {
@@ -14,6 +15,7 @@ namespace AMMS.Application.Services
         private readonly IMachineRepository _machineRepo;
         private readonly ITaskRepository _taskRepo;
         private readonly WorkCalendar _cal;
+        private readonly ILogger<ProductionSchedulingService> _logger;
 
         public ProductionSchedulingService(
             AppDbContext db,
@@ -21,12 +23,14 @@ namespace AMMS.Application.Services
             IProductTypeProcessRepository ptpRepo,
             IMachineRepository machineRepo,
             ITaskRepository taskRepo,
-            WorkCalendar cal)
+            WorkCalendar cal,
+            ILogger<ProductionSchedulingService> logger)
         {
             _db = db;
             _machineRepo = machineRepo;
             _taskRepo = taskRepo;
             _cal = cal;
+            _logger = logger;
         }
 
         public async Task<int> ScheduleOrderAsync(int orderId, int productTypeId, string? productionProcessCsv, int? managerId = 3)
@@ -37,75 +41,114 @@ namespace AMMS.Application.Services
             {
                 await using var tx = await _db.Database.BeginTransactionAsync();
 
-                var now = AppTime.NowVnUnspecified();
-
-                var order = await _db.orders
-                    .AsTracking()
-                    .FirstOrDefaultAsync(o => o.order_id == orderId);
-
-                if (order == null)
-                    throw new Exception($"Order {orderId} not found");
-
-                var prod = await GetOrCreateProductionAsync(orderId, productTypeId, managerId, now);
-
-                if (order.production_id != prod.prod_id)
+                try
                 {
-                    order.production_id = prod.prod_id;
+                    var now = AppTime.NowVnUnspecified();
+
+                    var ctx = await BuildPlanningContextByOrderIdAsync(
+                        orderId,
+                        productTypeId,
+                        productionProcessCsv,
+                        CancellationToken.None)
+                        ?? throw new InvalidOperationException(
+                            $"Cannot build planning context for order {orderId}. productTypeId={productTypeId}, csv={productionProcessCsv}");
+
+                    _logger.LogInformation(
+                        "ScheduleOrder start. OrderId={OrderId}, ProductTypeId={ProductTypeId}, RawCsv={RawCsv}, Qty={Qty}, SheetsTotal={SheetsTotal}, SheetsRequired={SheetsRequired}",
+                        orderId, productTypeId, ctx.RawProductionProcessCsv, ctx.OrderQty, ctx.SheetsTotal, ctx.SheetsRequired);
+
+                    var plan = await BuildStagePlansAsync(ctx, now, CancellationToken.None);
+
+                    if (plan.Stages.Count == 0)
+                        throw new InvalidOperationException(
+                            $"No stage plan generated for order {orderId}. RawCsv={ctx.RawProductionProcessCsv}");
+
+                    // Chỉ tạo production sau khi plan build OK
+                    var prod = await GetOrCreateProductionAsync(orderId, productTypeId, managerId, now);
+
+                    var order = await _db.orders
+                        .AsTracking()
+                        .FirstOrDefaultAsync(o => o.order_id == orderId);
+
+                    if (order == null)
+                        throw new InvalidOperationException($"Order {orderId} not found when updating production_id");
+
+                    if (order.production_id != prod.prod_id)
+                    {
+                        order.production_id = prod.prod_id;
+                        await _db.SaveChangesAsync();
+                    }
+
+                    var hasTask = await _db.tasks
+                        .AsNoTracking()
+                        .AnyAsync(t => t.prod_id == prod.prod_id);
+
+                    if (hasTask)
+                    {
+                        await tx.CommitAsync();
+
+                        try { await DispatchDueTasksAsync(); }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "DispatchDueTasksAsync failed after existing-task detection. OrderId={OrderId}, ProdId={ProdId}", orderId, prod.prod_id);
+                        }
+
+                        return prod.prod_id;
+                    }
+
+                    var orderItems = await _db.order_items
+                        .Where(x => x.order_id == orderId)
+                        .ToListAsync();
+
+                    foreach (var item in orderItems)
+                        item.production_process = plan.NormalizedProcessCsv;
+
                     await _db.SaveChangesAsync();
-                }
 
-                var hasTask = await _db.tasks
-                    .AsNoTracking()
-                    .AnyAsync(t => t.prod_id == prod.prod_id);
+                    var tasks = plan.Stages
+                        .OrderBy(x => x.SeqNum)
+                        .Select(x => new task
+                        {
+                            prod_id = prod.prod_id,
+                            process_id = x.ProcessId,
+                            seq_num = x.SeqNum,
+                            name = x.ProcessName,
+                            status = "Unassigned",
+                            machine = x.MachineCode,
+                            start_time = null,
+                            end_time = null,
+                            planned_start_time = x.PlannedStart,
+                            planned_end_time = x.PlannedEnd
+                        })
+                        .ToList();
 
-                if (hasTask)
-                {
+                    await _taskRepo.AddRangeAsync(tasks);
+                    await _taskRepo.SaveChangesAsync();
+
+                    _logger.LogInformation(
+                        "ScheduleOrder success. OrderId={OrderId}, ProdId={ProdId}, TaskCount={TaskCount}, Csv={Csv}",
+                        orderId, prod.prod_id, tasks.Count, plan.NormalizedProcessCsv);
+
                     await tx.CommitAsync();
-                    try { await DispatchDueTasksAsync(); } catch { }
+
+                    try { await DispatchDueTasksAsync(); }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "DispatchDueTasksAsync failed after schedule commit. OrderId={OrderId}, ProdId={ProdId}", orderId, prod.prod_id);
+                    }
+
                     return prod.prod_id;
                 }
+                catch (Exception ex)
+                {
+                    await tx.RollbackAsync();
 
-                var ctx = await BuildPlanningContextByOrderIdAsync(orderId, productTypeId, productionProcessCsv, CancellationToken.None)
-                    ?? throw new Exception($"Cannot build planning context for order {orderId}");
+                    _logger.LogError(ex,
+                        "ScheduleOrderAsync FAILED. OrderId={OrderId}, ProductTypeId={ProductTypeId}, ProductionProcessCsv={ProductionProcessCsv}",
+                        orderId, productTypeId, productionProcessCsv);
 
-                var plan = await BuildStagePlansAsync(ctx, now, CancellationToken.None);
-                if (plan.Stages.Count == 0)
-                    throw new Exception("No stage plan generated");
-
-                var orderItems = await _db.order_items
-                    .Where(x => x.order_id == orderId)
-                    .ToListAsync();
-
-                foreach (var item in orderItems)
-                    item.production_process = plan.NormalizedProcessCsv;
-
-                await _db.SaveChangesAsync();
-
-                var tasks = plan.Stages
-                    .OrderBy(x => x.SeqNum)
-                    .Select(x => new task
-                    {
-                        prod_id = prod.prod_id,
-                        process_id = x.ProcessId,
-                        seq_num = x.SeqNum,
-                        name = x.ProcessName,
-                        status = "Unassigned",
-                        machine = x.MachineCode,
-                        start_time = null,
-                        end_time = null,
-                        planned_start_time = x.PlannedStart,
-                        planned_end_time = x.PlannedEnd
-                    })
-                    .ToList();
-
-                await _taskRepo.AddRangeAsync(tasks);
-                await _taskRepo.SaveChangesAsync();
-
-                await tx.CommitAsync();
-
-                try { await DispatchDueTasksAsync(); } catch { }
-
-                return prod.prod_id;
+                    throw;
+                }
             });
         }
 
@@ -604,20 +647,37 @@ namespace AMMS.Application.Services
         }
 
         private async Task<MachinePoolState> GetOrBuildPoolStateAsync(
-            machine m,
-            DateTime now,
-            Dictionary<string, MachinePoolState> cache,
-            CancellationToken ct)
+    machine m,
+    DateTime now,
+    Dictionary<string, MachinePoolState> cache,
+    CancellationToken ct)
         {
-            if (cache.TryGetValue(m.machine_code, out var existing))
+            var machineCode = (m.machine_code ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(machineCode))
+                throw new InvalidOperationException($"Machine code is empty. machine_id={m.machine_id}");
+
+            if (cache.TryGetValue(machineCode, out var existing))
                 return existing;
 
-            var laneCount = Math.Max(1, m.quantity);
-            var laneStates = Enumerable.Repeat(_cal.NormalizeStart(now), laneCount).ToList();
+            int laneCount = Math.Max(1, m.quantity);
+
+            DateTime normalizedNow;
+            try
+            {
+                normalizedNow = _cal.NormalizeStart(now);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"WorkCalendar.NormalizeStart failed. machine={machineCode}, now={now:O}", ex);
+            }
+
+            var laneStates = Enumerable.Repeat(normalizedNow, laneCount).ToList();
+            var machineKey = machineCode.ToUpperInvariant();
 
             var reservations = await _db.tasks
                 .AsNoTracking()
-                .Where(t => t.machine == m.machine_code)
+                .Where(t => t.machine != null && t.machine.Trim().ToUpper() == machineKey)
                 .Where(t =>
                     !(string.Equals(t.status, "Finished", StringComparison.OrdinalIgnoreCase)
                       && t.end_time != null
@@ -643,7 +703,7 @@ namespace AMMS.Application.Services
                 LaneAvailableAt = laneStates
             };
 
-            cache[m.machine_code] = state;
+            cache[machineCode] = state;
             return state;
         }
 
