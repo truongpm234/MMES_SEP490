@@ -295,8 +295,12 @@ namespace AMMS.Application.Services
         private async Task<production> GetOrCreateProductionAsync(int orderId, int productTypeId, int? managerId, DateTime now)
         {
             var order = await _db.orders
-                .AsTracking()
-                .FirstAsync(x => x.order_id == orderId);
+                .FromSqlInterpolated($@"
+            SELECT *
+            FROM orders
+            WHERE order_id = {orderId}
+            FOR UPDATE")
+                .FirstAsync();
 
             production? prod = null;
 
@@ -304,9 +308,7 @@ namespace AMMS.Application.Services
             {
                 prod = await _db.productions
                     .AsTracking()
-                    .FirstOrDefaultAsync(p =>
-                        p.prod_id == order.production_id.Value &&
-                        p.end_date == null);
+                    .FirstOrDefaultAsync(p => p.prod_id == order.production_id.Value && p.end_date == null);
             }
 
             prod ??= await _db.productions
@@ -332,6 +334,9 @@ namespace AMMS.Application.Services
             await _db.SaveChangesAsync();
 
             prod.code = $"PROD-{prod.prod_id:00000}";
+            await _db.SaveChangesAsync();
+
+            order.production_id = prod.prod_id;
             await _db.SaveChangesAsync();
 
             return prod;

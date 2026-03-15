@@ -27,7 +27,7 @@ namespace AMMS.Application.Helpers
                 : req.customer_name!.Trim();
 
             return $@"
-<div style='margin-top:18px;background:linear-gradient(135deg,#fff7ed 0%,#eff6ff 100%);border:1px solid #dbe7f3;border-radius:16px;padding:22px 24px;box-shadow:0 10px 28px rgba(15,23,42,0.06);font-family:'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;line-height:1.78;color:#334155;'>
+<div style='margin-top:18px;background:linear-gradient(135deg,#fff7ed 0%,#eff6ff 100%);border:1px solid #dbe7f3;border-radius:16px;padding:22px 24px;box-shadow:0 10px 28px rgba(15,23,42,0.06);font-family:'Arial, Helvetica, sans-serif;line-height:1.78;color:#334155;'>
   <div style='display:inline-block;background:linear-gradient(90deg,#f97316 0%,#2563eb 100%);color:#ffffff;font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;padding:6px 12px;border-radius:999px;margin-bottom:12px;'>
     MES CARE
   </div>
@@ -67,7 +67,7 @@ namespace AMMS.Application.Helpers
             var copyBox = "margin:0 0 16px 0;max-width:100%;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:12px;padding:12px 14px;text-align:left;";
             var copyTitle = "font-size:12px;color:#475569;font-weight:800;margin:0 0 8px 0;";
             var copyDesc = "font-size:12px;color:#334155;line-height:1.6;margin:0 0 8px 0;";
-            var copyUrl = "font-size:12px;color:#0f172a;word-break:break-all;line-height:1.6;margin:0;font-family:'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;user-select:all;-webkit-user-select:all;";
+            var copyUrl = "font-size:12px;color:#0f172a;word-break:break-all;line-height:1.6;margin:0;font-family:'Arial, Helvetica, sans-serif;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;user-select:all;-webkit-user-select:all;";
 
             return $@"
 <div style='{copyBox}'>
@@ -344,7 +344,7 @@ namespace AMMS.Application.Helpers
   <meta charset='utf-8'>
   <meta name='viewport' content='width=device-width, initial-scale=1'>
 </head>
-<body style='background-color:#f7fafc;padding:30px 0;font-family:'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;'>
+<body style='background-color:#f7fafc;padding:30px 0;font-family:'Arial, Helvetica, sans-serif;'>
   <div style='max-width:700px;margin:0 auto;'>
     {topCopyBlock}
     {inner}
@@ -433,7 +433,7 @@ namespace AMMS.Application.Helpers
   <meta charset='utf-8'>
   <meta name='viewport' content='width=device-width, initial-scale=1'>
 </head>
-<body style='margin:0;background-color:#f7fafc;padding:30px 0;font-family:'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;'>
+<body style='margin:0;background-color:#f7fafc;padding:30px 0;font-family:'Arial, Helvetica, sans-serif;'>
   <div style='max-width:1100px;margin:0 auto;padding:0 12px;'>
 
     <div style='margin-bottom:18px;text-align:center;color:#0f172a;font-weight:800;font-size:18px;letter-spacing:0.2px;'>

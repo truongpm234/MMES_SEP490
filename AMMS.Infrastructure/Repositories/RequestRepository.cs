@@ -866,6 +866,17 @@ namespace AMMS.Infrastructure.Repositories
             return "";
         }
 
+        public async Task<order_request?> GetRequestForUpdateAsync(int orderRequestId, CancellationToken ct)
+        {
+            return await _db.order_requests
+                .FromSqlInterpolated($@"
+            SELECT *
+            FROM order_request
+            WHERE order_request_id = {orderRequestId}
+            FOR UPDATE")
+                .FirstOrDefaultAsync(ct);
+        }
+
         private async Task<decimal> GetVatPercentAsync(CancellationToken ct = default)
         {
             var vat = await _db.estimate_config

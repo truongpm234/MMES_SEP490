@@ -223,7 +223,13 @@ namespace AMMS.Application.Services
 
                 try
                 {
-                    var req = await _requestRepo.GetByIdAsync(requestId);
+                    var req = await _db.order_requests
+                        .FromSqlInterpolated($@"
+        SELECT *
+        FROM order_request
+        WHERE order_request_id = {requestId}
+        FOR UPDATE")
+                        .FirstOrDefaultAsync(); 
                     if (req == null)
                     {
                         return new ConvertRequestToOrderResponse
@@ -231,6 +237,17 @@ namespace AMMS.Application.Services
                             Success = false,
                             Message = "Order request not found",
                             RequestId = requestId
+                        };
+                    }
+
+                    if (req.order_id != null)
+                    {
+                        return new ConvertRequestToOrderResponse
+                        {
+                            Success = true,
+                            Message = "This request was already converted",
+                            RequestId = requestId,
+                            OrderId = req.order_id
                         };
                     }
 
@@ -937,6 +954,11 @@ namespace AMMS.Application.Services
                 rawCsv);
 
             return ProductionProcessSelectionHelper.BuildCsv(selected, x => x.process_code);
+        }
+
+        public async Task<order_request?> GetRequestForUpdateAsync(int orderRequestId, CancellationToken ct)
+        {
+            return await _requestRepo.GetRequestForUpdateAsync(orderRequestId, ct);
         }
     }
 }
