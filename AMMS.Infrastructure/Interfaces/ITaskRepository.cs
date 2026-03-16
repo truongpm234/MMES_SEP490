@@ -11,9 +11,14 @@ namespace AMMS.Infrastructure.Interfaces
     {
         Task AddRangeAsync(IEnumerable<task> tasks);
         Task SaveChangesAsync();
+        Task SaveChangesAsync(CancellationToken ct);
         Task<task?> GetByIdAsync(int taskId);
         Task<task?> GetNextTaskAsync(int prodId, int currentSeqNum);
         Task<task?> GetPrevTaskAsync(int prodId, int seqNum);
         Task<int> SuggestQtyGoodAsync(int taskId, CancellationToken ct = default);
+        Task<List<task>> GetTasksByProductionAsync(int prodId, CancellationToken ct = default);
+        Task<task?> GetFirstTaskByProductionAsync(int prodId, CancellationToken ct = default);
+        Task<bool> PromoteFirstTaskToReadyAsync(int prodId, DateTime now, CancellationToken ct = default);
+        Task<bool> PromoteNextTaskToReadyAsync(int currentTaskId, DateTime now, CancellationToken ct = default);
     }
 }

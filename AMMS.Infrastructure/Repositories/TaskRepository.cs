@@ -2,17 +2,13 @@
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace AMMS.Infrastructure.Repositories
 {
     public class TaskRepository : ITaskRepository
     {
         private readonly AppDbContext _db;
+
         public TaskRepository(AppDbContext db) => _db = db;
 
         public Task AddRangeAsync(IEnumerable<task> tasks)
@@ -23,6 +19,9 @@ namespace AMMS.Infrastructure.Repositories
 
         public Task SaveChangesAsync() => _db.SaveChangesAsync();
 
+        public Task SaveChangesAsync(CancellationToken ct)
+            => _db.SaveChangesAsync(ct);
+
         public Task<task?> GetByIdAsync(int taskId)
             => _db.tasks.FirstOrDefaultAsync(x => x.task_id == taskId);
 
@@ -31,6 +30,7 @@ namespace AMMS.Infrastructure.Repositories
                 .Where(x => x.prod_id == prodId && x.seq_num > currentSeqNum)
                 .OrderBy(x => x.seq_num)
                 .FirstOrDefaultAsync();
+
         public Task<task?> GetPrevTaskAsync(int prodId, int seqNum)
         {
             return _db.tasks
@@ -38,6 +38,96 @@ namespace AMMS.Infrastructure.Repositories
                 .OrderByDescending(x => x.seq_num)
                 .FirstOrDefaultAsync();
         }
+
+        public async Task<List<task>> GetTasksByProductionAsync(int prodId, CancellationToken ct = default)
+        {
+            return await _db.tasks
+                .Where(x => x.prod_id == prodId)
+                .OrderBy(x => x.seq_num)
+                .ThenBy(x => x.task_id)
+                .ToListAsync(ct);
+        }
+
+        public async Task<task?> GetFirstTaskByProductionAsync(int prodId, CancellationToken ct = default)
+        {
+            return await _db.tasks
+                .Where(x => x.prod_id == prodId)
+                .OrderBy(x => x.seq_num)
+                .ThenBy(x => x.task_id)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        public async Task<bool> PromoteFirstTaskToReadyAsync(int prodId, DateTime now, CancellationToken ct = default)
+        {
+            var tasks = await _db.tasks
+                .Where(x => x.prod_id == prodId)
+                .OrderBy(x => x.seq_num)
+                .ThenBy(x => x.task_id)
+                .ToListAsync(ct);
+
+            if (tasks.Count == 0)
+                return false;
+
+            if (tasks.Any(x => string.Equals(x.status, "Ready", StringComparison.OrdinalIgnoreCase)))
+                return true;
+
+            foreach (var t in tasks)
+            {
+                if (!string.Equals(t.status, "Finished", StringComparison.OrdinalIgnoreCase))
+                {
+                    t.status = "Unassigned";
+                    t.start_time = null;
+                }
+            }
+
+            var first = tasks.FirstOrDefault(x => !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase));
+            if (first == null)
+                return false;
+
+            first.status = "Ready";
+            first.start_time ??= now;
+
+            return true;
+        }
+
+        public async Task<bool> PromoteNextTaskToReadyAsync(int currentTaskId, DateTime now, CancellationToken ct = default)
+        {
+            var current = await _db.tasks
+                .FirstOrDefaultAsync(x => x.task_id == currentTaskId, ct);
+
+            if (current == null || !current.prod_id.HasValue || !current.seq_num.HasValue)
+                return false;
+
+            var prodId = current.prod_id.Value;
+            var currentSeq = current.seq_num.Value;
+
+            var hasOtherReady = await _db.tasks
+                .AnyAsync(x =>
+                    x.prod_id == prodId &&
+                    x.task_id != currentTaskId &&
+                    string.Equals(x.status, "Ready", StringComparison.OrdinalIgnoreCase), ct);
+
+            if (hasOtherReady)
+                return true;
+
+            var next = await _db.tasks
+                .Where(x =>
+                    x.prod_id == prodId &&
+                    x.seq_num > currentSeq &&
+                    !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(x => x.seq_num)
+                .ThenBy(x => x.task_id)
+                .FirstOrDefaultAsync(ct);
+
+            if (next == null)
+                return false;
+
+            next.status = "Ready";
+            next.start_time ??= now;
+
+            return true;
+        }
+
         public async Task<int> SuggestQtyGoodAsync(int taskId, CancellationToken ct = default)
         {
             var row = await (
@@ -80,6 +170,7 @@ namespace AMMS.Infrastructure.Repositories
                 fallback: SafeInt(sheetsRequired, fallback: SafeInt(orderQty, 1))
             );
         }
+
         private static int SafeInt(int v, int fallback = 1) => v > 0 ? v : fallback;
     }
 }

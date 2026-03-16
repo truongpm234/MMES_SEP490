@@ -1,4 +1,5 @@
-﻿using AMMS.Application.Interfaces;
+﻿using AMMS.Application.Helpers;
+using AMMS.Application.Interfaces;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Enums;
@@ -60,12 +61,18 @@ namespace AMMS.Application.Services
         }
         public async Task<bool> StartProductionByOrderIdAsync(int orderId, CancellationToken ct = default)
         {
-            var now = DateTime.UtcNow;
-            return await _repo.StartProductionByOrderIdAsync(orderId, now, ct);
+            var now = AppTime.NowVnUnspecified();
+            var prodId = await _repo.StartProductionByOrderIdAndPromoteFirstTaskAsync(orderId, now, ct);
+            return prodId.HasValue;
         }
         public async Task<bool> SetProductionDeliveryAsync(int orderId, CancellationToken ct = default)
         {
             return await _repo.SetProductionDeliveryByOrderIdAsync(orderId, ct);
+        }
+
+        public async Task<int?> StartProductionAndPromoteFirstTaskAsync(int orderId, CancellationToken ct = default)
+        {
+            return await _repo.StartProductionByOrderIdAndPromoteFirstTaskAsync(orderId, AppTime.NowVnUnspecified(), ct);
         }
     }
 }

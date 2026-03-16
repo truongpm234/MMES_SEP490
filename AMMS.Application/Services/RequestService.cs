@@ -37,10 +37,9 @@ namespace AMMS.Application.Services
             _rt = rt;
         }
 
-        private DateTime? ToUnspecified(DateTime? dateTime)
+        private DateTime? ToDeliveryDate(DateTime? dateTime)
         {
-            if (!dateTime.HasValue) return null;
-            return DateTime.SpecifyKind(dateTime.Value, DateTimeKind.Unspecified);
+            return AppTime.NormalizeToVnDateOnlyUnspecified(dateTime);
         }
 
         private static string Trunc20(string? s)
@@ -57,7 +56,7 @@ namespace AMMS.Application.Services
                 customer_name = req.customer_name,
                 customer_phone = req.customer_phone,
                 customer_email = req.customer_email,
-                delivery_date = ToUnspecified(req.delivery_date),
+                delivery_date = ToDeliveryDate(req.delivery_date),
                 product_name = req.product_name,
                 quantity = req.quantity,
                 description = req.description,
@@ -123,7 +122,7 @@ namespace AMMS.Application.Services
             entity.description = req.description ?? entity.description;
             entity.design_file_path = req.design_file_path ?? entity.design_file_path;
             entity.detail_address = req.detail_address ?? entity.detail_address;
-            entity.delivery_date = ToUnspecified(req.delivery_date);
+            entity.delivery_date = ToDeliveryDate(req.delivery_date);
             entity.product_type = req.product_type ?? entity.product_type;
             entity.number_of_plates = req.number_of_plates ?? entity.number_of_plates;
             entity.product_length_mm = req.product_length_mm ?? entity.product_length_mm;
@@ -288,7 +287,7 @@ namespace AMMS.Application.Services
                 customer_phone = dto.customer_phone?.Trim(),
                 customer_email = dto.customer_email?.Trim(),
 
-                delivery_date = ToUnspecified(dto.delivery_date),
+                delivery_date = ToDeliveryDate(dto.delivery_date),
                 detail_address = dto.detail_address?.Trim(),
 
                 product_name = dto.product_name?.Trim(),
