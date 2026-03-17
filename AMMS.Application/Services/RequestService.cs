@@ -5,6 +5,7 @@ using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Requests;
+using AMMS.Shared.DTOs.Socket;
 using Microsoft.EntityFrameworkCore;
 
 namespace AMMS.Application.Services
@@ -72,10 +73,10 @@ namespace AMMS.Application.Services
 
             await _requestRepo.AddAsync(entity);
             await _requestRepo.SaveChangesAsync();
-            
+
             await _rt.PublishRequestChangedAsync(new(request_id: entity.order_request_id, old_status: null, new_status: entity.process_status, action: "created", changed_at: AppTime.NowVnUnspecified(), changed_by: null));
-            
-            return new CreateRequestResponse();           
+
+            return new CreateRequestResponse();
         }
 
         public async Task<CreateRequestResponse> CreateRequestByConsultantAsync(CreateResquestConsultant req)
@@ -94,7 +95,7 @@ namespace AMMS.Application.Services
             await _requestRepo.SaveChangesAsync();
 
             await _rt.PublishRequestChangedAsync(new(request_id: entity.order_request_id, old_status: null, new_status: entity.process_status, action: "created", changed_at: AppTime.NowVnUnspecified(), changed_by: null));
-            
+
             return new CreateRequestResponse
             {
                 order_request_id = entity.order_request_id
@@ -176,7 +177,7 @@ namespace AMMS.Application.Services
         {
             var entity = await _requestRepo.GetByIdAsync(id);
             if (entity == null) return;
-           
+
             if (entity.order_id != null)
                 throw new InvalidOperationException("This request is already linked to an order, cannot cancel.");
             entity.reason = reason;

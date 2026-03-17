@@ -113,17 +113,17 @@ namespace AMMS.Infrastructure.Repositories
 
             var taskRows = await _db.tasks.AsNoTracking().Where(t => t.prod_id != null && prodIds.Contains(t.prod_id.Value))
                 .Select(t => new TaskRow
-    {
-        TaskId = t.task_id,
-        ProdId = t.prod_id!.Value,
-        ProcessId = t.process_id,
-        SeqNum = t.seq_num,
-        Status = t.status,
-        StartTime = t.start_time,
-        EndTime = t.end_time,
-        PlannedStartTime = t.planned_start_time,
-        PlannedEndTime = t.planned_end_time
-    })
+                {
+                    TaskId = t.task_id,
+                    ProdId = t.prod_id!.Value,
+                    ProcessId = t.process_id,
+                    SeqNum = t.seq_num,
+                    Status = t.status,
+                    StartTime = t.start_time,
+                    EndTime = t.end_time,
+                    PlannedStartTime = t.planned_start_time,
+                    PlannedEndTime = t.planned_end_time
+                })
     .ToListAsync(ct);
 
             var tasksByProd = taskRows

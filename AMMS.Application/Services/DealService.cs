@@ -5,6 +5,7 @@ using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Background;
 using AMMS.Shared.DTOs.Exceptions.AMMS.Application.Exceptions;
 using AMMS.Shared.DTOs.PayOS;
+using AMMS.Shared.DTOs.Socket;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -198,7 +199,7 @@ namespace AMMS.Application.Services
             var deposit = est.deposit_amount;
             var amount = (int)Math.Round(deposit, 0) / 100;
             var description = $"AM{orderRequestId:D6}";
-            
+
             var orderCode = await GetOrCreatePayOsOrderCodeAsync(orderRequestId);
             var baseUrl = _config["Deal:BaseUrl"]!;
 
@@ -275,6 +276,10 @@ namespace AMMS.Application.Services
             try { est = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId); } catch { }
 
             var safeReason = System.Net.WebUtility.HtmlEncode(reason ?? "");
+            //signalr reject
+            RequestChangedEvent evt = new RequestChangedEvent(orderRequestId, "", req.process_status, "customer_rejected", DateTime.Now, "Customer");
+            await _rt.PublishRequestChangedAsync(evt);
+            //
             await SendConsultantStatusEmailAsync(req, est, $"KHACH TU CHOI (LY DO: {safeReason})");
         }
 
