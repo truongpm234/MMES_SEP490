@@ -982,9 +982,6 @@ namespace AMMS.API.Controllers
             if (!IsPayableStatus(req.process_status))
                 return (false, "Only request with process_status is verified or waiting can start payment");
 
-            if (!req.verified_at.HasValue)
-                return (false, "Request has not been manager-approved yet");
-
             if (!req.quote_expires_at.HasValue)
                 return (false, "Quote expiry time has not been initialized");
 
