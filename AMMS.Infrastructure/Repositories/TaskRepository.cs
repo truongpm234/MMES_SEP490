@@ -102,22 +102,22 @@ namespace AMMS.Infrastructure.Repositories
             var currentSeq = current.seq_num.Value;
 
             var hasOtherReady = await _db.tasks
-                .AnyAsync(x =>
-                    x.prod_id == prodId &&
-                    x.task_id != currentTaskId &&
-                    string.Equals(x.status, "Ready", StringComparison.OrdinalIgnoreCase), ct);
+        .AnyAsync(x =>
+            x.prod_id == prodId &&
+            x.task_id != currentTaskId &&
+            x.status == "Ready", ct);
 
             if (hasOtherReady)
                 return true;
 
             var next = await _db.tasks
-                .Where(x =>
-                    x.prod_id == prodId &&
-                    x.seq_num > currentSeq &&
-                    !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(x => x.seq_num)
-                .ThenBy(x => x.task_id)
-                .FirstOrDefaultAsync(ct);
+        .Where(x =>
+            x.prod_id == prodId &&
+            x.seq_num > currentSeq &&
+            x.status != "Finished")
+        .OrderBy(x => x.seq_num)
+        .ThenBy(x => x.task_id)
+        .FirstOrDefaultAsync(ct);
 
             if (next == null)
                 return false;
