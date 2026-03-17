@@ -38,10 +38,9 @@ namespace AMMS.Application.Services
             _rt = rt;
         }
 
-        private DateTime? ToUnspecified(DateTime? dateTime)
+        private DateTime? ToDeliveryDate(DateTime? dateTime)
         {
-            if (!dateTime.HasValue) return null;
-            return DateTime.SpecifyKind(dateTime.Value, DateTimeKind.Unspecified);
+            return AppTime.NormalizeToVnDateOnlyUnspecified(dateTime);
         }
 
         private static string Trunc20(string? s)
@@ -58,7 +57,7 @@ namespace AMMS.Application.Services
                 customer_name = req.customer_name,
                 customer_phone = req.customer_phone,
                 customer_email = req.customer_email,
-                delivery_date = ToUnspecified(req.delivery_date),
+                delivery_date = ToDeliveryDate(req.delivery_date),
                 product_name = req.product_name,
                 quantity = req.quantity,
                 description = req.description,
@@ -124,7 +123,7 @@ namespace AMMS.Application.Services
             entity.description = req.description ?? entity.description;
             entity.design_file_path = req.design_file_path ?? entity.design_file_path;
             entity.detail_address = req.detail_address ?? entity.detail_address;
-            entity.delivery_date = ToUnspecified(req.delivery_date);
+            entity.delivery_date = ToDeliveryDate(req.delivery_date);
             entity.product_type = req.product_type ?? entity.product_type;
             entity.number_of_plates = req.number_of_plates ?? entity.number_of_plates;
             entity.product_length_mm = req.product_length_mm ?? entity.product_length_mm;
@@ -224,270 +223,16 @@ namespace AMMS.Application.Services
 
                 try
                 {
-                    var req = await _requestRepo.GetByIdAsync(requestId);
-                    if (req == null)
+                    var result = await ConvertToOrderInternalAsync(requestId);
+
+                    if (!result.Success)
                     {
-                        return new ConvertRequestToOrderResponse
-                        {
-                            Success = false,
-                            Message = "Order request not found",
-                            RequestId = requestId
-                        };
+                        await tx.RollbackAsync();
+                        return result;
                     }
-
-                    if (!string.Equals(req.process_status?.Trim(), "Accepted", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return new ConvertRequestToOrderResponse
-                        {
-                            Success = false,
-                            Message = "Only process_status = 'Accepted' can be converted to order",
-                            RequestId = requestId
-                        };
-                    }
-
-                    if (req.quote_id == null)
-                    {
-                        return new ConvertRequestToOrderResponse
-                        {
-                            Success = false,
-                            Message = "No quote found for this request",
-                            RequestId = requestId
-                        };
-                    }
-
-                    if (req.order_id != null || await _requestRepo.AnyOrderLinkedAsync(requestId))
-                    {
-                        return new ConvertRequestToOrderResponse
-                        {
-                            Success = true,
-                            Message = "This request was already converted",
-                            RequestId = requestId,
-                            OrderId = req.order_id
-                        };
-                    }
-
-                    var est = await _estimateRepo.GetByOrderRequestIdAsync(requestId);
-                    if (est == null)
-                    {
-                        return new ConvertRequestToOrderResponse
-                        {
-                            Success = false,
-                            Message = "Cost estimate not found for this request",
-                            RequestId = requestId
-                        };
-                    }
-
-                    var ptCode = (req.product_type ?? "").Trim();
-                    if (string.IsNullOrWhiteSpace(ptCode))
-                    {
-                        return new ConvertRequestToOrderResponse
-                        {
-                            Success = false,
-                            Message = "order_request.product_type is missing, cannot map product_type_id",
-                            RequestId = requestId
-                        };
-                    }
-
-                    var productTypeId = await _db.product_types
-                        .AsNoTracking()
-                        .Where(x => x.code == ptCode)
-                        .Select(x => (int?)x.product_type_id)
-                        .FirstOrDefaultAsync();
-
-                    if (productTypeId == null)
-                    {
-                        return new ConvertRequestToOrderResponse
-                        {
-                            Success = false,
-                            Message = $"Product type code '{ptCode}' not found in product_types",
-                            RequestId = requestId
-                        };
-                    }
-                    var normalizedProcessCsv = await NormalizeProductionProcessCsvAsync(productTypeId.Value, est.production_processes);
-
-                    var newOrder = new order
-                    {
-                        code = "TMP-ORD",
-                        order_date = AppTime.NowVnUnspecified(),
-                        delivery_date = req.delivery_date,
-                        status = "Scheduled",
-                        payment_status = "Deposited",
-                        quote_id = req.quote_id,
-                        total_amount = est.final_total_cost,
-                        is_enough = null,
-                        is_buy = false
-                    };
-                    //Signalr Deposit
-                    RequestChangedEvent evt = new RequestChangedEvent(
-                        requestId,
-                        "Pending",
-                        "Deposited",
-                        "customer_deposited",
-                        DateTime.Now,
-                        "customer"
-                    );
-                    await _rt.PublishRequestChangedAsync(evt);
-                    //
-                    await _orderRepo.AddOrderAsync(newOrder);
-                    await _orderRepo.SaveChangesAsync();
-
-                    newOrder.code = $"ORD-{newOrder.order_id:00000}";
-                    _orderRepo.Update(newOrder);
-
-                    await _orderRepo.SaveChangesAsync();
-
-                    // ===== order_item =====
-                    var newItem = new order_item
-                    {
-                        order_id = newOrder.order_id,
-                        product_name = req.product_name,
-                        quantity = req.quantity ?? 0,
-                        design_url = req.design_file_path,
-                        product_type_id = productTypeId,
-                        paper_code = est.paper_code,
-                        production_process = normalizedProcessCsv,
-                        paper_name = est.paper_name,
-                        glue_type = est.coating_type,
-                        wave_type = est.wave_type,
-                        est_paper_sheets_total = est.sheets_total,
-                        est_ink_weight_kg = est.ink_weight_kg,
-                        est_coating_glue_weight_kg = est.coating_glue_weight_kg,
-                        est_mounting_glue_weight_kg = est.mounting_glue_weight_kg,
-                        est_lamination_weight_kg = est.lamination_weight_kg,
-                        height_mm = req.product_height_mm,
-                        length_mm = req.product_length_mm,
-                        width_mm = req.product_width_mm
-                    };
-
-                    await _orderRepo.AddOrderItemAsync(newItem);
-                    await _orderRepo.SaveChangesAsync();
-
-                    material? paperMaterial = null;
-                    if (!string.IsNullOrWhiteSpace(est.paper_code))
-                        paperMaterial = await _materialRepo.GetByCodeAsync(est.paper_code!);
-
-                    var qty = (decimal)(newItem.quantity <= 0 ? 1 : newItem.quantity);
-                    var bomTasks = new List<Task>();
-
-                    if (est.sheets_total > 0)
-                        bomTasks.Add(_bomRepo.AddBomAsync(new bom
-                        {
-                            order_item_id = newItem.item_id,
-                            material_id = paperMaterial?.material_id,
-                            material_code = Trunc20(est.paper_code ?? "PAPER"),
-                            material_name = est.paper_name ?? "Giấy",
-                            unit = "tờ",
-                            qty_total = est.sheets_total,
-                            qty_per_product = est.sheets_total / qty,
-                            source_estimate_id = est.estimate_id
-                        }));
-
-                    if (est.ink_weight_kg > 0)
-                        bomTasks.Add(_bomRepo.AddBomAsync(new bom
-                        {
-                            order_item_id = newItem.item_id,
-                            material_code = Trunc20("INK"),
-                            material_name = "Mực in",
-                            unit = "kg",
-                            qty_total = est.ink_weight_kg,
-                            qty_per_product = est.ink_weight_kg / qty,
-                            source_estimate_id = est.estimate_id
-                        }));
-
-                    if (est.coating_glue_weight_kg > 0)
-                        bomTasks.Add(_bomRepo.AddBomAsync(new bom
-                        {
-                            order_item_id = newItem.item_id,
-                            material_code = Trunc20(est.coating_type ?? "COATING_GLUE"),
-                            material_name = "Keo phủ",
-                            unit = "kg",
-                            qty_total = est.coating_glue_weight_kg,
-                            qty_per_product = est.coating_glue_weight_kg / qty,
-                            source_estimate_id = est.estimate_id
-                        }));
-
-                    if (est.mounting_glue_weight_kg > 0)
-                    {
-                        var codeBoi = string.IsNullOrWhiteSpace(est.wave_type) ? "MOUNTING_GLUE" : $"BOI_{est.wave_type}";
-                        bomTasks.Add(_bomRepo.AddBomAsync(new bom
-                        {
-                            order_item_id = newItem.item_id,
-                            material_code = Trunc20(codeBoi),
-                            material_name = "Keo bồi",
-                            unit = "kg",
-                            qty_total = est.mounting_glue_weight_kg,
-                            qty_per_product = est.mounting_glue_weight_kg / qty,
-                            source_estimate_id = est.estimate_id
-                        }));
-                    }
-
-                    if (est.lamination_weight_kg > 0)
-                        bomTasks.Add(_bomRepo.AddBomAsync(new bom
-                        {
-                            order_item_id = newItem.item_id,
-                            material_code = Trunc20("LAMINATION"),
-                            material_name = "Màng cán",
-                            unit = "kg",
-                            qty_total = est.lamination_weight_kg,
-                            qty_per_product = est.lamination_weight_kg / qty,
-                            source_estimate_id = est.estimate_id
-                        }));
-
-                    await Task.WhenAll(bomTasks);
-                    await _bomRepo.SaveChangesAsync();
-
-                    var bomHasNullMaterial = await (
-                        from oi in _db.order_items.AsNoTracking()
-                        join b in _db.boms.AsNoTracking() on oi.item_id equals b.order_item_id
-                        where oi.order_id == newOrder.order_id
-                        select b.material_id
-                    ).AnyAsync(x => x == null);
-
-                    bool isEnough;
-                    if (bomHasNullMaterial)
-                    {
-                        isEnough = false;
-                    }
-                    else
-                    {
-                        isEnough = await (
-                            from oi in _db.order_items.AsNoTracking()
-                            join b in _db.boms.AsNoTracking() on oi.item_id equals b.order_item_id
-                            join m in _db.materials.AsNoTracking() on b.material_id equals m.material_id
-                            where oi.order_id == newOrder.order_id
-                            group new { oi, b, m } by b.material_id into g
-                            select new
-                            {
-                                Required = g.Sum(x =>
-                                    ((decimal)x.oi.quantity)
-                                    * (x.b.qty_per_product ?? 0m)
-                                    * (1m + ((x.b.wastage_percent ?? 0m) / 100m))
-                                ),
-                                StockQty = g.Max(x => x.m.stock_qty ?? 0m)
-                            }
-                        ).AllAsync(x => x.StockQty >= x.Required);
-                    }
-
-                    newOrder.is_enough = isEnough;
-                    _orderRepo.Update(newOrder);
-                    await _orderRepo.SaveChangesAsync();
-
-                    // link request -> order
-                    req.order_id = newOrder.order_id;
-                    await _requestRepo.UpdateAsync(req);
-                    await _requestRepo.SaveChangesAsync();
 
                     await tx.CommitAsync();
-
-                    return new ConvertRequestToOrderResponse
-                    {
-                        Success = true,
-                        Message = "Converted order request to order successfully",
-                        RequestId = requestId,
-                        OrderId = newOrder.order_id,
-                        OrderItemId = newItem.item_id,
-                        OrderCode = newOrder.code
-                    };
+                    return result;
                 }
                 catch
                 {
@@ -543,7 +288,7 @@ namespace AMMS.Application.Services
                 customer_phone = dto.customer_phone?.Trim(),
                 customer_email = dto.customer_email?.Trim(),
 
-                delivery_date = ToUnspecified(dto.delivery_date),
+                delivery_date = ToDeliveryDate(dto.delivery_date),
                 detail_address = dto.detail_address?.Trim(),
 
                 product_name = dto.product_name?.Trim(),
@@ -948,6 +693,270 @@ namespace AMMS.Application.Services
                 rawCsv);
 
             return ProductionProcessSelectionHelper.BuildCsv(selected, x => x.process_code);
+        }
+
+        public async Task<order_request?> GetRequestForUpdateAsync(int orderRequestId, CancellationToken ct)
+        {
+            return await _requestRepo.GetRequestForUpdateAsync(orderRequestId, ct);
+        }
+
+        private async Task<ConvertRequestToOrderResponse> ConvertToOrderInternalAsync(int requestId)
+        {
+            var req = await _requestRepo.GetByIdAsync(requestId);
+            if (req == null)
+            {
+                return new ConvertRequestToOrderResponse
+                {
+                    Success = false,
+                    Message = "Order request not found",
+                    RequestId = requestId
+                };
+            }
+
+            if (!string.Equals(req.process_status?.Trim(), "Accepted", StringComparison.OrdinalIgnoreCase))
+            {
+                return new ConvertRequestToOrderResponse
+                {
+                    Success = false,
+                    Message = "Only process_status = 'Accepted' can be converted to order",
+                    RequestId = requestId
+                };
+            }
+
+            if (req.quote_id == null)
+            {
+                return new ConvertRequestToOrderResponse
+                {
+                    Success = false,
+                    Message = "No quote found for this request",
+                    RequestId = requestId
+                };
+            }
+
+            if (req.order_id != null || await _requestRepo.AnyOrderLinkedAsync(requestId))
+            {
+                return new ConvertRequestToOrderResponse
+                {
+                    Success = true,
+                    Message = "This request was already converted",
+                    RequestId = requestId,
+                    OrderId = req.order_id
+                };
+            }
+
+            var est = await _estimateRepo.GetByOrderRequestIdAsync(requestId);
+            if (est == null)
+            {
+                return new ConvertRequestToOrderResponse
+                {
+                    Success = false,
+                    Message = "Cost estimate not found for this request",
+                    RequestId = requestId
+                };
+            }
+
+            var ptCode = (req.product_type ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(ptCode))
+            {
+                return new ConvertRequestToOrderResponse
+                {
+                    Success = false,
+                    Message = "order_request.product_type is missing, cannot map product_type_id",
+                    RequestId = requestId
+                };
+            }
+
+            var productTypeId = await _db.product_types
+                .AsNoTracking()
+                .Where(x => x.code == ptCode)
+                .Select(x => (int?)x.product_type_id)
+                .FirstOrDefaultAsync();
+
+            if (productTypeId == null)
+            {
+                return new ConvertRequestToOrderResponse
+                {
+                    Success = false,
+                    Message = $"Product type code '{ptCode}' not found in product_types",
+                    RequestId = requestId
+                };
+            }
+
+            var normalizedProcessCsv = await NormalizeProductionProcessCsvAsync(productTypeId.Value, est.production_processes);
+
+            var newOrder = new order
+            {
+                code = "TMP-ORD",
+                order_date = AppTime.NowVnUnspecified(),
+                delivery_date = req.delivery_date,
+                status = "Scheduled",
+                payment_status = "Deposited",
+                quote_id = req.quote_id,
+                total_amount = est.final_total_cost,
+                is_enough = null,
+                is_buy = false
+            };
+
+            await _orderRepo.AddOrderAsync(newOrder);
+            await _orderRepo.SaveChangesAsync();
+
+            newOrder.code = $"ORD-{newOrder.order_id:00000}";
+            _orderRepo.Update(newOrder);
+            await _orderRepo.SaveChangesAsync();
+
+            var newItem = new order_item
+            {
+                order_id = newOrder.order_id,
+                product_name = req.product_name,
+                quantity = req.quantity ?? 0,
+                design_url = req.design_file_path,
+                product_type_id = productTypeId,
+                paper_code = est.paper_code,
+                production_process = normalizedProcessCsv,
+                paper_name = est.paper_name,
+                glue_type = est.coating_type,
+                wave_type = est.wave_type,
+                est_paper_sheets_total = est.sheets_total,
+                est_ink_weight_kg = est.ink_weight_kg,
+                est_coating_glue_weight_kg = est.coating_glue_weight_kg,
+                est_mounting_glue_weight_kg = est.mounting_glue_weight_kg,
+                est_lamination_weight_kg = est.lamination_weight_kg,
+                height_mm = req.product_height_mm,
+                length_mm = req.product_length_mm,
+                width_mm = req.product_width_mm
+            };
+
+            await _orderRepo.AddOrderItemAsync(newItem);
+            await _orderRepo.SaveChangesAsync();
+
+            material? paperMaterial = null;
+            if (!string.IsNullOrWhiteSpace(est.paper_code))
+                paperMaterial = await _materialRepo.GetByCodeAsync(est.paper_code!);
+
+            var qty = (decimal)(newItem.quantity <= 0 ? 1 : newItem.quantity);
+            var bomTasks = new List<Task>();
+
+            if (est.sheets_total > 0)
+                bomTasks.Add(_bomRepo.AddBomAsync(new bom
+                {
+                    order_item_id = newItem.item_id,
+                    material_id = paperMaterial?.material_id,
+                    material_code = Trunc20(est.paper_code ?? "PAPER"),
+                    material_name = est.paper_name ?? "Giấy",
+                    unit = "tờ",
+                    qty_total = est.sheets_total,
+                    qty_per_product = est.sheets_total / qty,
+                    source_estimate_id = est.estimate_id
+                }));
+
+            if (est.ink_weight_kg > 0)
+                bomTasks.Add(_bomRepo.AddBomAsync(new bom
+                {
+                    order_item_id = newItem.item_id,
+                    material_code = Trunc20("INK"),
+                    material_name = "Mực in",
+                    unit = "kg",
+                    qty_total = est.ink_weight_kg,
+                    qty_per_product = est.ink_weight_kg / qty,
+                    source_estimate_id = est.estimate_id
+                }));
+
+            if (est.coating_glue_weight_kg > 0)
+                bomTasks.Add(_bomRepo.AddBomAsync(new bom
+                {
+                    order_item_id = newItem.item_id,
+                    material_code = Trunc20(est.coating_type ?? "COATING_GLUE"),
+                    material_name = "Keo phủ",
+                    unit = "kg",
+                    qty_total = est.coating_glue_weight_kg,
+                    qty_per_product = est.coating_glue_weight_kg / qty,
+                    source_estimate_id = est.estimate_id
+                }));
+
+            if (est.mounting_glue_weight_kg > 0)
+            {
+                var codeBoi = string.IsNullOrWhiteSpace(est.wave_type) ? "MOUNTING_GLUE" : $"BOI_{est.wave_type}";
+                bomTasks.Add(_bomRepo.AddBomAsync(new bom
+                {
+                    order_item_id = newItem.item_id,
+                    material_code = Trunc20(codeBoi),
+                    material_name = "Keo bồi",
+                    unit = "kg",
+                    qty_total = est.mounting_glue_weight_kg,
+                    qty_per_product = est.mounting_glue_weight_kg / qty,
+                    source_estimate_id = est.estimate_id
+                }));
+            }
+
+            if (est.lamination_weight_kg > 0)
+                bomTasks.Add(_bomRepo.AddBomAsync(new bom
+                {
+                    order_item_id = newItem.item_id,
+                    material_code = Trunc20("LAMINATION"),
+                    material_name = "Màng cán",
+                    unit = "kg",
+                    qty_total = est.lamination_weight_kg,
+                    qty_per_product = est.lamination_weight_kg / qty,
+                    source_estimate_id = est.estimate_id
+                }));
+
+            await Task.WhenAll(bomTasks);
+            await _bomRepo.SaveChangesAsync();
+
+            var bomHasNullMaterial = await (
+                from oi in _db.order_items.AsNoTracking()
+                join b in _db.boms.AsNoTracking() on oi.item_id equals b.order_item_id
+                where oi.order_id == newOrder.order_id
+                select b.material_id
+            ).AnyAsync(x => x == null);
+
+            bool isEnough;
+            if (bomHasNullMaterial)
+            {
+                isEnough = false;
+            }
+            else
+            {
+                isEnough = await (
+                    from oi in _db.order_items.AsNoTracking()
+                    join b in _db.boms.AsNoTracking() on oi.item_id equals b.order_item_id
+                    join m in _db.materials.AsNoTracking() on b.material_id equals m.material_id
+                    where oi.order_id == newOrder.order_id
+                    group new { oi, b, m } by b.material_id into g
+                    select new
+                    {
+                        Required = g.Sum(x =>
+                            ((decimal)x.oi.quantity)
+                            * (x.b.qty_per_product ?? 0m)
+                            * (1m + ((x.b.wastage_percent ?? 0m) / 100m))
+                        ),
+                        StockQty = g.Max(x => x.m.stock_qty ?? 0m)
+                    }
+                ).AllAsync(x => x.StockQty >= x.Required);
+            }
+
+            newOrder.is_enough = isEnough;
+            _orderRepo.Update(newOrder);
+            await _orderRepo.SaveChangesAsync();
+
+            req.order_id = newOrder.order_id;
+            await _requestRepo.UpdateAsync(req);
+            await _requestRepo.SaveChangesAsync();
+
+            return new ConvertRequestToOrderResponse
+            {
+                Success = true,
+                Message = "Converted order request to order successfully",
+                RequestId = requestId,
+                OrderId = newOrder.order_id,
+                OrderItemId = newItem.item_id,
+                OrderCode = newOrder.code
+            };
+        }
+
+        public Task<ConvertRequestToOrderResponse> ConvertToOrderInCurrentTransactionAsync(int requestId)
+        {
+            return ConvertToOrderInternalAsync(requestId);
         }
     }
 }

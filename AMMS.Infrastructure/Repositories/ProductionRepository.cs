@@ -11,10 +11,12 @@ namespace AMMS.Infrastructure.Repositories
     public class ProductionRepository : IProductionRepository
     {
         private readonly AppDbContext _db;
+        private readonly ITaskRepository _taskRepo;
 
-        public ProductionRepository(AppDbContext db)
+        public ProductionRepository(AppDbContext db, ITaskRepository taskRepo)
         {
             _db = db;
+            _taskRepo = taskRepo;
         }
 
         public async Task<DateTime?> GetNearestDeliveryDateAsync()
@@ -702,32 +704,48 @@ namespace AMMS.Infrastructure.Repositories
             return true;
         }
 
+        public async Task<int?> StartProductionByOrderIdAndPromoteFirstTaskAsync(int orderId, DateTime now, CancellationToken ct = default)
+        {
+            var strategy = _db.Database.CreateExecutionStrategy();
+
+            return await strategy.ExecuteAsync(async () =>
+            {
+                await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
+                var prod = await _db.productions
+                    .FirstOrDefaultAsync(p => p.order_id == orderId, ct);
+
+                if (prod == null)
+                    return (int?)null;
+
+                prod.status = "InProcessing";
+
+                if (prod.start_date == null)
+                    prod.start_date = now;
+
+                if (prod.order_id.HasValue)
+                {
+                    var order = await _db.orders
+                        .FirstOrDefaultAsync(o => o.order_id == prod.order_id.Value, ct);
+
+                    if (order != null)
+                        order.status = "InProcessing";
+                }
+
+                await _db.SaveChangesAsync(ct);
+
+                // Promote task đầu tiên -> Ready
+                await _taskRepo.PromoteFirstTaskToReadyAsync(prod.prod_id, now, ct);
+                await _taskRepo.SaveChangesAsync(ct);
+
+                await tx.CommitAsync(ct);
+                return prod.prod_id;
+            });
+        }
         public async Task<bool> StartProductionByOrderIdAsync(int orderId, DateTime now, CancellationToken ct = default)
         {
-            var prod = await _db.productions
-                .FirstOrDefaultAsync(p => p.order_id == orderId, ct);
-
-            if (prod == null)
-                return false;
-
-            prod.status = "InProcessing";
-
-            if (prod.start_date == null)
-                prod.start_date = now;
-
-            if (prod.order_id.HasValue)
-            {
-                var order = await _db.orders
-                    .FirstOrDefaultAsync(o => o.order_id == prod.order_id.Value, ct);
-
-                if (order != null)
-                {
-                    order.status = "InProcessing";
-                }
-            }
-
-            await _db.SaveChangesAsync(ct);
-            return true;
+            var prodId = await StartProductionByOrderIdAndPromoteFirstTaskAsync(orderId, now, ct);
+            return prodId.HasValue;
         }
 
         public async Task<bool> SetProductionDeliveryByOrderIdAsync(int orderId, CancellationToken ct = default)

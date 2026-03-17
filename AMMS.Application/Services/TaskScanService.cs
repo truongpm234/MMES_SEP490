@@ -63,19 +63,19 @@ namespace AMMS.Application.Services
                     if (prev != null && !string.Equals(prev.status, "Finished", StringComparison.OrdinalIgnoreCase))
                         throw new Exception($"Previous step (task_id={prev.task_id}, seq={prev.seq_num}) is not Finished");
 
-                    if (!string.Equals(t.status, "Ready", StringComparison.OrdinalIgnoreCase) &&
-                        !string.Equals(t.status, "InProgress", StringComparison.OrdinalIgnoreCase))
-                    {
-                        throw new Exception($"Task status '{t.status}' is not scannable");
-                    }
+                    // Theo rule mới: chỉ Ready mới được scan finish
+                    if (!string.Equals(t.status, "Ready", StringComparison.OrdinalIgnoreCase))
+                        throw new Exception($"Task status '{t.status}' is not scannable. Only Ready can be finished.");
 
                     var now = AppTime.NowVnUnspecified();
 
-                    // release machine of current task
+                    // release machine của công đoạn hiện tại
                     if (!string.IsNullOrWhiteSpace(t.machine))
                         await _machineRepo.ReleaseAsync(t.machine!, release: 1);
 
+                    // finish current task
                     t.status = "Finished";
+                    t.start_time ??= now;
                     t.end_time = now;
 
                     var log = new task_log
@@ -92,13 +92,21 @@ namespace AMMS.Application.Services
                     await _taskRepo.SaveChangesAsync();
                     await _logRepo.SaveChangesAsync();
 
+                    // promote task kế tiếp -> Ready
+                    var promotedNext = await _taskRepo.PromoteNextTaskToReadyAsync(t.task_id, now);
+                    await _taskRepo.SaveChangesAsync();
+
+                    // nếu tất cả task finished thì đóng production
                     if (t.prod_id.HasValue)
                     {
                         await _prodRepo.TryCloseProductionIfCompletedAsync(
                             t.prod_id.Value, now, CancellationToken.None);
                     }
 
-                    var prod = await _db.productions.FirstOrDefaultAsync(p => p.prod_id == t.prod_id.Value);
+                    var prod = await _db.productions
+                        .AsTracking()
+                        .FirstOrDefaultAsync(p => p.prod_id == t.prod_id.Value);
+
                     if (prod != null
                         && string.Equals(prod.status, "Finished", StringComparison.OrdinalIgnoreCase)
                         && prod.order_id.HasValue)
@@ -117,7 +125,7 @@ namespace AMMS.Application.Services
 
                     await tx.CommitAsync();
 
-                    // Sau khi finish xong mới dispatch task kế tiếp / task đang chờ máy
+                    // Có thể giữ lại, nhưng không còn phụ thuộc vào nó để mở task kế tiếp nữa
                     try { await _scheduling.DispatchDueTasksAsync(); } catch { }
 
                     await _hub.Clients
@@ -126,7 +134,8 @@ namespace AMMS.Application.Services
                         {
                             prodId = t.prod_id,
                             taskId = t.task_id,
-                            status = "Finished"
+                            status = "Finished",
+                            promoted_next = promotedNext
                         });
 
                     if (prod?.order_id != null)
@@ -142,7 +151,9 @@ namespace AMMS.Application.Services
                     {
                         task_id = t.task_id,
                         prod_id = t.prod_id,
-                        message = $"Finished & logged qty_good={qtyGood}"
+                        message = promotedNext
+                            ? $"Finished & logged qty_good={qtyGood}. Next task promoted to Ready."
+                            : $"Finished & logged qty_good={qtyGood}."
                     };
                 }
                 catch

@@ -38,7 +38,7 @@ namespace AMMS.API.Jobs
 
             var expiredItems = await (
                 from req in _db.order_requests
-                where req.process_status == "Verified"
+                where (req.process_status == "Verified" || req.process_status == "Waiting")
                    && req.verified_at != null
                    && req.quote_expires_at != null
                    && req.quote_expires_at < now
@@ -83,7 +83,7 @@ namespace AMMS.API.Jobs
                 EnsureTracked(req);
 
                 // Chỉ reject nếu request vẫn còn Verified
-                if (!string.Equals(req.process_status, "Verified", StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(req.process_status, "Verified", StringComparison.OrdinalIgnoreCase) && !string.Equals(req.process_status, "Waiting", StringComparison.OrdinalIgnoreCase))
                 {
                     _logger.LogInformation(
                         "[QuoteExpiryJob] Skip request_id={id} because process_status={status}",

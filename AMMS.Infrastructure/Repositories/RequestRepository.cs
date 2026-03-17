@@ -866,6 +866,17 @@ namespace AMMS.Infrastructure.Repositories
             return "";
         }
 
+        public async Task<order_request?> GetRequestForUpdateAsync(int orderRequestId, CancellationToken ct)
+        {
+            return await _db.order_requests
+                .FromSqlInterpolated($@"
+            SELECT *
+            FROM ""AMMS_DB"".""order_request""
+            WHERE order_request_id = {orderRequestId}
+            FOR UPDATE")
+                .FirstOrDefaultAsync(ct);
+        }
+
         private async Task<decimal> GetVatPercentAsync(CancellationToken ct = default)
         {
             var vat = await _db.estimate_config
@@ -878,6 +889,15 @@ namespace AMMS.Infrastructure.Repositories
                 .Select(x => x.value_num)
                 .FirstOrDefaultAsync(ct);
             return vat ?? 0m;
+        }
+        public async Task<bool> TryMarkDealWaitingFromVerifiedAsync(int requestId, CancellationToken ct = default)
+        {
+            var affected = await _db.order_requests
+                .Where(x => x.order_request_id == requestId && x.process_status == "Verified")
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(x => x.process_status, "Waiting"), ct);
+
+            return affected == 1;
         }
     }
 }

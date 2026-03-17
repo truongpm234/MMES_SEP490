@@ -125,12 +125,17 @@ namespace AMMS.API.Controllers
         [HttpPost("start/{orderId:int}")]
         public async Task<IActionResult> StartProduction(int orderId, CancellationToken ct)
         {
-            var ok = await _service.StartProductionByOrderIdAsync(orderId, ct);
+            var prodId = await _service.StartProductionAndPromoteFirstTaskAsync(orderId, ct);
 
-            if (!ok)
+            if (!prodId.HasValue)
                 return NotFound(new { message = "Production not found for this orderId" });
 
-            return NoContent();
+            return Ok(new
+            {
+                message = "Production started successfully",
+                prod_id = prodId.Value,
+                first_task_status = "Ready"
+            });
         }
 
         [HttpPut("delivery/{orderId:int}")]

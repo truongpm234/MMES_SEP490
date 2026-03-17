@@ -1,13 +1,12 @@
 ﻿using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
-using AMMS.Application.Jobs;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
+using AMMS.Shared.DTOs.Background;
 using AMMS.Shared.DTOs.Exceptions.AMMS.Application.Exceptions;
 using AMMS.Shared.DTOs.PayOS;
-using AMMS.Shared.DTOs.Socket;
-using Hangfire;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace AMMS.Application.Services
 {
@@ -21,17 +20,21 @@ namespace AMMS.Application.Services
         private readonly IQuoteRepository _quoteRepo;
         private readonly IPayOsService _payOs;
         private readonly IPaymentsService _payment;
-        private readonly IBackgroundJobClient _jobs;
         private readonly IRealtimePublisher _rt;
-
+        private readonly ILogger<DealService> _logger;
+        private readonly IEmailBackgroundQueue _emailQueue;
         public DealService(
-            IRequestRepository requestRepo,
-            ICostEstimateRepository estimateRepo,
-            IOrderRepository orderRepo,
-            IConfiguration config,
-            IEmailService emailService,
-            IQuoteRepository quoteRepo,
-            IPayOsService payOs, IPaymentsService payment, IBackgroundJobClient jobs, IRealtimePublisher rt)
+    IRequestRepository requestRepo,
+    ICostEstimateRepository estimateRepo,
+    IOrderRepository orderRepo,
+    IConfiguration config,
+    IEmailService emailService,
+    IQuoteRepository quoteRepo,
+    IPayOsService payOs,
+    IPaymentsService payment,
+    IRealtimePublisher rt,
+    ILogger<DealService> logger,
+    IEmailBackgroundQueue emailQueue)
         {
             _requestRepo = requestRepo;
             _estimateRepo = estimateRepo;
@@ -41,20 +44,26 @@ namespace AMMS.Application.Services
             _quoteRepo = quoteRepo;
             _payOs = payOs;
             _payment = payment;
-            _jobs = jobs;
             _rt = rt;
+            _logger = logger;
+            _emailQueue = emailQueue;
         }
 
         public async Task SendDealAndEmailAsync(int orderRequestId, int? estimateId = null)
         {
+            var locked = await _requestRepo.TryMarkDealWaitingFromVerifiedAsync(orderRequestId);
+            if (!locked)
+                throw new InvalidOperationException("Request must be Verified and not already sent");
+
             var req = await _requestRepo.GetByIdAsync(orderRequestId)
                 ?? throw new Exception("Order request not found");
 
-            if (!string.Equals(req.process_status?.Trim(), "Verified", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Request must be Verified by manager before sending deal");
-
             if (string.IsNullOrWhiteSpace(req.customer_email))
+            {
+                req.process_status = "Verified";
+                await _requestRepo.SaveChangesAsync();
                 throw new Exception("Customer email missing");
+            }
 
             List<cost_estimate> estimates;
 
@@ -64,10 +73,18 @@ namespace AMMS.Application.Services
                     ?? throw new Exception("Estimate not found");
 
                 if (one.order_request_id != orderRequestId)
+                {
+                    req.process_status = "Verified";
+                    await _requestRepo.SaveChangesAsync();
                     throw new InvalidOperationException("Estimate does not belong to this order_request_id");
+                }
 
                 if (!one.is_active)
+                {
+                    req.process_status = "Verified";
+                    await _requestRepo.SaveChangesAsync();
                     throw new InvalidOperationException("Estimate is inactive. Please create a new estimate.");
+                }
 
                 estimates = new List<cost_estimate> { one };
             }
@@ -80,72 +97,95 @@ namespace AMMS.Application.Services
                                .ToList();
 
                 if (estimates.Count == 0)
+                {
+                    req.process_status = "Verified";
+                    await _requestRepo.SaveChangesAsync();
                     throw new Exception("No active estimates found for this request");
+                }
             }
 
             var baseUrlFe = _config["Deal:BaseUrlFe"]!;
-            var consultantEmail = _config["Deal:ConsultantEmail"];
-
+            var consultantEmail = _config["Deal:ConsultantEmail"]?.Trim();
             var quotePairs = new List<(cost_estimate est, quote q, string checkoutUrl)>();
 
-            foreach (var est in estimates)
+            try
             {
-                var q = new quote
+                foreach (var est in estimates)
                 {
-                    order_request_id = orderRequestId,
-                    estimate_id = est.estimate_id,
-                    total_amount = est.final_total_cost,
-                    status = "Sent",
-                    created_at = AppTime.NowVnUnspecified()
-                };
+                    var q = new quote
+                    {
+                        order_request_id = orderRequestId,
+                        estimate_id = est.estimate_id,
+                        total_amount = est.final_total_cost,
+                        status = "Sent",
+                        created_at = AppTime.NowVnUnspecified()
+                    };
 
-                await _quoteRepo.AddAsync(q);
+                    await _quoteRepo.AddAsync(q);
+
+                    var checkoutUrl = $"{baseUrlFe}/checkout/{orderRequestId}";
+                    quotePairs.Add((est, q, checkoutUrl));
+                }
+
                 await _quoteRepo.SaveChangesAsync();
 
-                var checkoutUrl = $"{baseUrlFe}/checkout/{orderRequestId}";
-                quotePairs.Add((est, q, checkoutUrl));
-            }
+                var htmlCustomer = DealEmailTemplates.QuoteEmailCompare(req, quotePairs);
+                var sentSuffix = DateTime.Now.ToString("ddMMyyyy-HHmmss");
 
-            var htmlCustomer = DealEmailTemplates.QuoteEmailCompare(req, quotePairs);
-
-            var subjectCustomer =
-                quotePairs.Count == 1
-                    ? $"Báo giá đơn hàng in ấn #{req.order_request_id:D6} (E{quotePairs[0].est.estimate_id})"
-                    : $"Báo giá đơn hàng in ấn #{req.order_request_id:D6} (E{quotePairs[0].est.estimate_id} vs {quotePairs[1].est.estimate_id})";
-
-            var customerJobId = _jobs.Enqueue<EmailJob>(job =>
-                job.SendAsync(req.customer_email!, subjectCustomer, htmlCustomer));
-
-            if (!string.IsNullOrWhiteSpace(consultantEmail))
-            {
-                var consultantPairs = quotePairs
-                    .Select(x => (x.est, x.q, checkoutUrl: (string?)null))
-                    .ToList();
-
-                var htmlConsultant = DealEmailTemplates.QuoteEmailCompare(req, consultantPairs);
-
-                var subjectConsultant =
+                var subjectCustomer =
                     quotePairs.Count == 1
-                        ? $"[COPY] Đã gửi báo giá #{req.order_request_id:D6} (E{quotePairs[0].est.estimate_id})"
-                        : $"[COPY] Đã gửi báo giá #{req.order_request_id:D6} (Compare {quotePairs[0].est.estimate_id} vs {quotePairs[1].est.estimate_id})";
+                        ? $"Báo giá đơn hàng in ấn #{req.order_request_id:D6} (E{quotePairs[0].est.estimate_id}) - {sentSuffix}"
+                        : $"Báo giá đơn hàng in ấn #{req.order_request_id:D6} (E{quotePairs[0].est.estimate_id} vs {quotePairs[1].est.estimate_id}) - {sentSuffix}";
 
-                _jobs.ContinueJobWith<EmailJob>(customerJobId, job =>
-                    job.SendAsync(consultantEmail!, subjectConsultant, htmlConsultant));
+                await _emailQueue.QueueAsync(new EmailQueueItem(
+                    req.customer_email!,
+                    subjectCustomer,
+                    htmlCustomer));
+
+                // enqueue consultant mail
+                if (!string.IsNullOrWhiteSpace(consultantEmail))
+                {
+                    try
+                    {
+                        var consultantPairs = quotePairs
+                            .Select(x => (x.est, x.q, checkoutUrl: (string?)null))
+                            .ToList();
+
+                        var htmlConsultant = DealEmailTemplates.QuoteEmailCompare(req, consultantPairs);
+
+                        var subjectConsultant =
+    quotePairs.Count == 1
+        ? $"COPY báo giá #{req.order_request_id:D6} (E{quotePairs[0].est.estimate_id}) - {sentSuffix}"
+        : $"COPY báo giá #{req.order_request_id:D6} (Compare {quotePairs[0].est.estimate_id} vs {quotePairs[1].est.estimate_id}) - {sentSuffix}";
+
+                        await _emailQueue.QueueAsync(new EmailQueueItem(
+                            consultantEmail!,
+                            subjectConsultant,
+                            htmlConsultant));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex,
+                            "Queue consultant copy failed. RequestId={RequestId}; ConsultantEmail={ConsultantEmail}",
+                            orderRequestId, consultantEmail);
+                    }
+                }
+
+                await _rt.PublishRequestChangedAsync(new(
+                    request_id: req.order_request_id,
+                    old_status: "Verified",
+                    new_status: "Waiting",
+                    action: "sent_deal_email",
+                    changed_at: AppTime.NowVnUnspecified(),
+                    changed_by: null
+                ));
             }
-
-            var oldStatus = req.process_status;
-
-            req.process_status = "Waiting";
-            await _requestRepo.SaveChangesAsync();
-
-            await _rt.PublishRequestChangedAsync(new(
-                request_id: req.order_request_id,
-                old_status: oldStatus,
-                new_status: req.process_status,
-                action: "sent_deal_email",
-                changed_at: AppTime.NowVnUnspecified(),
-                changed_by: null
-            ));
+            catch
+            {
+                req.process_status = "Verified";
+                await _requestRepo.SaveChangesAsync();
+                throw;
+            }
         }
 
         public async Task<string> AcceptAndCreatePayOsLinkAsync(int orderRequestId)
@@ -156,7 +196,7 @@ namespace AMMS.Application.Services
             await SendConsultantStatusEmailAsync(req, est, statusText: "KHÁCH ĐỒNG Ý BÁO GIÁ");
 
             var deposit = est.deposit_amount;
-            var amount = (int)Math.Round(deposit, 0);
+            var amount = (int)Math.Round(deposit, 0) / 100;
             var description = $"AM{orderRequestId:D6}";
 
             var orderCode = await GetOrCreatePayOsOrderCodeAsync(orderRequestId);
@@ -566,7 +606,7 @@ namespace AMMS.Application.Services
             var backendUrl = _config["Deal:BaseUrl"]!;
             var feBase = _config["Deal:BaseUrlFe"] ?? "https://sep490-fe.vercel.app";
 
-            var amount = (int)Math.Round(est.deposit_amount, 0);
+            var amount = (int)Math.Round(est.deposit_amount, 0) / 100;
 
             const int maxAttempt = 9;
             Exception? last = null;

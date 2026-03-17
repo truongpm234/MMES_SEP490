@@ -7,7 +7,7 @@ namespace AMMS.Application.Helpers
     {
         private static string VND(decimal v)
             => string.Format(new CultureInfo("vi-VN"), "{0:N0} ₫", v);
-
+        private const string EmailFontFamily = "Arial, Helvetica, sans-serif";
         private static string MapCoatingType(string? coatingType)
         {
             var v = (coatingType ?? "").Trim().ToUpperInvariant();
@@ -27,7 +27,7 @@ namespace AMMS.Application.Helpers
                 : req.customer_name!.Trim();
 
             return $@"
-<div style='margin-top:18px;background:linear-gradient(135deg,#fff7ed 0%,#eff6ff 100%);border:1px solid #dbe7f3;border-radius:16px;padding:22px 24px;box-shadow:0 10px 28px rgba(15,23,42,0.06);font-family:Roboto, Arial, Helvetica, sans-serif;line-height:1.78;color:#334155;'>
+<div style='margin-top:18px;background:linear-gradient(135deg,#fff7ed 0%,#eff6ff 100%);border:1px solid #dbe7f3;border-radius:16px;padding:22px 24px;box-shadow:0 10px 28px rgba(15,23,42,0.06);font-family:'Arial, Helvetica, sans-serif;line-height:1.78;color:#334155;'>
   <div style='display:inline-block;background:linear-gradient(90deg,#f97316 0%,#2563eb 100%);color:#ffffff;font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;padding:6px 12px;border-radius:999px;margin-bottom:12px;'>
     MES CARE
   </div>
@@ -67,7 +67,7 @@ namespace AMMS.Application.Helpers
             var copyBox = "margin:0 0 16px 0;max-width:100%;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:12px;padding:12px 14px;text-align:left;";
             var copyTitle = "font-size:12px;color:#475569;font-weight:800;margin:0 0 8px 0;";
             var copyDesc = "font-size:12px;color:#334155;line-height:1.6;margin:0 0 8px 0;";
-            var copyUrl = "font-size:12px;color:#0f172a;word-break:break-all;line-height:1.6;margin:0;font-family:Roboto, Arial, Helvetica, sans-serif;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;user-select:all;-webkit-user-select:all;";
+            var copyUrl = "font-size:12px;color:#0f172a;word-break:break-all;line-height:1.6;margin:0;font-family:'Arial, Helvetica, sans-serif;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;user-select:all;-webkit-user-select:all;";
 
             return $@"
 <div style='{copyBox}'>
@@ -76,6 +76,61 @@ namespace AMMS.Application.Helpers
     Xin cảm ơn quý khách hàng đã tin tưởng và sử dụng dịch vụ của chúng tôi. Vui lòng copy đường dẫn bên dưới và dán vào tab mới của trình duyệt để tiếp tục xác nhận báo giá.
   </p>
   <p style='{copyUrl}'>{safeUrl}</p>
+</div>";
+        }
+
+        private static string ContractLinksBlock(IEnumerable<cost_estimate> estimates)
+        {
+            var items = estimates
+                .Where(x => !string.IsNullOrWhiteSpace(x.contract_file_path))
+                .GroupBy(x => x.estimate_id)
+                .Select(g => g.First())
+                .OrderBy(x => x.estimate_id)
+                .ToList();
+
+            if (items.Count == 0)
+                return "";
+
+            var rows = string.Join("", items.Select(x =>
+            {
+                var rawUrl = x.contract_file_path!.Trim();
+                var safeUrl = System.Net.WebUtility.HtmlEncode(rawUrl);
+
+                return $@"
+<tr>
+  <td style='padding:10px 12px;border:1px solid #e2e8f0;font-size:12px;color:#0f172a;font-weight:800;white-space:nowrap;width:90px;vertical-align:top;'>
+    E{x.estimate_id}
+  </td>
+  <td style='padding:10px 12px;border:1px solid #e2e8f0;font-size:12px;color:#2563eb;word-break:break-all;line-height:1.6;vertical-align:top;'>
+    <a href='{rawUrl}' target='_blank' rel='noopener noreferrer' style='color:#2563eb;text-decoration:none;'>
+      {safeUrl}
+    </a>
+  </td>
+</tr>";
+            }));
+
+            return $@"
+<div style='margin-top:16px;background:linear-gradient(135deg,#ecfeff 0%,#f8fafc 100%);border:1px solid #cbd5e1;border-radius:14px;padding:16px;box-shadow:0 8px 18px rgba(15,23,42,0.05);'>
+  <p style='margin:0 0 8px 0;font-size:13px;color:#0f766e;font-weight:900;letter-spacing:0.2px;'>
+    📄 Đường dẫn hợp đồng
+  </p>
+
+  <p style='margin:0 0 12px 0;font-size:12.5px;color:#334155;line-height:1.65;'>
+    Hợp đồng được đặt bên dưới phần báo giá để Quý khách tiện đối chiếu.
+    Vui lòng mở đường dẫn tương ứng của từng phương án báo giá.
+  </p>
+
+  <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;background:#ffffff;border-radius:10px;overflow:hidden;table-layout:fixed;'>
+    <thead>
+      <tr style='background:#f8fafc;'>
+        <th style='padding:10px 12px;border:1px solid #e2e8f0;text-align:left;font-size:12px;color:#475569;'>Báo giá</th>
+        <th style='padding:10px 12px;border:1px solid #e2e8f0;text-align:left;font-size:12px;color:#475569;'>Đường dẫn hợp đồng</th>
+      </tr>
+    </thead>
+    <tbody>
+      {rows}
+    </tbody>
+  </table>
 </div>";
         }
 
@@ -108,38 +163,38 @@ namespace AMMS.Application.Helpers
 
             string FormatVND(decimal? amount) => string.Format("{0:N0} đ", amount ?? 0).Replace(",", ".");
 
-            var font = "font-family:Roboto, Arial, Helvetica, sans-serif; line-height:1.35;";
+            var font = $"font-family:{EmailFontFamily}; line-height:1.45;";
             var tableFixed = "width:100%;border-collapse:collapse;table-layout:fixed;";
             var tdLabel = "width:130px;white-space:nowrap;color:#64748b;font-size:13px;padding:7px 0;border-bottom:1px solid #eef2f7;vertical-align:top;";
-            var tdValue = "color:#0f172a;font-size:13px;font-weight:700;padding:7px 0;border-bottom:1px solid #eef2f7;text-align:right;vertical-align:top;word-break:break-word;";
-            var tdValueNoWrap = tdValue + "white-space:nowrap;font-size:12px;";
-            var tdValueLink = "color:#2563eb;font-size:13px;font-weight:800;padding:7px 0;border-bottom:1px solid #eef2f7;text-align:right;vertical-align:top;word-break:break-word;";
+            var tdValue = "color:#0f172a;font-size:13px;font-weight:700;padding:7px 0;border-bottom:1px solid #eef2f7;text-align:right;vertical-align:top;word-break:break-word;overflow-wrap:anywhere;";
+            var tdValueWrap = "color:#0f172a;font-size:12px;font-weight:600;padding:7px 0;border-bottom:1px solid #eef2f7;text-align:right;vertical-align:top;white-space:normal;word-break:break-word;overflow-wrap:anywhere;line-height:1.45;";
+            var tdValueLink = "color:#2563eb;font-size:13px;font-weight:700;padding:7px 0;border-bottom:1px solid #eef2f7;text-align:right;vertical-align:top;word-break:break-word;overflow-wrap:anywhere;";
 
             var card = "background:#ffffff; border:1px solid #e2e8f0; border-radius:16px; overflow:hidden; box-shadow:0 10px 25px rgba(0,0,0,0.05); margin-bottom:20px;";
             var header = "background:linear-gradient(90deg,#1e3a8a 0%,#2563eb 100%); padding:20px;";
             var badge = "display:inline-block;background:rgba(255,255,255,0.18);color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;font-weight:700;";
-            var h1 = "color:#ffffff;font-size:18px;font-weight:800;margin:4px 0 0 0;letter-spacing:0.2px;";
-            var smallTop = "color:#cfe6ff;font-size:11px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;";
+            var h1 = "color:#ffffff;font-size:18px;font-weight:700;margin:4px 0 0 0;letter-spacing:0.2px;";
+            var smallTop = "color:#cfe6ff;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;";
             var bodyPad = "padding:18px 18px 16px 18px;";
 
-            var sectionTitleBlue = "font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;color:#2563eb;border-bottom:2px solid #bfdbfe;padding-bottom:6px;margin:0 0 10px 0;";
-            var sectionTitleOrange = "font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;color:#d97706;border-bottom:2px solid #fde68a;padding-bottom:6px;margin:0 0 10px 0;";
-            var sectionTitleGreen = "font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;color:#16a34a;border-bottom:2px solid #bbf7d0;padding-bottom:6px;margin:0 0 10px 0;";
+            var sectionTitleBlue = "font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:#2563eb;border-bottom:2px solid #bfdbfe;padding-bottom:6px;margin:0 0 10px 0;";
+            var sectionTitleOrange = "font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:#d97706;border-bottom:2px solid #fde68a;padding-bottom:6px;margin:0 0 10px 0;";
+            var sectionTitleGreen = "font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:#16a34a;border-bottom:2px solid #bbf7d0;padding-bottom:6px;margin:0 0 10px 0;";
 
             var boxCost = "background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px;";
             var line = "padding:6px 0;font-size:13px;color:#334155;";
-            var money = "padding:6px 0;font-size:13px;color:#0f172a;font-weight:800;text-align:right;";
-            var moneyRed = "padding:6px 0;font-size:13px;color:#dc2626;font-weight:900;text-align:right;";
+            var money = "padding:6px 0;font-size:13px;color:#0f172a;font-weight:700;text-align:right;";
+            var moneyRed = "padding:6px 0;font-size:13px;color:#dc2626;font-weight:700;text-align:right;";
 
             var totalLabel = "color:#64748b;font-size:13px;padding:6px 0;";
-            var totalValue = "color:#0f172a;font-size:13px;font-weight:800;text-align:right;padding:6px 0;";
-            var finalRowLeft = "font-weight:900;color:#0f172a;font-size:14px;padding-top:10px;";
-            var finalRowRight = "font-weight:900;color:#1d4ed8;font-size:18px;text-align:right;padding-top:10px;";
+            var totalValue = "color:#0f172a;font-size:13px;font-weight:700;text-align:right;padding:6px 0;";
+            var finalRowLeft = "font-weight:700;color:#0f172a;font-size:14px;padding-top:10px;";
+            var finalRowRight = "font-weight:700;color:#1d4ed8;font-size:18px;text-align:right;padding-top:10px;";
             var vatNote = "text-align:right;font-size:11px;color:#ef4444;padding-top:4px;";
 
             var depositBoxCell = "background:#ecfdf5;border:1px solid #86efac;border-radius:10px;padding:12px;";
-            var depositLeft = "color:#166534;font-weight:900;font-size:13px;";
-            var depositRight = "color:#166534;font-weight:900;font-size:16px;text-align:right;";
+            var depositLeft = "color:#166534;font-weight:700;font-size:13px;";
+            var depositRight = "color:#166534;font-weight:700;font-size:16px;text-align:right;";
 
             var otherFeesRow = otherFees > 0
                 ? $"<tr><td style='{line}'>Chi phí khác</td><td style='{money}'>{FormatVND(otherFees)}</td></tr>"
@@ -157,56 +212,20 @@ namespace AMMS.Application.Helpers
 </tr>"
                 : "";
 
-            var rightColLayout = $@"
-<div>
-  <div style='{sectionTitleGreen}'>Tổng thanh toán</div>
-  <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
-    <tr>
-      <td style='{totalLabel}'>Tạm tính</td>
-      <td style='{totalValue}'>{FormatVND(subtotal)}</td>
-    </tr>
-    {discountRow}
-    <tr>
-      <td style='{finalRowLeft}'>THÀNH TIỀN</td>
-      <td style='{finalRowRight}'>{FormatVND(finalTotal)}</td>
-    </tr>
-    <tr>
-      <td colspan='2' style='{vatNote}'>(Đã bao gồm VAT)</td>
-    </tr>
-  </table>
-</div>";
-            var depositBoxHtml = $@"
-<table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;margin-top:18px;'>
-  <tr>
-    <td align='right'>
-      <table width='280' cellpadding='0' cellspacing='0' border='0' style='border-collapse:separate;border-spacing:0;'>
-        <tr>
-          <td style='{depositBoxCell}'>
-            <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
-              <tr>
-                <td style='{depositLeft}'>Cần cọc:</td>
-                <td style='{depositRight}'>{FormatVND(deposit)}</td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
-</table>";
             string messageBoxHtml = "";
             if (!string.IsNullOrWhiteSpace(messageToCustomer))
             {
-                var msgBoxStyle = "margin: 0 0 20px 0; background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #3b82f6; border-radius: 12px; padding: 16px;";
-                var msgTitleStyle = "color: #0369a1; font-size: 13px; font-weight: 800; text-transform: uppercase; margin-bottom: 8px; display: block; letter-spacing: 0.5px;";
-                var msgContentStyle = "color: #1e293b; font-size: 14px; line-height: 1.6; margin: 0; font-style: italic;";
+                var msgBoxStyle = "margin:0 0 20px 0;background-color:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid #3b82f6;border-radius:12px;padding:16px;";
+                var msgTitleStyle = "color:#0369a1;font-size:13px;font-weight:800;text-transform:uppercase;margin-bottom:8px;display:block;letter-spacing:0.5px;";
+                var msgContentStyle = "color:#1e293b;font-size:14px;line-height:1.6;margin:0;font-style:italic;";
 
                 messageBoxHtml = $@"
-        <div style='{msgBoxStyle}'>
-            <span style='{msgTitleStyle}'>💬 Lời nhắn từ chuyên viên tư vấn:</span>
-            <p style='{msgContentStyle}'>""{messageToCustomer.Trim()}""</p>
-        </div>";
+<div style='{msgBoxStyle}'>
+    <span style='{msgTitleStyle}'>💬 Lời nhắn từ chuyên viên tư vấn:</span>
+    <p style='{msgContentStyle}'>""{System.Net.WebUtility.HtmlEncode(messageToCustomer.Trim())}""</p>
+</div>";
             }
+
             return $@"
 <div style='{font}{card}'>
     <div style='{header}'>
@@ -223,8 +242,7 @@ namespace AMMS.Application.Helpers
         </table>
     </div>
 
-    <div style='{bodyPad}background-color: #ffffff;'>
-        
+    <div style='{bodyPad}background-color:#ffffff;'>
         {messageBoxHtml}
 
         <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
@@ -253,11 +271,11 @@ namespace AMMS.Application.Helpers
             </tr>
         </table>
 
-        <div style='height:20px;'></div>
+        <div style='height:20px;line-height:20px;font-size:0;'>&nbsp;</div>
 
-<table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
+        <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;table-layout:fixed;'>
     <tr>
-        <td width='50%' valign='top' style='padding-right:12px;'>
+        <td width='50%' valign='top' style='padding-right:12px;vertical-align:top;'>
             <div style='{sectionTitleBlue}'>Chi tiết sản phẩm</div>
             <table style='{tableFixed}' cellpadding='0' cellspacing='0' border='0'>
                 <tr><td style='{tdLabel}'>Sản phẩm</td><td style='{tdValue}'>{productName}</td></tr>
@@ -265,18 +283,48 @@ namespace AMMS.Application.Helpers
                 <tr><td style='{tdLabel}'>Loại giấy</td><td style='{tdValue}'>{paperName}</td></tr>
                 <tr><td style='{tdLabel}'>Phủ</td><td style='{tdValue}'>{coatingType}</td></tr>
                 <tr><td style='{tdLabel}'>Sóng</td><td style='{tdValue}'>{waveType}</td></tr>
-                <tr><td style='{tdLabel}'>Thiết kế</td><td style='{tdValueNoWrap}'>{designType}</td></tr>
+                <tr><td style='{tdLabel}'>Thiết kế</td><td style='{tdValueWrap}'>{designType}</td></tr>
                 <tr><td style='{tdLabel}'>Giao dự kiến</td><td style='{tdValue}'>{delivery}</td></tr>
             </table>
         </td>
 
-        <td width='50%' valign='top' style='padding-left:12px;'>
-            {rightColLayout}
+        <td width='50%' valign='top' style='padding-left:12px;vertical-align:top;'>
+            <div style='{sectionTitleGreen}'>Tổng thanh toán</div>
+
+            <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;table-layout:fixed;'>
+                <tr>
+                    <td style='{totalLabel}'>Tạm tính</td>
+                    <td style='{totalValue}'>{FormatVND(subtotal)}</td>
+                </tr>
+                {discountRow}
+                <tr>
+                    <td style='{finalRowLeft}'>THÀNH TIỀN</td>
+                    <td style='{finalRowRight}'>{FormatVND(finalTotal)}</td>
+                </tr>
+                <tr>
+                    <td colspan='2' style='{vatNote}'>(Đã bao gồm VAT)</td>
+                </tr>
+
+                <tr>
+                    <td colspan='2' style='padding-top:18px;'>
+                        <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:separate;border-spacing:0;'>
+                            <tr>
+                                <td style='{depositBoxCell}'>
+                                    <table width='100%' cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;'>
+                                        <tr>
+                                            <td style='{depositLeft}'>Cần cọc:</td>
+                                            <td style='{depositRight}'>{FormatVND(deposit)}</td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
         </td>
     </tr>
 </table>
-
-{depositBoxHtml}
     </div>
 </div>";
         }
@@ -285,6 +333,7 @@ namespace AMMS.Application.Helpers
         {
             var topCopyBlock = SecurePlainUrlBlock(orderDetailUrl);
             var inner = QuoteEmailInner(req, est, req.message_to_customer);
+            var contractBlock = ContractLinksBlock(new[] { est });
             var expiryBox = QuoteExpiryNotice(ResolveQuoteExpiredAt(req, q), includeAutoReject: true);
             var closingNote = QuoteIntro(req);
 
@@ -294,15 +343,12 @@ namespace AMMS.Application.Helpers
 <head>
   <meta charset='utf-8'>
   <meta name='viewport' content='width=device-width, initial-scale=1'>
-  <link href='https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;800&display=swap' rel='stylesheet'>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;800&display=swap');
-  </style>
 </head>
-<body style='background-color:#f7fafc;padding:30px 0;font-family:Roboto, Arial, Helvetica, sans-serif;'>
+<body style='background-color:#f7fafc;padding:30px 0;font-family:'Arial, Helvetica, sans-serif;'>
   <div style='max-width:700px;margin:0 auto;'>
     {topCopyBlock}
     {inner}
+    {contractBlock}
     {expiryBox}
     {closingNote}
     <div style='background:linear-gradient(180deg,#edf2f7 0%,#e2e8f0 100%);padding:15px;text-align:center;font-size:12px;color:#64748b;border-radius:12px;margin-top:14px;'>
@@ -322,8 +368,10 @@ namespace AMMS.Application.Helpers
             var right = pairs.Count > 1 ? pairs[1] : ((cost_estimate est, quote q, string? checkoutUrl)?)null;
 
             var expiryBox = QuoteExpiryNotice(ResolveQuoteExpiredAt(req, left.q), includeAutoReject: true);
+            var contractBlock = ContractLinksBlock(pairs.Select(x => x.est).ToList());
 
             var leftHtml = QuoteEmailInner(req, left.est, req.message_to_customer);
+
             var rightHtml = right.HasValue
                 ? QuoteEmailInner(req, right.Value.est, req.message_to_customer)
                 : "";
@@ -384,12 +432,8 @@ namespace AMMS.Application.Helpers
 <head>
   <meta charset='utf-8'>
   <meta name='viewport' content='width=device-width, initial-scale=1'>
-  <link href='https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;800&display=swap' rel='stylesheet'>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;800&display=swap');
-  </style>
 </head>
-<body style='margin:0;background-color:#f7fafc;padding:30px 0;font-family:Roboto, Arial, Helvetica, sans-serif;'>
+<body style='margin:0;background-color:#f7fafc;padding:30px 0;font-family:'Arial, Helvetica, sans-serif;'>
   <div style='max-width:1100px;margin:0 auto;padding:0 12px;'>
 
     <div style='margin-bottom:18px;text-align:center;color:#0f172a;font-weight:800;font-size:18px;letter-spacing:0.2px;'>
@@ -398,6 +442,7 @@ namespace AMMS.Application.Helpers
 
     {sharedAction}
     {compareLayoutHtml}
+    {contractBlock}
     {expiryBox}
     {closingNoteHtml}
 
