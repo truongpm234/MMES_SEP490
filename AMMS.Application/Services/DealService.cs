@@ -5,6 +5,7 @@ using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Background;
 using AMMS.Shared.DTOs.Exceptions.AMMS.Application.Exceptions;
 using AMMS.Shared.DTOs.PayOS;
+using AMMS.Shared.DTOs.Socket;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 

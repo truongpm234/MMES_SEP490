@@ -70,6 +70,8 @@ namespace AMMS.Application.Services
 
         public async Task<int?> StartProductionAndPromoteFirstTaskAsync(int orderId, CancellationToken ct = default)
         {
+            var evt = new RequestChangedEvent(orderId, "Scheduled", "InProcessing", "Start", DateTime.Now, "production-manager");
+            await _hub.PublishRequestChangedAsync(evt);
             return await _repo.StartProductionByOrderIdAndPromoteFirstTaskAsync(orderId, AppTime.NowVnUnspecified(), ct);
         }
     }

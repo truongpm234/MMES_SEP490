@@ -1,7 +1,4 @@
 ﻿using AMMS.Application.Interfaces;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 
 namespace AMMS.API.Jobs
 {
