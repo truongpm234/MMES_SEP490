@@ -15,7 +15,6 @@ namespace AMMS.Application.Interfaces
     {
         Task UpdateFinalCostAsync(int orderRequestId, decimal? finalCostInput);
         Task<cost_estimate?> GetEstimateByIdAsync(int estimateId);
-        Task<cost_estimate?> GetEstimateByOrderRequestIdAsync(int orderRequestId);
         Task<DepositByRequestResponse?> GetDepositByRequestIdAsync(int requestId, CancellationToken ct = default);
         Task<bool> OrderRequestExistsAsync(int order_request_id);
         Task<int> SaveFeCostEstimateAsync(CostEstimateInsertRequest req, CancellationToken ct = default);

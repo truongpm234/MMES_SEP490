@@ -228,34 +228,6 @@ namespace AMMS.Application.Services
             return result.check_out_url ?? "";
         }
 
-        public async Task<PayOsDepositInfoDto> PrepareDepositPaymentAsync(int orderRequestId, CancellationToken ct = default)
-        {
-            var req = await _requestRepo.GetByIdAsync(orderRequestId)
-                ?? throw new InvalidOperationException("Order request not found");
-
-            var est = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId)
-                ?? throw new InvalidOperationException("Cost estimate not found");
-
-            var expiredAt = est.created_at.AddHours(24);
-            if (DateTime.UtcNow > expiredAt.ToUniversalTime())
-                throw new InvalidOperationException("Báo giá đã hết hạn, không thể tạo link thanh toán.");
-
-            var payos = await CreateOrReuseDepositLinkAsync(orderRequestId, est.estimate_id, req.quote_id, ct);
-
-            return new PayOsDepositInfoDto
-            {
-                order_code = payos.order_code ?? 0,
-                checkout_url = payos.check_out_url,
-                deposit_amount = est.deposit_amount,
-                expire_at = expiredAt,
-                qr_code = payos.qr_code,
-                account_number = payos.account_number,
-                account_name = payos.account_name,
-                bin = payos.bin,
-                status = payos.status
-            };
-        }
-
         public async Task RejectDealAsync(int orderRequestId, string reason)
         {
             var req = await _requestRepo.GetByIdAsync(orderRequestId)
@@ -283,23 +255,7 @@ namespace AMMS.Application.Services
             await SendConsultantStatusEmailAsync(req, est, $"KHACH TU CHOI (LY DO: {safeReason})");
         }
 
-        public async Task MarkAcceptedAsync(int orderRequestId)
-        {
-            var req = await _requestRepo.GetByIdAsync(orderRequestId)
-                ?? throw new Exception("Order request not found");
-
-            req.process_status = "Accepted";
-
-            if (req.quote_id != null)
-            {
-                var q = await _quoteRepo.GetByIdAsync(req.quote_id.Value);
-                if (q != null) q.status = "Accepted";
-                await _quoteRepo.SaveChangesAsync();
-            }
-
-            await _requestRepo.SaveChangesAsync();
-        }
-
+        
         public async Task SendConsultantStatusEmailAsync(
     order_request req,
     cost_estimate? est,

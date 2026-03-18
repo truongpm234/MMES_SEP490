@@ -18,16 +18,9 @@ namespace AMMS.Infrastructure.Interfaces
         Task<int> SaveChangesAsync();
         Task<string> GenerateNextOrderCodeAsync();
         Task<OrderDetailDto?> GetDetailByIdAsync(int orderId, CancellationToken ct = default);
-        Task<PagedResultLite<MissingMaterialDto>> GetAllMissingMaterialsAsync(
-            int page,
-            int pageSize,
-            CancellationToken ct = default);
+        Task<PagedResultLite<MissingMaterialDto>> GetAllMissingMaterialsAsync(int page, int pageSize, CancellationToken ct = default);
         Task<string> DeleteDesignFilePath(int orderRequestId);
-        Task<object> BuyMaterialAndRecalcOrdersAsync(
-            int materialId,
-            decimal quantity,
-            int managerUserId,
-            CancellationToken ct = default);
+        Task<object> BuyMaterialAndRecalcOrdersAsync(int materialId, decimal quantity, int managerUserId, CancellationToken ct = default);
         Task<List<order>> GetAllOrderInprocessStatus();
         Task MarkOrdersBuyByMaterialsAsync(List<int> materialIds, CancellationToken ct = default);
         Task MarkOrdersBuyByMaterialAsync(int materialId, CancellationToken ct = default);

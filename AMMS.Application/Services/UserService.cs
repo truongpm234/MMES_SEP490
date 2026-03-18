@@ -28,7 +28,6 @@ namespace AMMS.Application.Services
 
         public async Task<UserRegisterResponseDto> Register(UserRegisterRequestDto request, string otp)
         {
-            //await _emailService.SendOtpAsync(request.email);
 
             if (await _emailService.VerifyOtpAsync(request.email, otp))
             {

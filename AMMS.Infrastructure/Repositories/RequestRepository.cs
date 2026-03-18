@@ -107,6 +107,7 @@ namespace AMMS.Infrastructure.Repositories
             entity.process_status = "Cancel";
             _db.order_requests.Update(entity);
         }
+
         public Task<int> CountAsync()
         {
             return _db.order_requests.AsNoTracking().CountAsync();
@@ -179,7 +180,6 @@ namespace AMMS.Infrastructure.Repositories
             return data.StockQty >= data.RequiredQty;
         }
 
-
         public async Task<PagedResultLite<RequestSortedDto>> GetSortedByQuantityPagedAsync(
     bool ascending, int page, int pageSize, CancellationToken ct = default)
         {
@@ -194,7 +194,6 @@ namespace AMMS.Infrastructure.Repositories
                 ? query.OrderBy(x => x.quantity ?? 0)
                 : query.OrderByDescending(x => x.quantity ?? 0);
 
-            // lấy dư 1 record để biết có trang sau
             var list = await query
                 .Skip(skip)
                 .Take(pageSize + 1)
@@ -340,6 +339,7 @@ namespace AMMS.Infrastructure.Repositories
                 Data = list.Select(x => new RequestEmailStatsDto(x.CustomerEmail, x.AcceptedCount)).ToList()
             };
         }
+
         public async Task<PagedResultLite<RequestStockCoverageDto>> GetSortedByStockCoveragePagedAsync(
     int page, int pageSize, CancellationToken ct = default)
         {
@@ -348,7 +348,6 @@ namespace AMMS.Infrastructure.Repositories
 
             var skip = (page - 1) * pageSize;
 
-            // 1) Tạo base query có stock + ratio dạng primitive
             var baseQuery =
                 from r in _db.order_requests.AsNoTracking()
                 join m in _db.materials.AsNoTracking()
@@ -809,8 +808,7 @@ namespace AMMS.Infrastructure.Repositories
                     discount_amount = e.discount_amount,
                     final_total_cost = e.final_total_cost,
                     deposit_amount = e.deposit_amount,
-                    created_at = e.created_at,
-                    
+                    created_at = e.created_at,                   
                     estimated_finish_date = e.estimated_finish_date,
                     desired_delivery_date = e.desired_delivery_date,
                     sheets_required = e.sheets_required,

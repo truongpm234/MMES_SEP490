@@ -55,25 +55,20 @@ namespace AMMS.Application.Services
             var res = await _http.SendAsync(msg, ct);
             var rawResponse = await res.Content.ReadAsStringAsync(ct);
 
-            // ✅ PayOS có thể trả 200 nhưng success=false; hoặc trả lỗi nhưng vẫn có data
             using var doc = JsonDocument.Parse(rawResponse);
 
             var root = doc.RootElement;
             var code = root.TryGetProperty("code", out var c) ? (c.GetString() ?? "") : "";
             var hasData = root.TryGetProperty("data", out var data);
 
-            // ✅ Case "code=00" có data => coi như OK
             if (code == "00" && hasData)
                 return MapPayOsDataToDto(data, orderCode, description, amount, rawResponse);
 
-            // Nếu HTTP fail mà vẫn có data thì vẫn map (tuỳ bạn muốn strict hay not)
             if (hasData && !string.Equals(code, "", StringComparison.Ordinal))
             {
-                // Một số case PayOS vẫn kèm data, ưu tiên trả dto để FE có link
                 return MapPayOsDataToDto(data, orderCode, description, amount, rawResponse);
             }
 
-            // ❌ Không có data => throw
             throw new PayOsException($"PayOS Error: {rawResponse}");
         }
 
@@ -131,6 +126,7 @@ namespace AMMS.Application.Services
                 _ => null
             };
         }
+
         public async Task<PayOsResultDto?> GetPaymentLinkInformationAsync(long orderCode, CancellationToken ct = default)
         {
             using var msg = new HttpRequestMessage(HttpMethod.Get, $"{_opt.BaseUrl}/v2/payment-requests/{orderCode}");

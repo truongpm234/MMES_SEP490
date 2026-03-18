@@ -11,11 +11,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AMMS.Application.Services
 {
-    public class EstimateBaseConfigService : IEstimateBaseConfigService
+    public class BaseConfigService : IBaseConfigService
     {
         private readonly AppDbContext _db;
 
-        public EstimateBaseConfigService(AppDbContext db)
+        public BaseConfigService(AppDbContext db)
         {
             _db = db;
         }

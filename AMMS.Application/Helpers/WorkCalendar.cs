@@ -65,7 +65,6 @@ namespace AMMS.Application.Helpers
                 var shiftStart = new DateTime(cur.Year, cur.Month, cur.Day, _opt.shift_start_hour, 0, 0, DateTimeKind.Unspecified);
                 var shiftEnd = shiftStart.AddHours(_opt.shift_hours_per_day);
 
-                // cur đã nằm trong ca
                 var available = shiftEnd - cur;
                 if (available <= TimeSpan.Zero)
                 {

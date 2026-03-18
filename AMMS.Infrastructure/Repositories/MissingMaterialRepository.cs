@@ -124,7 +124,6 @@ namespace AMMS.Infrastructure.Repositories
                     return new { insertedRows = 0, message = "No BOM lines found." };
                 }
 
-                // 4) usage 30 ngày OUT
                 var today = DateTime.SpecifyKind(DateTime.UtcNow.Date, DateTimeKind.Unspecified);
                 var historyStart = DateTime.SpecifyKind(today.AddDays(-30), DateTimeKind.Unspecified);
                 var historyEndExclusive = DateTime.SpecifyKind(today.AddDays(1), DateTimeKind.Unspecified);
@@ -144,7 +143,6 @@ namespace AMMS.Infrastructure.Repositories
 
                 var usageDict = usageLast30.ToDictionary(x => x.MaterialId, x => Math.Round(x.Usage, 4));
 
-                // ✅ 5) OUTSTANDING purchase orders (status = "Ordered") - chỉ PO, không tính request Pending, không tính Delivered
                 var orderedOutstandingList = await (
                     from pi in _db.purchase_items.AsNoTracking()
                     join p in _db.purchases.AsNoTracking() on pi.purchase_id equals p.purchase_id
@@ -164,7 +162,6 @@ namespace AMMS.Infrastructure.Repositories
                     x => Math.Round(x.QtyOrdered, 4)
                 );
 
-                // 6) group theo material → needed = required + safety(30% usage)
                 var now = DateTime.UtcNow;
 
 
@@ -190,11 +187,9 @@ namespace AMMS.Infrastructure.Repositories
 
                         var available = Math.Round(g.Max(x => x.StockQty), 4);
 
-                        // ✅ base missing theo BOM/stock
                         var baseMissing = needed - available;
                         if (baseMissing < 0m) baseMissing = 0m;
 
-                        // ✅ subtract outstanding Ordered PO
                         orderedOutstandingDict.TryGetValue(g.Key.MaterialId, out var orderedOutstanding);
                         var remaining = baseMissing - orderedOutstanding;
                         if (remaining < 0m) remaining = 0m;
@@ -211,7 +206,6 @@ namespace AMMS.Infrastructure.Repositories
                         var requestDateUtc = ToUtc(requestDate);
 
 
-                        // ✅ is_buy=true khi đã order đủ để remaining=0 (và thực sự có thiếu ban đầu)
                         var isBuy = baseMissing > 0m && remaining == 0m;
 
                         return new missing_material
@@ -225,7 +219,6 @@ namespace AMMS.Infrastructure.Repositories
                             needed = needed,
                             available = available,
 
-                            // ✅ store remaining missing (sau khi trừ PO Ordered)
                             quantity = remaining,
                             total_price = totalPrice,
 
@@ -233,7 +226,6 @@ namespace AMMS.Infrastructure.Repositories
                             created_at = now
                         };
                     })
-                    // ✅ Insert cả trường hợp remaining=0 nhưng baseMissing>0 (để show is_buy=true)
                     .Where(x => x.needed > x.available)
                     .ToList();
 

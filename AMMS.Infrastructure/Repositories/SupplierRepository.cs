@@ -18,7 +18,6 @@ namespace AMMS.Infrastructure.Repositories
         public Task<int> CountAsync(CancellationToken ct = default)
             => _db.suppliers.AsNoTracking().CountAsync(ct);
 
-        // ✅ Lấy danh sách supplier + materials có main_material_type trùng nhau
         public async Task<List<SupplierLiteDto>> GetPagedAsync(
     int skip, int take, CancellationToken ct = default)
         {
@@ -39,7 +38,6 @@ namespace AMMS.Infrastructure.Repositories
                 })
                 .ToListAsync(ct);
         }
-
 
         public async Task<SupplierDetailDto?> GetSupplierDetailWithMaterialsAsync(
     int supplierId, int page, int pageSize, CancellationToken ct = default)
@@ -74,7 +72,7 @@ namespace AMMS.Infrastructure.Repositories
                     m.code,
                     m.name,
                     m.unit,
-                    UnitPrice = m.cost_price,  // ✅ đơn giá từ material
+                    UnitPrice = m.cost_price,
                     sm.is_active,
                     sm.note
                 };
@@ -113,6 +111,7 @@ namespace AMMS.Infrastructure.Repositories
                 }
             };
         }
+
         public async Task<List<SupplierByMaterialIdDto>> ListSupplierByMaterialId(int id)
         {
             var listSuppliers = await _db.suppliers

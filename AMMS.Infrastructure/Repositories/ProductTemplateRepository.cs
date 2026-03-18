@@ -36,6 +36,7 @@ namespace AMMS.Infrastructure.Repositories
                 .OrderBy(x => x.template_code)
                 .ToListAsync(ct);
         }
+
         public Task<List<material>> GetPaperMaterialsStockDescAsync(CancellationToken ct = default)
         {
             return _db.materials

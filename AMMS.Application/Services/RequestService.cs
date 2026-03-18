@@ -287,10 +287,8 @@ namespace AMMS.Application.Services
                 customer_name = dto.customer_name?.Trim(),
                 customer_phone = dto.customer_phone?.Trim(),
                 customer_email = dto.customer_email?.Trim(),
-
                 delivery_date = ToDeliveryDate(dto.delivery_date),
                 detail_address = dto.detail_address?.Trim(),
-
                 product_name = dto.product_name?.Trim(),
                 quantity = dto.quantity,
                 description = dto.description,

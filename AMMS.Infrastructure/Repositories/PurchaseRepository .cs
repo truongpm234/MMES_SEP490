@@ -68,9 +68,6 @@ namespace AMMS.Infrastructure.Repositories
                 .FirstOrDefaultAsync(ct);
         }
 
-        // =========================
-        // ✅ NEW: Paging helpers
-        // =========================
         private static void NormalizePaging(ref int page, ref int pageSize)
         {
             if (page <= 0) page = 1;
@@ -105,12 +102,6 @@ namespace AMMS.Infrastructure.Repositories
             };
         }
 
-        // =========================
-        // ✅ NEW/CHANGED: Build list query (all/pending)
-        // - add eta_date, status
-        // - join stock_moves(IN) + users => receivedByName
-        // - join materials (optional) => unit (MIXED/1 unit/null)
-        // =========================
         private IQueryable<PurchaseOrderListItemDto> BuildPurchaseListQuery(string? statusFilter)
         {
             var q =
@@ -125,17 +116,14 @@ namespace AMMS.Infrastructure.Repositories
                     on p.purchase_id equals i.purchase_id into items
                 from i in items.DefaultIfEmpty()
 
-                    // ✅ CHANGED: join materials để lấy unit (nếu bạn cần unit tổng)
                 join m in _db.materials.AsNoTracking()
                     on i.material_id equals m.material_id into mats
                 from m in mats.DefaultIfEmpty()
 
-                    // ✅ CHANGED: join stock_moves IN
                 join sm in _db.stock_moves.AsNoTracking().Where(x => x.type == "IN")
                     on p.purchase_id equals sm.purchase_id into sms
                 from sm in sms.DefaultIfEmpty()
 
-                    // ✅ CHANGED: join users để lấy tên người nhận
                 join u in _db.users.AsNoTracking()
                     on sm.user_id equals u.user_id into us
                 from u in us.DefaultIfEmpty()
@@ -160,11 +148,10 @@ namespace AMMS.Infrastructure.Repositories
                     // total qty ordered
                     g.Sum(x => (decimal?)(x.i != null ? (x.i.qty_ordered ?? 0) : 0)) ?? 0m,
 
-                    // ✅ CHANGED: eta_date + status + receivedByName + unit
                     g.Key.status ?? "Pending",
                     g.Max(x => x.u != null ? x.u.full_name : null),
 
-                    // unit: 0 unit => null, 1 unit => that unit, many => MIXED
+                    // unit: 0 unit => null, 1 unit => that unit, many => mix
                     g.Select(x => x.m != null ? x.m.unit : null)
                         .Where(v => v != null)
                         .Distinct()
@@ -183,9 +170,6 @@ namespace AMMS.Infrastructure.Repositories
             return q;
         }
 
-        // =========================
-        // ✅ CHANGED: Get all purchases (paged)
-        // =========================
         public async Task<PagedResultLite<PurchaseOrderCardDto>> GetPurchaseOrdersAsync(
     string? status,
     int page,
@@ -194,17 +178,13 @@ namespace AMMS.Infrastructure.Repositories
         {
             NormalizePaging(ref page, ref pageSize);
             var skip = (page - 1) * pageSize;
-
-            // ✅ 0) Normalize status input (optional)
-            // FE có thể gửi "pending" / "Pending" => normalize lại
             string? statusFilter = string.IsNullOrWhiteSpace(status) ? null : status.Trim();
 
-            // ✅ 1) Base purchases (FILTER + PAGING trên purchases.status)
+            // ✅ 1) Base purchases
             var baseQuery = _db.purchases.AsNoTracking();
 
             if (statusFilter != null)
             {
-                // ✅ status lấy từ DB => filter trực tiếp DB
                 if (!string.IsNullOrWhiteSpace(status))
                 {
                     var normalizedStatus = status.Trim().ToLower();
@@ -227,11 +207,7 @@ namespace AMMS.Infrastructure.Repositories
                     p.supplier_id,
                     SupplierName = p.supplier != null ? p.supplier.name : "N/A",
                     p.created_at,
-
-                    // ✅ LẤY STATUS 100% từ purchases.status
                     Status = p.status ?? "Ordered",
-
-                    // ✅ created_by_name từ users
                     CreatedByName = p.created_byNavigation != null
                         ? (p.created_byNavigation.full_name ?? "N/A")
                         : "N/A"
@@ -274,8 +250,6 @@ namespace AMMS.Infrastructure.Repositories
                     }).ToList()
                 );
 
-            // ✅ 3) Received info từ stock_moves (IN) + users
-            // NOTE: không dùng để tính status nữa, chỉ để show UI
             var receivedInfoMap = await (
                 from sm in _db.stock_moves.AsNoTracking()
                 where sm.type == "IN"
@@ -303,9 +277,6 @@ namespace AMMS.Infrastructure.Repositories
 
                 var totalQty = poItems.Sum(x => x.QtyOrdered);
 
-                // ✅ Nếu DB có status khác 3 status chuẩn => bạn có thể ép về 3 status
-                // Ở đây mình giữ nguyên DB để khớp 100%.
-                // Nếu muốn ép: xem đoạn "Gợi ý chuẩn hoá status" bên dưới.
                 return new PurchaseOrderCardDto
                 {
                     PurchaseId = p.purchase_id,
@@ -331,9 +302,6 @@ namespace AMMS.Infrastructure.Repositories
             };
         }
 
-        // =========================
-        // ✅ CHANGED: Get pending purchases (paged)
-        // =========================
         public Task<PagedResultLite<PurchaseOrderListItemDto>> GetPendingPurchasesAsync(
             int page,
             int pageSize,
@@ -343,10 +311,6 @@ namespace AMMS.Infrastructure.Repositories
             return ToPagedAsync(query, page, pageSize, ct);
         }
 
-        // ===========================================================
-        // ✅ CHANGED: Receive purchase by purchaseId (NOT receive all)
-        // - fix case "Nothing to receive" nhưng thực ra đã đủ => set Received
-        // ===========================================================
         public async Task<object> ReceiveAllPendingPurchasesAsync(
             int purchaseId,
             int managerUserId,

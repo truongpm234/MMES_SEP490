@@ -22,10 +22,7 @@ namespace AMMS.Application.Services
         public Task<object> RecalculateAndSaveAsync(CancellationToken ct = default)
             => _repo.RecalculateAndSaveAsync(ct);
 
-        public async Task<PagedResultLite<MissingMaterialDto>> GetPagedAsync(
-    int page,
-    int pageSize,
-    CancellationToken ct = default)
+        public async Task<PagedResultLite<MissingMaterialDto>> GetPagedAsync(int page, int pageSize, CancellationToken ct = default)
         {
             await _repo.RecalculateAndSaveAsync(ct);
 

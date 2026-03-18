@@ -75,7 +75,6 @@ namespace AMMS.Application.Services
                 var missingBase = x.quantity;
                 if (missingBase < 0m) missingBase = 0m;
 
-                // +10%
                 var withBuffer = missingBase * 1.10m;
 
                 var rounded = RoundUpToTens(withBuffer);

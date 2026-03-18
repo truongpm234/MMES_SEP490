@@ -10,11 +10,7 @@ namespace AMMS.Infrastructure.Interfaces
 {
     public interface IMissingMaterialRepository
     {
+        Task<PagedResultLite<MissingMaterialDto>> GetPagedFromDbAsync(int page, int pageSize, CancellationToken ct = default);
         Task<object> RecalculateAndSaveAsync(CancellationToken ct = default);
-
-        Task<PagedResultLite<MissingMaterialDto>> GetPagedFromDbAsync(
-            int page,
-            int pageSize,
-            CancellationToken ct = default);
     }
 }

@@ -37,32 +37,6 @@ namespace AMMS.Infrastructure.Repositories
             var o1 = header.o;
             var r1 = header.r;
             var ce1 = header.ce;
-
-            //if (r1 == null || ce1 == null)
-            //{
-            //    var bomLines = await (
-            //        from oi in _db.order_items.AsNoTracking()
-            //        join b in _db.boms.AsNoTracking() on oi.item_id equals b.order_item_id
-            //        where oi.order_id == orderId
-            //        select new OrderMaterialLineDto
-            //        {
-            //            material_group = "BOM",
-            //            material_code = b.material_code,
-            //            material_name = b.material_name,
-            //            unit = b.unit ?? "",
-            //            quantity = b.qty_total ?? 0m
-            //        }
-            //    ).ToListAsync(ct);
-
-            //    return new OrderMaterialsResponse
-            //    {
-            //        order_id = orderId,
-            //        order_code = o1.code,
-            //        order_request_id = null,
-            //        items = bomLines
-            //    };
-            //}
-
             var paperCode = ce1.paper_code;
             var paperName = ce1.paper_name;
 

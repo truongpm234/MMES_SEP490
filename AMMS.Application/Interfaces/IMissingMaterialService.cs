@@ -11,11 +11,6 @@ namespace AMMS.Application.Interfaces
 {
     public interface IMissingMaterialService
     {
-        Task<object> RecalculateAndSaveAsync(CancellationToken ct = default);
-
-        Task<PagedResultLite<MissingMaterialDto>> GetPagedAsync(
-            int page,
-            int pageSize,
-            CancellationToken ct = default);
+        Task<PagedResultLite<MissingMaterialDto>> GetPagedAsync(int page, int pageSize, CancellationToken ct = default);
     }
 }

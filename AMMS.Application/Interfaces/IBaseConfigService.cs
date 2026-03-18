@@ -7,7 +7,7 @@ using AMMS.Shared.DTOs.Estimates;
 
 namespace AMMS.Application.Interfaces
 {
-    public interface IEstimateBaseConfigService
+    public interface IBaseConfigService
     {
         Task<EstimateBaseConfigDto> GetAsync(CancellationToken ct = default);
     }

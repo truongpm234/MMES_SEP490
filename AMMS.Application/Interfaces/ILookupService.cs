@@ -12,12 +12,6 @@ namespace AMMS.Application.Interfaces
     public interface ILookupService
     {
         Task SendOtpForPhoneAsync(string phone, CancellationToken ct = default);
-
-        Task<PhoneHistoryWithOtpResult> GetHistoryByPhoneWithOtpAsync(
-        string phone,
-        string otp,
-        int page,
-        int pageSize,
-        CancellationToken ct = default);
+        Task<PhoneHistoryWithOtpResult> GetHistoryByPhoneWithOtpAsync(string phone, string otp, int page, int pageSize, CancellationToken ct = default);
     }
 }

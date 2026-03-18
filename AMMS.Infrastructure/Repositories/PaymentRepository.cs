@@ -63,6 +63,7 @@ namespace AMMS.Infrastructure.Repositories
                 }
             }
         }
+
         public async Task<payment?> GetLatestPendingByRequestIdAndEstimateIdAsync(int requestId, int estimateId, CancellationToken ct = default)
         {
             return await _db.payments
@@ -76,6 +77,7 @@ namespace AMMS.Infrastructure.Repositories
                 .ThenByDescending(p => p.payment_id)
                 .FirstOrDefaultAsync(ct);
         }
+
         public Task<payment?> GetByOrderCodeAsync(long orderCode, CancellationToken ct = default)
         {
             return _db.payments.AsNoTracking()

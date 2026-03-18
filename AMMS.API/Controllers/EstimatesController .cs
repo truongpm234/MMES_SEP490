@@ -15,10 +15,10 @@ namespace AMMS.API.Controllers
     public class EstimatesController : ControllerBase
     {
         private readonly IEstimateService _service;
-        private readonly IEstimateBaseConfigService _baseConfig;
+        private readonly IBaseConfigService _baseConfig;
         private readonly IOrderPlanningService _planning;
 
-        public EstimatesController(IEstimateService service, IEstimateBaseConfigService baseConfig, IOrderPlanningService planning)
+        public EstimatesController(IEstimateService service, IBaseConfigService baseConfig, IOrderPlanningService planning)
         {
             _service = service;
             _baseConfig = baseConfig;

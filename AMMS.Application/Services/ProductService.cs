@@ -21,6 +21,7 @@ namespace AMMS.Application.Services
         {
             return await _repo.GetByIdAsync(productId, ct);
         }
+
         public async Task<List<product>> GetAllActiveAsync(CancellationToken ct = default) 
         {
             return await _repo.GetAllActiveAsync(ct);

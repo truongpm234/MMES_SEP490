@@ -23,7 +23,6 @@ namespace AMMS.Infrastructure.Repositories
 
         public async Task<ProductTypeDetailDto?> GetProductTypeDetailAsync(int productTypeId, CancellationToken ct = default)
         {
-            // 1) product type
             var pt = await _db.product_types
                 .AsNoTracking()
                 .Where(x => x.product_type_id == productTypeId)
@@ -59,8 +58,6 @@ namespace AMMS.Infrastructure.Repositories
                 })
                 .ToListAsync(ct);
 
-            // 3) processes (join cost rule + machines)
-            // ✅ dùng DbSet: process_cost_rules
             var processes = await (
                 from p in _db.product_type_processes.AsNoTracking()
                 where p.product_type_id == productTypeId && (p.is_active ?? true) == true

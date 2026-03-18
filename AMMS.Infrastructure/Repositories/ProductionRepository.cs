@@ -140,9 +140,7 @@ namespace AMMS.Infrastructure.Repositories
                 .Distinct()
                 .ToList();
 
-            var stepRows = await _db.product_type_processes
-    .AsNoTracking()
-    .Where(p => productTypeIds.Contains(p.product_type_id) && (p.is_active ?? true))
+            var stepRows = await _db.product_type_processes.AsNoTracking().Where(p => productTypeIds.Contains(p.product_type_id) && (p.is_active ?? true))
     .Select(p => new StepRow
     {
         ProductTypeId = p.product_type_id,
@@ -742,6 +740,7 @@ namespace AMMS.Infrastructure.Repositories
                 return prod.prod_id;
             });
         }
+
         public async Task<bool> StartProductionByOrderIdAsync(int orderId, DateTime now, CancellationToken ct = default)
         {
             var prodId = await StartProductionByOrderIdAndPromoteFirstTaskAsync(orderId, now, ct);

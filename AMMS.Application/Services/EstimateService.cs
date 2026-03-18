@@ -37,6 +37,7 @@ namespace AMMS.Application.Services
 
             await _estimateRepo.SaveChangesAsync();
         }
+
         private static decimal RoundToThousand(decimal value)
         {
             return Math.Round(value / 1000m, MidpointRounding.AwayFromZero) * 1000m;
@@ -45,11 +46,6 @@ namespace AMMS.Application.Services
         public async Task<cost_estimate?> GetEstimateByIdAsync(int estimateId)
         {
             return await _estimateRepo.GetByIdAsync(estimateId);
-        }
-
-        public async Task<cost_estimate?> GetEstimateByOrderRequestIdAsync(int orderRequestId)
-        {
-            return await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId);
         }
 
         public Task<DepositByRequestResponse?> GetDepositByRequestIdAsync(int requestId, CancellationToken ct = default) 

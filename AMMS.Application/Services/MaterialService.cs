@@ -1,6 +1,7 @@
 ﻿using AMMS.Application.Interfaces;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
+using AMMS.Shared.DTOs.Boms;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Materials;
 
@@ -9,10 +10,13 @@ namespace AMMS.Application.Services
     public class MaterialService : IMaterialService
     {
         private readonly IMaterialRepository _materialRepository;
-
-        public MaterialService(IMaterialRepository materialRepository)
+        private readonly ICostEstimateRepository _estimateRepo;
+        private readonly IRequestRepository _reqRepo;
+        public MaterialService(IMaterialRepository materialRepository, ICostEstimateRepository costEstimateRepository, IRequestRepository requestRepository)
         {
             _materialRepository = materialRepository;
+            _estimateRepo = costEstimateRepository;
+            _reqRepo = requestRepository;
         }
 
         public async Task<List<material>> GetAllAsync()
