@@ -135,7 +135,10 @@ namespace AMMS.Infrastructure.Repositories
 
                     order_detail_url = null,
                     is_customer_copy = true,
-                    email_html = null
+                    email_html = null,
+
+                    contract_file_path = est.contract_file_path,
+                    contract_uploaded_at = est.contract_uploaded_at,
                 });
             }
 

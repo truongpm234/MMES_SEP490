@@ -42,6 +42,8 @@ namespace AMMS.Shared.DTOs.Email
         public string? order_detail_url { get; set; }
         public bool is_customer_copy { get; set; }
         public string? email_html { get; set; }
+        public string? contract_file_path { get; set; }
+        public DateTime? contract_uploaded_at { get; set; }
     }
 
 }
