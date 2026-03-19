@@ -149,14 +149,13 @@ namespace AMMS.Application.Services
 
                 status = GetString(data, "status"),
                 amount = TryGetInt32Flexible(data, "amount"),
-
                 check_out_url = GetString(data, "checkoutUrl"),
                 qr_code = GetString(data, "qrCode"),
                 account_number = GetString(data, "accountNumber"),
                 account_name = GetString(data, "accountName"),
                 bin = GetString(data, "bin"),
                 description = GetString(data, "description"),
-                payment_link_id = GetString(data, "paymentLinkId"),
+                payment_link_id = GetString(data, "paymentLinkId") ?? GetString(data, "id"),
                 transaction_id = GetString(data, "transactionId") ?? GetString(data, "reference"),
             };
         }

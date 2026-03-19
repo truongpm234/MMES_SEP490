@@ -544,20 +544,43 @@ namespace AMMS.Application.Services
             var pending = await _payment.GetLatestPendingByRequestIdAndEstimateIdAsync(requestId, estimateId, ct);
             if (pending != null)
             {
-                var info = await _payOs.GetPaymentLinkInformationAsync(pending.order_code, ct);
+                PayOsResultDto? liveInfo = null;
+                PayOsResultDto? savedInfo = null;
 
-                if (info != null)
+                try
                 {
-                    var st = (info.status ?? "").ToUpperInvariant();
-
-                    if (st == "PENDING" || st == "PROCESSING" || st == "PAID" || st == "SUCCESS")
-                    {
-                        return info;
-                    }
+                    liveInfo = await _payOs.GetPaymentLinkInformationAsync(pending.order_code, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Cannot fetch PayOS live info. RequestId={RequestId}, EstimateId={EstimateId}, OrderCode={OrderCode}",
+                        requestId, estimateId, pending.order_code);
                 }
 
                 if (!string.IsNullOrWhiteSpace(pending.payos_raw))
-                    return PayOsRawMapper.FromPayment(pending);
+                {
+                    try
+                    {
+                        savedInfo = PayOsRawMapper.FromPayment(pending);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex,
+                            "Cannot parse saved payos_raw. RequestId={RequestId}, EstimateId={EstimateId}, OrderCode={OrderCode}",
+                            requestId, estimateId, pending.order_code);
+                    }
+                }
+
+                var merged = MergePayOsResult(liveInfo, savedInfo, pending);
+
+                if (IsReusablePayOsStatus(merged.status))
+                {
+                    if (!string.IsNullOrWhiteSpace(merged.check_out_url))
+                        return merged;
+
+                    return merged;
+                }
             }
 
             var backendUrl = _config["Deal:BaseUrl"]!;
@@ -650,6 +673,71 @@ namespace AMMS.Application.Services
             }
 
             throw new InvalidOperationException("Cannot allocate orderCode: attempts exhausted.");
+        }
+
+        private static bool IsReusablePayOsStatus(string? status)
+        {
+            var st = (status ?? "").Trim().ToUpperInvariant();
+            return st is "PENDING" or "PROCESSING" or "PAID" or "SUCCESS";
+        }
+
+        private static PayOsResultDto MergePayOsResult(
+            PayOsResultDto? live,
+            PayOsResultDto? saved,
+            payment? dbPayment = null)
+        {
+            return new PayOsResultDto
+            {
+                expired_at = live?.expired_at ?? saved?.expired_at,
+
+                check_out_url = !string.IsNullOrWhiteSpace(live?.check_out_url)
+                    ? live!.check_out_url
+                    : saved?.check_out_url,
+
+                qr_code = !string.IsNullOrWhiteSpace(live?.qr_code)
+                    ? live!.qr_code
+                    : saved?.qr_code,
+
+                account_number = !string.IsNullOrWhiteSpace(live?.account_number)
+                    ? live!.account_number
+                    : saved?.account_number,
+
+                account_name = !string.IsNullOrWhiteSpace(live?.account_name)
+                    ? live!.account_name
+                    : saved?.account_name,
+
+                bin = !string.IsNullOrWhiteSpace(live?.bin)
+                    ? live!.bin
+                    : saved?.bin,
+
+                amount = live?.amount
+                    ?? saved?.amount
+                    ?? (dbPayment != null ? (int?)decimal.ToInt32(dbPayment.amount) : null),
+
+                status = !string.IsNullOrWhiteSpace(live?.status)
+                    ? live!.status
+                    : (!string.IsNullOrWhiteSpace(saved?.status) ? saved!.status : dbPayment?.status),
+
+                description = !string.IsNullOrWhiteSpace(live?.description)
+                    ? live!.description
+                    : saved?.description,
+
+                payment_link_id = !string.IsNullOrWhiteSpace(live?.payment_link_id)
+                    ? live!.payment_link_id
+                    : (!string.IsNullOrWhiteSpace(saved?.payment_link_id) ? saved!.payment_link_id : dbPayment?.payos_payment_link_id),
+
+                transaction_id = !string.IsNullOrWhiteSpace(live?.transaction_id)
+                    ? live!.transaction_id
+                    : (!string.IsNullOrWhiteSpace(saved?.transaction_id) ? saved!.transaction_id : dbPayment?.payos_transaction_id),
+
+                raw_json = !string.IsNullOrWhiteSpace(live?.raw_json)
+                    ? live!.raw_json
+                    : (!string.IsNullOrWhiteSpace(saved?.raw_json) ? saved!.raw_json : dbPayment?.payos_raw),
+
+                order_code = (live?.order_code ?? 0) > 0
+                    ? live!.order_code
+                    : ((saved?.order_code ?? 0) > 0 ? saved!.order_code : dbPayment?.order_code ?? 0)
+            };
         }
     }
 }
