@@ -755,7 +755,14 @@ namespace AMMS.Infrastructure.Repositories
             if (prod == null)
                 return false;
 
+            var order = await _db.orders
+                .FirstOrDefaultAsync(o => o.order_id == orderId, ct);
+
+            if (order == null)
+                return false;
+
             prod.status = "Delivery";
+            order.status = "Delivery";
 
             await _db.SaveChangesAsync(ct);
             return true;
