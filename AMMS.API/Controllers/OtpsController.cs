@@ -22,10 +22,34 @@ namespace AMMS.API.Controllers
         public async Task<IActionResult> SendOTPSendRequest([FromBody] SendOtpRequest req)
         {
             if (req == null || string.IsNullOrWhiteSpace(req.email))
-                return BadRequest(new { message = "email is required" });
+                return BadRequest(new { message = "Email is required" });
 
-            await _emailService.SendOtpAsync(req.email);
-            return Ok(new { message = "OTP đã gửi, vui lòng kiểm tra email." });
+            try
+            {
+                await _emailService.SendOtpAsync(req.email);
+                return Ok(new { message = "OTP sent successfully" });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex) when (
+                ex.Message.Contains("Dịch vụ gửi email", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("Unosend", StringComparison.OrdinalIgnoreCase))
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                {
+                    message = "Dịch vụ gửi email đang tạm thời gián đoạn. Vui lòng thử lại sau."
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Send OTP failed",
+                    detail = ex.Message
+                });
+            }
         }
 
         [HttpPost("verify-otp")]

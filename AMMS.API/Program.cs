@@ -14,14 +14,16 @@ using Hangfire;
 using Hangfire.PostgreSql;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
-using System.Net;
-using System.Net.Http.Headers;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Npgsql;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Security.Authentication;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -212,18 +214,34 @@ if (hangfireRunServer)
     });
 }
 
-builder.Services.AddHttpClient("Unosend", client =>
+builder.Services.AddHttpClient("Resend", client =>
 {
-    client.BaseAddress = new Uri(builder.Configuration["Unosend:BaseUrl"] ?? "https://www.unosend.co/api/v1/");
-    client.Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue("Unosend:TimeoutSeconds", 120));
-    client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-})
-.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
-{
-    AutomaticDecompression = DecompressionMethods.All,
-    PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-    MaxConnectionsPerServer = 10
+    client.BaseAddress = new Uri(builder.Configuration["Resend:BaseUrl"] ?? "https://api.resend.com/");
+    client.Timeout = TimeSpan.FromSeconds(90);
 });
+//builder.Services.AddHttpClient("Unosend", client =>
+//{
+//    client.BaseAddress = new Uri(
+//        builder.Configuration["Unosend:BaseUrl"] ?? "https://www.unosend.co/api/v1/");
+
+//    client.Timeout = TimeSpan.FromSeconds(
+//        builder.Configuration.GetValue("Unosend:TimeoutSeconds", 30));
+
+//    client.DefaultRequestVersion = HttpVersion.Version11;
+//    client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
+
+//    client.DefaultRequestHeaders.Accept.Clear();
+//    client.DefaultRequestHeaders.Accept.Add(
+//        new MediaTypeWithQualityHeaderValue("application/json"));
+//})
+//.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+//{
+//    AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+//    PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+//    PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+//    MaxConnectionsPerServer = 10,
+//    ConnectTimeout = TimeSpan.FromSeconds(15)
+//});
 
 builder.Services.AddScoped<QuoteExpiryJob>();
 builder.Services.Configure<SchedulingOptions>(

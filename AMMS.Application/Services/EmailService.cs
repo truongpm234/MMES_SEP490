@@ -45,14 +45,15 @@ namespace AMMS.Application.Services
 
         public async Task SendAsync(string toEmail, string subject, string htmlContent)
         {
-            var apiKey = _config["Unosend:ApiKey"]?.Trim();
-            var fromEmail = (_config["EmailSender:FromEmail"] ?? _settings.FromEmail)?.Trim();
+            var apiKey = _config["Resend:ApiKey"]?.Trim();
+            var fromEmail = (_config["Resend:FromEmail"] ?? _config["EmailSender:FromEmail"] ?? _settings.FromEmail)?.Trim();
+            var userAgent = _config["Resend:UserAgent"]?.Trim() ?? "AMMS/1.0";
 
             if (string.IsNullOrWhiteSpace(apiKey))
-                throw new InvalidOperationException("Thiếu Unosend:ApiKey");
+                throw new InvalidOperationException("Thiếu Resend:ApiKey");
 
             if (string.IsNullOrWhiteSpace(fromEmail))
-                throw new InvalidOperationException("Thiếu EmailSender:FromEmail");
+                throw new InvalidOperationException("Thiếu Resend:FromEmail");
 
             if (string.IsNullOrWhiteSpace(toEmail))
                 throw new ArgumentException("toEmail is required");
@@ -63,9 +64,9 @@ namespace AMMS.Application.Services
             if (string.IsNullOrWhiteSpace(htmlContent))
                 throw new ArgumentException("htmlContent is required");
 
-            var payload = new UnosendSendEmailRequest
+            var payload = new
             {
-                from = NormalizeSingleEmail(fromEmail),
+                from = fromEmail.Trim(),
                 to = NormalizeEmailList(toEmail),
                 subject = subject.Trim(),
                 html = htmlContent.Trim(),
@@ -76,35 +77,90 @@ namespace AMMS.Application.Services
                 throw new ArgumentException("No valid recipient email found");
 
             var json = JsonSerializer.Serialize(payload, JsonOptions);
-            var http = _httpFactory.CreateClient("Unosend");
+            var http = _httpFactory.CreateClient("Resend");
 
-            using var req = new HttpRequestMessage(HttpMethod.Post, "emails");
-            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            req.Content = new StringContent(json, Encoding.UTF8, "application/json");
+            Exception? lastEx = null;
 
-            _logger.LogInformation(
-                "Sending email directly via Unosend. From={From}; To={To}; Subject={Subject}",
-                payload.from,
-                string.Join(",", payload.to),
-                payload.subject
-            );
+            for (int attempt = 1; attempt <= 2; attempt++)
+            {
+                try
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Post, "emails");
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
-            using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
-            var respText = await resp.Content.ReadAsStringAsync();
+                    // Resend yêu cầu User-Agent khi gọi HTTP trực tiếp
+                    req.Headers.TryAddWithoutValidation("User-Agent", userAgent);
 
-            if (resp.IsSuccessStatusCode)
-                return;
+                    req.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            _logger.LogError(
-                "Unosend send failed. Status={Status}; Response={Response}; To={To}; Subject={Subject}",
-                (int)resp.StatusCode,
-                respText,
-                string.Join(",", payload.to),
-                payload.subject
-            );
+                    _logger.LogInformation(
+                        "Sending email via Resend. Attempt={Attempt}; From={From}; To={To}; Subject={Subject}",
+                        attempt,
+                        payload.from,
+                        string.Join(",", payload.to),
+                        payload.subject
+                    );
+
+                    using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+                    var respText = await resp.Content.ReadAsStringAsync();
+
+                    if (resp.IsSuccessStatusCode)
+                    {
+                        _logger.LogInformation(
+                            "Resend send success. Attempt={Attempt}; Status={Status}; To={To}; Subject={Subject}; Response={Response}",
+                            attempt,
+                            (int)resp.StatusCode,
+                            string.Join(",", payload.to),
+                            payload.subject,
+                            respText
+                        );
+
+                        return;
+                    }
+
+                    _logger.LogError(
+                        "Resend send failed. Attempt={Attempt}; Status={Status}; Response={Response}; To={To}; Subject={Subject}",
+                        attempt,
+                        (int)resp.StatusCode,
+                        respText,
+                        string.Join(",", payload.to),
+                        payload.subject
+                    );
+
+                    lastEx = new InvalidOperationException(
+                        $"Resend API failed: {(int)resp.StatusCode} - {respText}");
+                }
+                catch (HttpRequestException ex)
+                {
+                    lastEx = ex;
+
+                    _logger.LogError(
+                        ex,
+                        "Resend TLS/HTTP error. Attempt={Attempt}; To={To}; Subject={Subject}",
+                        attempt,
+                        string.Join(",", payload.to),
+                        payload.subject
+                    );
+                }
+                catch (TaskCanceledException ex)
+                {
+                    lastEx = ex;
+
+                    _logger.LogError(
+                        ex,
+                        "Resend timeout. Attempt={Attempt}; To={To}; Subject={Subject}",
+                        attempt,
+                        string.Join(",", payload.to),
+                        payload.subject
+                    );
+                }
+
+                if (attempt < 2)
+                    await Task.Delay(800);
+            }
 
             throw new InvalidOperationException(
-                $"Unosend API failed: {(int)resp.StatusCode} - {respText}");
+                "Dịch vụ gửi email tạm thời không khả dụng. Vui lòng thử lại sau.", lastEx);
         }
 
         private sealed class UnosendSendEmailRequest
@@ -297,5 +353,119 @@ namespace AMMS.Application.Services
                 htmlContent: html
             );
         }
+
+        //public async Task SendAsync(string toEmail, string subject, string htmlContent)
+        //{
+        //    var apiKey = _config["Unosend:ApiKey"]?.Trim();
+        //    var fromEmail = (_config["EmailSender:FromEmail"] ?? _settings.FromEmail)?.Trim();
+
+        //    if (string.IsNullOrWhiteSpace(apiKey))
+        //        throw new InvalidOperationException("Thiếu Unosend:ApiKey");
+
+        //    if (string.IsNullOrWhiteSpace(fromEmail))
+        //        throw new InvalidOperationException("Thiếu EmailSender:FromEmail");
+
+        //    if (string.IsNullOrWhiteSpace(toEmail))
+        //        throw new ArgumentException("toEmail is required");
+
+        //    if (string.IsNullOrWhiteSpace(subject))
+        //        throw new ArgumentException("subject is required");
+
+        //    if (string.IsNullOrWhiteSpace(htmlContent))
+        //        throw new ArgumentException("htmlContent is required");
+
+        //    var payload = new UnosendSendEmailRequest
+        //    {
+        //        from = NormalizeSingleEmail(fromEmail),
+        //        to = NormalizeEmailList(toEmail),
+        //        subject = subject.Trim(),
+        //        html = htmlContent.Trim(),
+        //        text = HtmlToPlainText(htmlContent)
+        //    };
+
+        //    if (payload.to.Length == 0)
+        //        throw new ArgumentException("No valid recipient email found");
+
+        //    var json = JsonSerializer.Serialize(payload, JsonOptions);
+        //    var http = _httpFactory.CreateClient("Unosend");
+
+        //    Exception? lastEx = null;
+
+        //    for (int attempt = 1; attempt <= 2; attempt++)
+        //    {
+        //        try
+        //        {
+        //            using var req = new HttpRequestMessage(HttpMethod.Post, "emails");
+        //            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        //            req.Content = new StringContent(json, Encoding.UTF8, "application/json");
+
+        //            _logger.LogInformation(
+        //                "Sending email directly via Unosend. Attempt={Attempt}; From={From}; To={To}; Subject={Subject}",
+        //                attempt,
+        //                payload.from,
+        //                string.Join(",", payload.to),
+        //                payload.subject
+        //            );
+
+        //            using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+        //            var respText = await resp.Content.ReadAsStringAsync();
+
+        //            if (resp.IsSuccessStatusCode)
+        //            {
+        //                _logger.LogInformation(
+        //                    "Unosend send success. Attempt={Attempt}; Status={Status}; To={To}; Subject={Subject}",
+        //                    attempt,
+        //                    (int)resp.StatusCode,
+        //                    string.Join(",", payload.to),
+        //                    payload.subject
+        //                );
+
+        //                return;
+        //            }
+
+        //            _logger.LogError(
+        //                "Unosend send failed. Attempt={Attempt}; Status={Status}; Response={Response}; To={To}; Subject={Subject}",
+        //                attempt,
+        //                (int)resp.StatusCode,
+        //                respText,
+        //                string.Join(",", payload.to),
+        //                payload.subject
+        //            );
+
+        //            lastEx = new InvalidOperationException(
+        //                $"Unosend API failed: {(int)resp.StatusCode} - {respText}");
+        //        }
+        //        catch (HttpRequestException ex)
+        //        {
+        //            lastEx = ex;
+
+        //            _logger.LogError(
+        //                ex,
+        //                "Unosend TLS/HTTP error. Attempt={Attempt}; To={To}; Subject={Subject}",
+        //                attempt,
+        //                string.Join(",", payload.to),
+        //                payload.subject
+        //            );
+        //        }
+        //        catch (TaskCanceledException ex)
+        //        {
+        //            lastEx = ex;
+
+        //            _logger.LogError(
+        //                ex,
+        //                "Unosend timeout. Attempt={Attempt}; To={To}; Subject={Subject}",
+        //                attempt,
+        //                string.Join(",", payload.to),
+        //                payload.subject
+        //            );
+        //        }
+
+        //        if (attempt < 2)
+        //            await Task.Delay(800);
+        //    }
+
+        //    throw new InvalidOperationException(
+        //        "Dịch vụ gửi email tạm thời không khả dụng. Vui lòng thử lại sau.", lastEx);
+        //}
     }
 }
