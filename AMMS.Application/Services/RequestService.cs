@@ -69,6 +69,7 @@ namespace AMMS.Application.Services
                 product_height_mm = req.product_height_mm,
                 product_length_mm = req.product_length_mm,
                 product_width_mm = req.product_width_mm,
+                preliminary_estimated_price = req.preliminary_estimated_price ?? null,
             };
 
             await _requestRepo.AddAsync(entity);

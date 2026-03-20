@@ -44,5 +44,6 @@ namespace AMMS.Shared.DTOs.Requests
         public string? message_to_customer { get; set; }
         public decimal? final_total_cost { get; set; }
         public decimal? deposit_amount { get; set; }
+        public decimal? preliminary_estimated_price { get; set; }
     }
 }

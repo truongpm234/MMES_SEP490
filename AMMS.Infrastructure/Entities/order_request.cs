@@ -71,6 +71,9 @@ public partial class order_request
 
     public string? message_to_customer { get; set; }
 
+    [Column(TypeName = "numeric(18,2)")]
+    public decimal? preliminary_estimated_price { get; set; }
+
     public virtual quote? quote { get; set; }
 
     public virtual order? order { get; set; }

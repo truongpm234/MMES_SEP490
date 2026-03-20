@@ -31,5 +31,7 @@
         public int? product_height_mm { get; set; }
 
         public string? paper_name { get; set; }
+
+        public decimal? preliminary_estimated_price { get; set; }
     }
 }

@@ -72,7 +72,8 @@ namespace AMMS.Infrastructure.Repositories
                             verified_at = r.verified_at,
                             quote_expires_at = r.quote_expires_at,
                             message_to_customer = r.message_to_customer,
-                            production_processes = ce != null ? ce.production_processes : null
+                            production_processes = ce != null ? ce.production_processes : null,
+                            preliminary_estimated_price = r.preliminary_estimated_price,
                         };
 
             return await query.FirstOrDefaultAsync();
