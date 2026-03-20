@@ -39,6 +39,8 @@ var hangfireQueuePollSeconds = builder.Configuration.GetValue("Hangfire:QueuePol
 var hangfireInvisibilityTimeoutMinutes = builder.Configuration.GetValue("Hangfire:InvisibilityTimeoutMinutes", 30);
 var hangfireDashboardPath = builder.Configuration["Hangfire:DashboardPath"] ?? "/hangfire";
 
+var autoSendDealEnabled = builder.Configuration.GetValue("AutoSendDeal:Enabled", true);
+var autoSendDealCron = builder.Configuration["AutoSendDeal:Cron"] ?? "*/15 * * * *";
 builder.Services.AddDbContext<AppDbContext>((sp, options) =>
 {
     options.UseNpgsql(
@@ -219,31 +221,9 @@ builder.Services.AddHttpClient("Resend", client =>
     client.BaseAddress = new Uri(builder.Configuration["Resend:BaseUrl"] ?? "https://api.resend.com/");
     client.Timeout = TimeSpan.FromSeconds(90);
 });
-//builder.Services.AddHttpClient("Unosend", client =>
-//{
-//    client.BaseAddress = new Uri(
-//        builder.Configuration["Unosend:BaseUrl"] ?? "https://www.unosend.co/api/v1/");
-
-//    client.Timeout = TimeSpan.FromSeconds(
-//        builder.Configuration.GetValue("Unosend:TimeoutSeconds", 30));
-
-//    client.DefaultRequestVersion = HttpVersion.Version11;
-//    client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
-
-//    client.DefaultRequestHeaders.Accept.Clear();
-//    client.DefaultRequestHeaders.Accept.Add(
-//        new MediaTypeWithQualityHeaderValue("application/json"));
-//})
-//.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
-//{
-//    AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
-//    PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-//    PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
-//    MaxConnectionsPerServer = 10,
-//    ConnectTimeout = TimeSpan.FromSeconds(15)
-//});
 
 builder.Services.AddScoped<QuoteExpiryJob>();
+builder.Services.AddScoped<AutoSendDealAfterVerifiedJob>();
 builder.Services.Configure<SchedulingOptions>(
     builder.Configuration.GetSection("Scheduling"));
 builder.Services.AddSingleton<WorkCalendar>();
@@ -305,6 +285,7 @@ builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddSingleton<IRealtimePublisher, RealtimePublisher>();
 builder.Services.AddSingleton<IEmailBackgroundQueue, EmailBackgroundQueue>();
 builder.Services.AddHostedService<EmailDispatcherHostedService>();
+
 // Logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
@@ -331,6 +312,16 @@ if (hangfireRunServer)
                 Cron.Hourly(),
                 vnTz
             );
+
+            if (autoSendDealEnabled)
+            {
+                RecurringJob.AddOrUpdate<AutoSendDealAfterVerifiedJob>(
+                    "auto-send-deal-after-verified-24h",
+                    job => job.RunAsync(CancellationToken.None),
+                    autoSendDealCron,
+                    vnTz
+                );
+            }
         }
         catch (Exception ex)
         {
@@ -338,7 +329,6 @@ if (hangfireRunServer)
         }
     });
 }
-
 
 app.UseSwagger();
 app.UseSwaggerUI(c =>
