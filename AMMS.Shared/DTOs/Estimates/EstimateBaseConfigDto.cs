@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace AMMS.Shared.DTOs.Estimates
+﻿namespace AMMS.Shared.DTOs.Estimates
 {
     public class EstimateBaseConfigDto
     {
@@ -14,6 +8,27 @@ namespace AMMS.Shared.DTOs.Estimates
         public SystemConfig SystemParameters { get; set; } = null!;
         public ProcessCostConfig ProcessCosts { get; set; } = null!;
         public DesignConfig Design { get; set; } = null!;
+        public PlatePriceConfig PlatePrices { get; set; } = null!;
+    }
+
+    public class PlatePriceConfig
+    {
+        public List<PlatePriceItemDto> items { get; set; } = new();
+        public List<PlatePriceItemDto> small { get; set; } = new();
+        public List<PlatePriceItemDto> medium { get; set; } = new();
+        public List<PlatePriceItemDto> large { get; set; } = new();
+        public List<PlatePriceItemDto> xlarge { get; set; } = new();
+    }
+
+    public class PlatePriceItemDto
+    {
+        public string key { get; set; } = "";
+        public string category { get; set; } = "";
+        public string category_text { get; set; } = "";
+        public string size_text { get; set; } = "";
+        public decimal width_cm { get; set; }
+        public decimal height_cm { get; set; }
+        public decimal price_per_plate { get; set; }
     }
 
     public class MaterialPriceConfig
@@ -27,20 +42,13 @@ namespace AMMS.Shared.DTOs.Estimates
 
     public class MaterialRateConfig
     {
-        // Ink
         public decimal ink_rate_gach_noi_dia { get; set; }
         public decimal ink_rate_gach_xk_don_gian { get; set; }
         public decimal ink_rate_hop_mau { get; set; }
         public decimal ink_rate_gach_nhieu_mau { get; set; }
-
-        // Coating glue
         public decimal coating_glue_rate_keo_nuoc { get; set; }
         public decimal coating_glue_rate_keo_dau { get; set; }
-
-        // Mounting glue
         public decimal mounting_glue_rate { get; set; }
-
-        // Lamination
         public decimal lamination_rate_12mic { get; set; }
     }
 
@@ -63,7 +71,6 @@ namespace AMMS.Shared.DTOs.Estimates
 
     public class StepWasteSimpleConfig
     {
-        // theo sheets_base
         public int lt_5000 { get; set; }
         public int lt_20000 { get; set; }
         public int ge_20000 { get; set; }
@@ -78,7 +85,6 @@ namespace AMMS.Shared.DTOs.Estimates
 
     public class GluingWasteConfig
     {
-        // theo quantity (số hộp)
         public int lt_100 { get; set; }
         public int lt_500 { get; set; }
         public int lt_2000 { get; set; }
@@ -87,7 +93,6 @@ namespace AMMS.Shared.DTOs.Estimates
 
     public class SystemConfig
     {
-        //public decimal overhead_percent { get; set; }
         public int default_production_days { get; set; }
         public int rush_threshold_days { get; set; }
         public decimal vat_percent { get; set; }
@@ -111,4 +116,3 @@ namespace AMMS.Shared.DTOs.Estimates
         public decimal default_design_cost { get; set; }
     }
 }
-

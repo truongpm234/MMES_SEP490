@@ -65,8 +65,6 @@ public partial class AppDbContext : DbContext
 
     public virtual DbSet<cost_estimate_process> cost_estimate_processes { get; set; }
 
-    public virtual DbSet<process_cost_rule> process_cost_rules { get; set; }
-
     public virtual DbSet<product_template> product_templates { get; set; } = null!;
 
     public virtual DbSet<missing_material> missing_materials { get; set; } = null!;
@@ -268,7 +266,6 @@ public partial class AppDbContext : DbContext
                   .HasMaxLength(20)
                   .HasDefaultValueSql("'Pending'::character varying");
 
-            // ✅ map FK column name đúng trong DB
             entity.Property(e => e.created_by).HasColumnName("created_by");
 
             entity.HasOne(d => d.created_byNavigation)
@@ -564,19 +561,6 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.total_cost)
                 .HasPrecision(18, 2);
             entity.Property(e => e.created_at).HasColumnType("timestamp without time zone");
-        });
-
-        modelBuilder.Entity<process_cost_rule>(entity =>
-        {
-            entity.HasKey(e => e.process_code).HasName("process_cost_rule_pkey");
-            entity.Property(e => e.process_code)
-                  .HasMaxLength(50);
-            entity.Property(e => e.process_name)
-                  .HasMaxLength(255);
-            entity.Property(e => e.unit)
-                  .HasMaxLength(20);
-            entity.Property(e => e.unit_price)
-                  .HasPrecision(18, 2);
         });
 
         modelBuilder.Entity<product_template>(entity =>
