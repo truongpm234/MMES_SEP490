@@ -1,4 +1,5 @@
 ﻿using AMMS.Infrastructure.Entities;
+using AMMS.Shared.DTOs.Productions;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -20,5 +21,8 @@ namespace AMMS.Infrastructure.Interfaces
         Task<task?> GetFirstTaskByProductionAsync(int prodId, CancellationToken ct = default);
         Task<bool> PromoteFirstTaskToReadyAsync(int prodId, DateTime now, CancellationToken ct = default);
         Task<bool> PromoteNextTaskToReadyAsync(int currentTaskId, DateTime now, CancellationToken ct = default);
+        Task<List<TaskFlowDto>> GetTasksWithCodesByProductionAsync(int prodId, CancellationToken ct = default);
+        Task<bool> PromoteInitialTasksAsync(int prodId, DateTime now, CancellationToken ct = default);
+        Task<bool> PromoteAllTasksAfterRaloAsync(int prodId, DateTime now, CancellationToken ct = default);
     }
 }

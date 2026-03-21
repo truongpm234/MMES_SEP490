@@ -148,5 +148,29 @@ namespace AMMS.API.Controllers
 
             return NoContent();
         }
+
+        [HttpGet("machine-schedule")]
+        public async Task<IActionResult> GetMachineSchedule(
+    [FromQuery] DateTime? from,
+    [FromQuery] DateTime? to,
+    CancellationToken ct = default)
+        {
+            var now = AppTime.NowVnUnspecified();
+
+            var rangeFrom = from ?? now.Date.AddDays(-7);
+            var rangeTo = to ?? now.Date.AddDays(7);
+
+            if (rangeTo <= rangeFrom)
+                rangeTo = rangeFrom.AddDays(14);
+
+            var data = await _service.GetMachineScheduleBoardAsync(rangeFrom, rangeTo, ct);
+
+            return Ok(new
+            {
+                from = rangeFrom,
+                to = rangeTo,
+                machines = data
+            });
+        }
     }
 }

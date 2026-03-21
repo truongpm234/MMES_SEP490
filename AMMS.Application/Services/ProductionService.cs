@@ -71,9 +71,14 @@ namespace AMMS.Application.Services
 
         public async Task<int?> StartProductionAndPromoteFirstTaskAsync(int orderId, CancellationToken ct = default)
         {
-            var evt = new RequestChangedEvent(orderId, "Scheduled", "InProcessing", "Start", DateTime.Now, "production-manager");
+            var evt = new RequestChangedEvent(orderId, "Scheduled", "InProcessing", "Start", AppTime.NowVnUnspecified(), "production-manager");
             await _hub.PublishRequestChangedAsync(evt);
             return await _repo.StartProductionByOrderIdAndPromoteFirstTaskAsync(orderId, AppTime.NowVnUnspecified(), ct);
+        }
+
+        public async Task<List<MachineScheduleBoardDto>> GetMachineScheduleBoardAsync(DateTime from, DateTime to, CancellationToken ct = default)
+        {
+            return await _repo.GetMachineScheduleBoardAsync(from, to, ct);
         }
     }
 }

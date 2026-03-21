@@ -8,7 +8,7 @@ namespace AMMS.Application.Helpers
     {
         private static readonly HashSet<int> FullAccessRoleIds = new()
         {
-            6
+            6, 3
         };
 
         // map role_id -> process_code

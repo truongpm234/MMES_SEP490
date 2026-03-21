@@ -421,7 +421,7 @@ namespace AMMS.Infrastructure.Repositories
             string? customerPhone = req?.customer_phone;
 
             DateTime? prodStart = order.productions
-                .Select(p => p.start_date)
+                .Select(p => p.actual_start_date)
                 .Where(d => d != null)
                 .OrderBy(d => d)
                 .FirstOrDefault();
@@ -433,7 +433,7 @@ namespace AMMS.Infrastructure.Repositories
                 .FirstOrDefault();
 
             string approverName = order.productions
-                .OrderByDescending(p => p.start_date ?? p.end_date ?? order.order_date)
+                .OrderByDescending(p => p.actual_start_date ?? p.end_date ?? order.order_date)
                 .Select(p => p.manager != null ? p.manager.full_name : null)
                 .FirstOrDefault()
                 ?? "Quản lí";

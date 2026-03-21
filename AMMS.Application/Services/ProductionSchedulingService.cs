@@ -6,6 +6,8 @@ using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Planning;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using AMMS.Infrastructure.Configurations;
+using Microsoft.Extensions.Options;
 
 namespace AMMS.Application.Services
 {
@@ -16,6 +18,7 @@ namespace AMMS.Application.Services
         private readonly ITaskRepository _taskRepo;
         private readonly WorkCalendar _cal;
         private readonly ILogger<ProductionSchedulingService> _logger;
+        private readonly SchedulingOptions _opt;
 
         public ProductionSchedulingService(
             AppDbContext db,
@@ -24,13 +27,14 @@ namespace AMMS.Application.Services
             IMachineRepository machineRepo,
             ITaskRepository taskRepo,
             WorkCalendar cal,
-            ILogger<ProductionSchedulingService> logger)
+            ILogger<ProductionSchedulingService> logger, IOptions<SchedulingOptions> opt)
         {
             _db = db;
             _machineRepo = machineRepo;
             _taskRepo = taskRepo;
             _cal = cal;
             _logger = logger;
+            _opt = opt.Value ?? new SchedulingOptions();
         }
 
         public async Task<int> ScheduleOrderAsync(int orderId, int productTypeId, string? productionProcessCsv, int? managerId = 3)
@@ -63,8 +67,14 @@ namespace AMMS.Application.Services
                         throw new InvalidOperationException(
                             $"No stage plan generated for order {orderId}. RawCsv={ctx.RawProductionProcessCsv}");
 
-                    // Chỉ tạo production sau khi plan build OK
                     var prod = await GetOrCreateProductionAsync(orderId, productTypeId, managerId, now);
+
+                    if (prod.created_at == null)
+                        prod.created_at = now;
+
+                    prod.planned_start_date = plan.PlanningAnchor;
+
+                    await _db.SaveChangesAsync();
 
                     var order = await _db.orders
                         .AsTracking()
@@ -200,16 +210,18 @@ namespace AMMS.Application.Services
 
                 var now = AppTime.NowVnUnspecified();
 
-                var dueTasks = await _db.tasks
-                    .AsTracking()
-                    .Where(t =>
-                        (t.status == null || t.status == "Unassigned") &&
-                        t.planned_start_time != null &&
-                        t.planned_start_time <= now)
-                    .OrderBy(t => t.planned_start_time)
-                    .ThenBy(t => t.seq_num)
-                    .ThenBy(t => t.task_id)
-                    .ToListAsync(ct);
+                var dueTasks = await (
+                    from t in _db.tasks.AsTracking()
+                    join p in _db.productions.AsTracking() on t.prod_id equals p.prod_id
+                    join o in _db.orders.AsTracking() on p.order_id equals o.order_id into oj
+                    from o in oj.DefaultIfEmpty()
+                    where (t.status == null || t.status == "Unassigned")
+                          && t.planned_start_time != null
+                          && t.planned_start_time <= now
+                          && (o == null || o.is_enough != false)
+                    orderby o.delivery_date, p.planned_start_date, t.planned_start_time, t.seq_num, t.task_id
+                    select t
+                ).ToListAsync(ct);
 
                 if (dueTasks.Count == 0)
                 {
@@ -224,6 +236,7 @@ namespace AMMS.Application.Services
                     .ToList();
 
                 var allProdTasks = await _db.tasks
+                    .Include(x => x.process)
                     .AsTracking()
                     .Where(t => t.prod_id != null && prodIds.Contains(t.prod_id.Value))
                     .ToListAsync(ct);
@@ -235,23 +248,38 @@ namespace AMMS.Application.Services
                     if (!t.prod_id.HasValue || !t.seq_num.HasValue)
                         continue;
 
-                    var prev = allProdTasks
-                        .Where(x => x.prod_id == t.prod_id && x.seq_num < t.seq_num)
+                    var prodTasks = allProdTasks
+                        .Where(x => x.prod_id == t.prod_id)
+                        .OrderBy(x => x.seq_num)
+                        .ThenBy(x => x.task_id)
+                        .ToList();
+
+                    var currentCode = ProductionFlowHelper.Norm(t.process?.process_code);
+                    var hasRalo = prodTasks.Any(x => ProductionFlowHelper.IsRalo(x.process?.process_code));
+                    var raloFinished = !hasRalo || prodTasks.Any(x =>
+                        ProductionFlowHelper.IsRalo(x.process?.process_code) &&
+                        string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase));
+
+                    var prev = prodTasks
+                        .Where(x => x.seq_num < t.seq_num)
                         .OrderByDescending(x => x.seq_num)
                         .FirstOrDefault();
 
-                    if (prev != null && !IsFinished(prev))
+                    var prevFinished = prev == null || IsFinished(prev);
+
+                    var canRelease =
+                        ProductionFlowHelper.IsInitialParallel(currentCode)
+                            ? true
+                            : hasRalo
+                                ? raloFinished
+                                : prevFinished;
+
+                    if (!canRelease)
                         continue;
 
                     if (string.IsNullOrWhiteSpace(t.machine))
                     {
-                        var pcode = await _db.product_type_processes
-                            .AsNoTracking()
-                            .Where(x => x.process_id == t.process_id)
-                            .Select(x => x.process_code)
-                            .FirstOrDefaultAsync(ct);
-
-                        pcode = ProductionProcessSelectionHelper.Norm(pcode);
+                        var pcode = ProductionProcessSelectionHelper.Norm(t.process?.process_code);
 
                         if (!string.IsNullOrWhiteSpace(pcode))
                         {
@@ -273,11 +301,11 @@ namespace AMMS.Application.Services
                     machine.busy_quantity ??= 0;
                     machine.free_quantity ??= (machine.quantity - machine.busy_quantity.Value);
 
-                    if (machine.free_quantity <= 0)
-                        continue;
-
-                    machine.free_quantity -= 1;
-                    machine.busy_quantity += 1;
+                    if (machine.free_quantity > 0)
+                    {
+                        machine.free_quantity -= 1;
+                        machine.busy_quantity += 1;
+                    }
 
                     t.status = "Ready";
                     t.start_time ??= now;
@@ -295,12 +323,12 @@ namespace AMMS.Application.Services
         private async Task<production> GetOrCreateProductionAsync(int orderId, int productTypeId, int? managerId, DateTime now)
         {
             var order = await _db.orders
-    .FromSqlInterpolated($@"
-        SELECT *
-        FROM ""AMMS_DB"".""orders""
-        WHERE order_id = {orderId}
-        FOR UPDATE")
-    .FirstAsync();
+                .FromSqlInterpolated($@"
+            SELECT *
+            FROM ""AMMS_DB"".""orders""
+            WHERE order_id = {orderId}
+            FOR UPDATE")
+                .FirstAsync();
 
             production? prod = null;
 
@@ -327,7 +355,9 @@ namespace AMMS.Application.Services
                 manager_id = managerId,
                 status = "Scheduled",
                 product_type_id = productTypeId,
-                start_date = now
+                created_at = now,
+                planned_start_date = null,
+                actual_start_date = null
             };
 
             await _db.productions.AddAsync(prod);
@@ -503,96 +533,26 @@ namespace AMMS.Application.Services
 
             var normalizedCsv = ProductionProcessSelectionHelper.BuildCsv(steps, x => x.process_code);
 
-            var machinePoolCache = new Dictionary<string, MachinePoolState>(StringComparer.OrdinalIgnoreCase);
-            var candidateCache = new Dictionary<string, List<machine>>(StringComparer.OrdinalIgnoreCase);
+            var earliestAnchor = EstimateInitialPlanningAnchor(ctx, now, steps.Count);
 
-            var result = new List<StagePlanDraft>();
-            DateTime? prevEnd = null;
-            string? prevCode = null;
+            var firstPass = await BuildStagePlansFromAnchorAsync(
+                ctx,
+                earliestAnchor,
+                steps,
+                normalizedCsv,
+                ct);
 
-            foreach (var step in steps.OrderBy(x => x.seq_num))
-            {
-                var pcode = ProductionProcessSelectionHelper.Norm(step.process_code);
-                if (string.IsNullOrWhiteSpace(pcode))
-                    throw new Exception($"process_code missing for process_id={step.process_id}");
+            var preferredAnchor = EstimatePreferredAnchorByDueDate(ctx, firstPass, earliestAnchor);
 
-                var unit = GetStageUnit(pcode);
-                var requiredUnits = GetStageRequiredUnits(pcode, ctx);
+            if (preferredAnchor <= earliestAnchor)
+                return firstPass;
 
-                var candidates = await GetCandidateMachinesAsync(step, candidateCache, ct);
-                if (candidates.Count == 0)
-                    throw new Exception($"No active machine found for process_code={pcode}");
-
-                StagePlanDraft? best = null;
-
-                foreach (var candidate in candidates)
-                {
-                    var pool = await GetOrBuildPoolStateAsync(candidate, now, machinePoolCache, ct);
-                    var (laneIndex, laneFreeAt) = GetEarliestLane(pool.LaneAvailableAt);
-
-                    var handoffMinutes = prevEnd.HasValue
-                        ? GetHandoffMinutes(prevCode, pcode, ctx)
-                        : 0;
-
-                    var earliestBySequence = prevEnd.HasValue
-                        ? prevEnd.Value.AddMinutes(handoffMinutes)
-                        : now;
-
-                    var startCandidate = laneFreeAt > earliestBySequence
-                        ? laneFreeAt
-                        : earliestBySequence;
-
-                    var plannedStart = _cal.NormalizeStart(startCandidate);
-
-                    var setupMinutes = GetSetupMinutes(pcode, ctx);
-                    var effectiveCap = GetEffectiveCapacityPerHour(candidate);
-                    var durationHours = EstimateStageDurationHours(pcode, requiredUnits, candidate, ctx);
-
-                    var plannedEnd = _cal.AddWorkingHours(plannedStart, durationHours);
-
-                    var draft = new StagePlanDraft
-                    {
-                        ProcessId = step.process_id,
-                        SeqNum = step.seq_num,
-                        ProcessName = step.process_name,
-                        ProcessCode = pcode,
-                        MachineCode = candidate.machine_code,
-                        MachineEntity = candidate,
-                        LaneIndex = laneIndex,
-                        Unit = unit,
-                        RequiredUnits = requiredUnits,
-                        EffectiveCapacityPerHour = effectiveCap,
-                        SetupMinutes = setupMinutes,
-                        HandoffMinutes = handoffMinutes,
-                        PlannedStart = plannedStart,
-                        PlannedEnd = plannedEnd
-                    };
-
-                    if (best == null ||
-                        draft.PlannedEnd < best.PlannedEnd ||
-                        (draft.PlannedEnd == best.PlannedEnd && draft.PlannedStart < best.PlannedStart))
-                    {
-                        best = draft;
-                    }
-                }
-
-                if (best == null)
-                    throw new Exception($"Cannot build plan for process_code={pcode}");
-
-                var selectedPool = await GetOrBuildPoolStateAsync(best.MachineEntity, now, machinePoolCache, ct);
-                selectedPool.LaneAvailableAt[best.LaneIndex] = best.PlannedEnd.AddMinutes(GetMachineTurnaroundMinutes(best.ProcessCode));
-
-                result.Add(best);
-
-                prevEnd = best.PlannedEnd;
-                prevCode = best.ProcessCode;
-            }
-
-            return new PlanBuildResult
-            {
-                NormalizedProcessCsv = normalizedCsv,
-                Stages = result
-            };
+            return await BuildStagePlansFromAnchorAsync(
+                ctx,
+                preferredAnchor,
+                steps,
+                normalizedCsv,
+                ct);
         }
 
         private async Task<List<machine>> GetCandidateMachinesAsync(
@@ -653,7 +613,7 @@ namespace AMMS.Application.Services
 
         private async Task<MachinePoolState> GetOrBuildPoolStateAsync(
     machine m,
-    DateTime now,
+    DateTime planningAnchor,
     Dictionary<string, MachinePoolState> cache,
     CancellationToken ct)
         {
@@ -665,8 +625,8 @@ namespace AMMS.Application.Services
                 return existing;
 
             var laneCount = Math.Max(1, m.quantity);
-            var normalizedNow = _cal.NormalizeStart(now);
-            var laneStates = Enumerable.Repeat(normalizedNow, laneCount).ToList();
+            var normalizedAnchor = _cal.NormalizeStart(planningAnchor);
+            var laneStates = Enumerable.Repeat(normalizedAnchor, laneCount).ToList();
 
             var machineKey = machineCode.ToUpperInvariant();
 
@@ -678,13 +638,13 @@ namespace AMMS.Application.Services
                     t.status != null &&
                     t.status.Trim().ToUpper() == "FINISHED" &&
                     t.end_time != null &&
-                    t.end_time <= now))
+                    t.end_time <= planningAnchor))
                 .Select(t => new ExistingReservation
                 {
-                    Start = t.planned_start_time ?? t.start_time ?? now,
+                    Start = t.planned_start_time ?? t.start_time ?? planningAnchor,
                     End = t.planned_end_time
                           ?? t.end_time
-                          ?? ((t.planned_start_time ?? t.start_time ?? now).AddHours(1))
+                          ?? ((t.planned_start_time ?? t.start_time ?? planningAnchor).AddHours(1))
                 })
                 .OrderBy(x => x.Start)
                 .ToListAsync(ct);
@@ -876,6 +836,174 @@ namespace AMMS.Application.Services
             return (double)Math.Round(totalHours, 4);
         }
 
+        private DateTime EstimateInitialPlanningAnchor(
+    PlanningContext ctx,
+    DateTime scheduledAt,
+    int stageCount)
+        {
+            var leadMinutes = Math.Max(_opt.MinimumPlanningLeadMinutes, _opt.InitialLeadMinutes);
+
+            if (stageCount >= _opt.LongRouteStageThreshold)
+                leadMinutes += _opt.LongRouteExtraLeadMinutes;
+
+            if (ctx.OrderQty >= _opt.LargeOrderQtyThreshold)
+                leadMinutes += _opt.LargeOrderExtraLeadMinutes;
+
+            if (ctx.SheetsTotal >= _opt.LargeSheetsThreshold)
+                leadMinutes += Math.Max(15, _opt.LargeOrderExtraLeadMinutes / 2);
+
+            if (ctx.NumberOfPlates >= _opt.HighPlateThreshold)
+                leadMinutes += _opt.HighPlateExtraLeadMinutes;
+
+            var selected = ProductionProcessSelectionHelper.ParseCsv(ctx.RawProductionProcessCsv);
+
+            if (selected.Contains("IN"))
+                leadMinutes += 10;
+
+            if (selected.Contains("CAN") || selected.Contains("BOI"))
+                leadMinutes += 10;
+
+            return _cal.NormalizeStart(scheduledAt.AddMinutes(leadMinutes));
+        }
+
+        private DateTime EstimatePreferredAnchorByDueDate(
+            PlanningContext ctx,
+            PlanBuildResult currentPlan,
+            DateTime earliestAnchor)
+        {
+            if (!ctx.DesiredDeliveryDate.HasValue || currentPlan.Stages.Count == 0)
+                return earliestAnchor;
+
+            var desiredFinish = ctx.DesiredDeliveryDate.Value;
+            if (desiredFinish.TimeOfDay == TimeSpan.Zero)
+                desiredFinish = desiredFinish.Date.AddHours(17);
+
+            var planStart = currentPlan.Stages.Min(x => x.PlannedStart);
+            var planEnd = currentPlan.Stages.Max(x => x.PlannedEnd);
+            var totalSpan = planEnd - planStart;
+
+            var latestAnchor = desiredFinish
+                .AddHours(-_opt.DueDateSafetyHours)
+                .Subtract(totalSpan);
+
+            if (latestAnchor <= earliestAnchor)
+                return earliestAnchor;
+
+            return _cal.NormalizeStart(latestAnchor);
+        }
+
+        private async Task<PlanBuildResult> BuildStagePlansFromAnchorAsync(
+            PlanningContext ctx,
+            DateTime planningAnchor,
+            List<product_type_process> steps,
+            string normalizedCsv,
+            CancellationToken ct)
+        {
+            var machinePoolCache = new Dictionary<string, MachinePoolState>(StringComparer.OrdinalIgnoreCase);
+            var candidateCache = new Dictionary<string, List<machine>>(StringComparer.OrdinalIgnoreCase);
+
+            var result = new List<StagePlanDraft>();
+            DateTime? prevEnd = null;
+            string? prevCode = null;
+            DateTime? raloEnd = null;
+
+            foreach (var step in steps.OrderBy(x => x.seq_num))
+            {
+                var pcode = ProductionProcessSelectionHelper.Norm(step.process_code);
+                if (string.IsNullOrWhiteSpace(pcode))
+                    throw new Exception($"process_code missing for process_id={step.process_id}");
+
+                var unit = GetStageUnit(pcode);
+                var requiredUnits = GetStageRequiredUnits(pcode, ctx);
+
+                var candidates = await GetCandidateMachinesAsync(step, candidateCache, ct);
+                if (candidates.Count == 0)
+                    throw new Exception($"No active machine found for process_code={pcode}");
+
+                StagePlanDraft? best = null;
+
+                foreach (var candidate in candidates)
+                {
+                    var pool = await GetOrBuildPoolStateAsync(candidate, planningAnchor, machinePoolCache, ct);
+                    var (laneIndex, laneFreeAt) = GetEarliestLane(pool.LaneAvailableAt);
+
+                    var independent = ProductionFlowHelper.IsInitialParallel(pcode);
+
+                    var handoffMinutes = (!independent && prevEnd.HasValue)
+                        ? GetHandoffMinutes(prevCode, pcode, ctx)
+                        : 0;
+
+                    var earliestByFlow = independent
+                        ? planningAnchor
+                        : (prevEnd.HasValue
+                            ? prevEnd.Value.AddMinutes(handoffMinutes)
+                            : planningAnchor);
+
+                    if (!independent && raloEnd.HasValue && earliestByFlow < raloEnd.Value)
+                        earliestByFlow = raloEnd.Value;
+
+                    var startCandidate = laneFreeAt > earliestByFlow
+                        ? laneFreeAt
+                        : earliestByFlow;
+
+                    var plannedStart = _cal.NormalizeStart(startCandidate);
+
+                    var setupMinutes = GetSetupMinutes(pcode, ctx);
+                    var effectiveCap = GetEffectiveCapacityPerHour(candidate);
+                    var durationHours = EstimateStageDurationHours(pcode, requiredUnits, candidate, ctx);
+
+                    var plannedEnd = _cal.AddWorkingHours(plannedStart, durationHours);
+
+                    var draft = new StagePlanDraft
+                    {
+                        ProcessId = step.process_id,
+                        SeqNum = step.seq_num,
+                        ProcessName = step.process_name,
+                        ProcessCode = pcode,
+                        MachineCode = candidate.machine_code,
+                        MachineEntity = candidate,
+                        LaneIndex = laneIndex,
+                        Unit = unit,
+                        RequiredUnits = requiredUnits,
+                        EffectiveCapacityPerHour = effectiveCap,
+                        SetupMinutes = setupMinutes,
+                        HandoffMinutes = handoffMinutes,
+                        PlannedStart = plannedStart,
+                        PlannedEnd = plannedEnd
+                    };
+
+                    if (best == null ||
+                        draft.PlannedEnd < best.PlannedEnd ||
+                        (draft.PlannedEnd == best.PlannedEnd && draft.PlannedStart < best.PlannedStart))
+                    {
+                        best = draft;
+                    }
+                }
+
+                if (best == null)
+                    throw new Exception($"Cannot build plan for process_code={pcode}");
+
+                var selectedPool = await GetOrBuildPoolStateAsync(best.MachineEntity, planningAnchor, machinePoolCache, ct);
+                selectedPool.LaneAvailableAt[best.LaneIndex] =
+                    best.PlannedEnd.AddMinutes(GetMachineTurnaroundMinutes(best.ProcessCode));
+
+                result.Add(best);
+
+                if (ProductionFlowHelper.IsRalo(best.ProcessCode))
+                    raloEnd = best.PlannedEnd;
+
+                prevEnd = best.PlannedEnd;
+                prevCode = best.ProcessCode;
+            }
+
+            return new PlanBuildResult
+            {
+                PlanningAnchor = planningAnchor,
+                NormalizedProcessCsv = normalizedCsv,
+                Stages = result
+            };
+        }
+
         private static bool IsFinished(task t)
         {
             return string.Equals(t.status, "Finished", StringComparison.OrdinalIgnoreCase)
@@ -907,6 +1035,7 @@ namespace AMMS.Application.Services
 
         private sealed class PlanBuildResult
         {
+            public DateTime PlanningAnchor { get; init; }
             public string NormalizedProcessCsv { get; init; } = "";
             public List<StagePlanDraft> Stages { get; init; } = new();
         }

@@ -59,21 +59,36 @@ namespace AMMS.Application.Services
                     if (!t.prod_id.HasValue || !t.seq_num.HasValue)
                         throw new Exception("Task missing prod_id/seq_num");
 
-                    var prev = await _taskRepo.GetPrevTaskAsync(t.prod_id.Value, t.seq_num.Value);
-                    if (prev != null && !string.Equals(prev.status, "Finished", StringComparison.OrdinalIgnoreCase))
-                        throw new Exception($"Previous step (task_id={prev.task_id}, seq={prev.seq_num}) is not Finished");
+                    var flowTasks = await _taskRepo.GetTasksWithCodesByProductionAsync(t.prod_id.Value);
+                    var currentFlow = flowTasks.FirstOrDefault(x => x.task_id == t.task_id)
+                        ?? throw new Exception("Task flow info not found");
 
-                    // Theo rule mới: chỉ Ready mới được scan finish
+                    var currentCode = ProductionFlowHelper.Norm(currentFlow.process_code);
+                    var hasRalo = flowTasks.Any(x => ProductionFlowHelper.IsRalo(x.process_code));
+                    var raloFinished = !hasRalo || flowTasks.Any(x =>
+                        ProductionFlowHelper.IsRalo(x.process_code) &&
+                        string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase));
+
+                    if (!hasRalo)
+                    {
+                        var prev = await _taskRepo.GetPrevTaskAsync(t.prod_id.Value, t.seq_num.Value);
+                        if (prev != null && !string.Equals(prev.status, "Finished", StringComparison.OrdinalIgnoreCase))
+                            throw new Exception($"Previous step (task_id={prev.task_id}, seq={prev.seq_num}) is not Finished");
+                    }
+                    else
+                    {
+                        if (ProductionFlowHelper.NeedsRaloGate(currentCode) && !raloFinished)
+                            throw new Exception("RALO must be Finished before this task can be scanned");
+                    }
+
                     if (!string.Equals(t.status, "Ready", StringComparison.OrdinalIgnoreCase))
                         throw new Exception($"Task status '{t.status}' is not scannable. Only Ready can be finished.");
 
                     var now = AppTime.NowVnUnspecified();
 
-                    // release machine của công đoạn hiện tại
                     if (!string.IsNullOrWhiteSpace(t.machine))
                         await _machineRepo.ReleaseAsync(t.machine!, release: 1);
 
-                    // finish current task
                     t.status = "Finished";
                     t.start_time ??= now;
                     t.end_time = now;
@@ -92,11 +107,22 @@ namespace AMMS.Application.Services
                     await _taskRepo.SaveChangesAsync();
                     await _logRepo.SaveChangesAsync();
 
-                    // promote task kế tiếp -> Ready
-                    var promotedNext = await _taskRepo.PromoteNextTaskToReadyAsync(t.task_id, now);
-                    await _taskRepo.SaveChangesAsync();
+                    bool promotedNext = false;
 
-                    // nếu tất cả task finished thì đóng production
+                    if (hasRalo)
+                    {
+                        if (ProductionFlowHelper.IsRalo(currentCode))
+                        {
+                            promotedNext = await _taskRepo.PromoteAllTasksAfterRaloAsync(t.prod_id.Value, now);
+                            await _taskRepo.SaveChangesAsync();
+                        }
+                    }
+                    else
+                    {
+                        promotedNext = await _taskRepo.PromoteNextTaskToReadyAsync(t.task_id, now);
+                        await _taskRepo.SaveChangesAsync();
+                    }
+
                     if (t.prod_id.HasValue)
                     {
                         await _prodRepo.TryCloseProductionIfCompletedAsync(
@@ -125,7 +151,6 @@ namespace AMMS.Application.Services
 
                     await tx.CommitAsync();
 
-                    // Có thể giữ lại, nhưng không còn phụ thuộc vào nó để mở task kế tiếp nữa
                     try { await _scheduling.DispatchDueTasksAsync(); } catch { }
 
                     await _hub.Clients
@@ -135,7 +160,8 @@ namespace AMMS.Application.Services
                             prodId = t.prod_id,
                             taskId = t.task_id,
                             status = "Finished",
-                            promoted_next = promotedNext
+                            promoted_next = promotedNext,
+                            flow_gate = hasRalo ? "RALO" : "SEQUENTIAL"
                         });
 
                     if (prod?.order_id != null)
@@ -152,7 +178,7 @@ namespace AMMS.Application.Services
                         task_id = t.task_id,
                         prod_id = t.prod_id,
                         message = promotedNext
-                            ? $"Finished & logged qty_good={qtyGood}. Next task promoted to Ready."
+                            ? $"Finished & logged qty_good={qtyGood}. Flow released."
                             : $"Finished & logged qty_good={qtyGood}."
                     };
                 }

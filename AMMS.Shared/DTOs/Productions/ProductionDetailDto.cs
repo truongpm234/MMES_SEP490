@@ -31,6 +31,9 @@ namespace AMMS.Shared.DTOs.Productions
         public int? height_mm { get; set; }
 
         // Timeline stages
+        public DateTime? created_at { get; set; }
+        public DateTime? planned_start_date { get; set; }
+        public DateTime? actual_start_date { get; set; }
         public List<ProductionStageDto> stages { get; set; } = new();
     }
 }

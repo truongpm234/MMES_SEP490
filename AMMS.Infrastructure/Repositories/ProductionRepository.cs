@@ -24,7 +24,7 @@ namespace AMMS.Infrastructure.Repositories
             return await (
                 from pr in _db.productions.AsNoTracking()
                 join o in _db.orders.AsNoTracking() on pr.order_id equals o.order_id
-                where pr.start_date != null
+                where pr.actual_start_date != null
                       && pr.end_date == null
                       && o.delivery_date != null
                 orderby o.delivery_date
@@ -59,9 +59,8 @@ namespace AMMS.Infrastructure.Repositories
                     on q.order_request_id equals r.order_request_id into rj
                 from r in rj.DefaultIfEmpty()
 
-                where pr.start_date != null
-                      && pr.order_id != null
-                orderby pr.start_date descending, pr.prod_id descending
+                where pr.created_at != null && pr.order_id != null
+                orderby (pr.planned_start_date ?? pr.created_at) descending, pr.prod_id descending
                 select new BaseRow
                 {
                     prod_id = pr.prod_id,
@@ -351,7 +350,7 @@ namespace AMMS.Infrastructure.Repositories
                 from q in qj.DefaultIfEmpty()
 
                 where pr.order_id == orderId
-                orderby pr.start_date ?? pr.end_date ?? o.order_date
+                orderby (pr.planned_start_date ?? pr.created_at ?? pr.end_date)
                 select new
                 {
                     pr,
@@ -370,17 +369,21 @@ namespace AMMS.Infrastructure.Repositories
                             i_width = (int?)EF.Property<int?>(i, "width_mm"),
                             i_height = (int?)EF.Property<int?>(i, "height_mm"),
                             i_ink_weight_kg = (decimal?)i.est_ink_weight_kg
-                        }).FirstOrDefault()
+                        })
+                        .FirstOrDefault()
                 }).FirstOrDefaultAsync(ct);
 
-            if (header == null) return null;
+            if (header == null)
+                return null;
 
             var dto = new ProductionDetailDto
             {
                 prod_id = header.pr.prod_id,
                 production_code = header.pr.code,
                 production_status = header.pr.status,
-                start_date = header.pr.start_date,
+                created_at = header.pr.created_at,
+                planned_start_date = header.pr.planned_start_date,
+                actual_start_date = header.pr.actual_start_date,
                 end_date = header.pr.end_date,
 
                 order_id = header.o?.order_id,
@@ -411,9 +414,22 @@ namespace AMMS.Infrastructure.Repositories
 
                 if (orderReq != null)
                 {
-                    estimate = await _db.cost_estimates
+                    if (orderReq.accepted_estimate_id.HasValue && orderReq.accepted_estimate_id.Value > 0)
+                    {
+                        estimate = await _db.cost_estimates
+                            .AsNoTracking()
+                            .FirstOrDefaultAsync(
+                                x => x.estimate_id == orderReq.accepted_estimate_id.Value
+                                  && x.order_request_id == orderReq.order_request_id,
+                                ct);
+                    }
+
+                    estimate ??= await _db.cost_estimates
                         .AsNoTracking()
-                        .FirstOrDefaultAsync(x => x.order_request_id == orderReq.order_request_id, ct);
+                        .Where(x => x.order_request_id == orderReq.order_request_id)
+                        .OrderByDescending(x => x.is_active)
+                        .ThenByDescending(x => x.estimate_id)
+                        .FirstOrDefaultAsync(ct);
 
                     if (estimate != null)
                     {
@@ -425,20 +441,10 @@ namespace AMMS.Infrastructure.Repositories
             }
 
             decimal estInkWeightKg = 0m;
-            if (header.first_item != null && header.first_item.i_ink_weight_kg.HasValue)
-            {
+            if (header.first_item?.i_ink_weight_kg.HasValue == true)
                 estInkWeightKg = header.first_item.i_ink_weight_kg.Value;
-            }
 
             int? numberOfPlates = orderReq?.number_of_plates;
-            int? orderItemId = header.first_item?.item_id;
-
-            if (orderItemId.HasValue)
-            {
-                _ = await _db.boms.AsNoTracking()
-                    .Where(b => b.order_item_id == orderItemId.Value)
-                    .ToListAsync(ct);
-            }
 
             var prodId = header.pr.prod_id;
 
@@ -460,7 +466,11 @@ namespace AMMS.Infrastructure.Repositories
                 })
                 .ToListAsync(ct);
 
-            var lastTask = tasks.OrderByDescending(t => t.seq_num ?? 0).FirstOrDefault();
+            var lastTask = tasks
+                .OrderByDescending(t => t.seq_num ?? 0)
+                .ThenByDescending(t => t.task_id)
+                .FirstOrDefault();
+
             if (lastTask != null
                 && string.Equals(lastTask.status, "Finished", StringComparison.OrdinalIgnoreCase)
                 && lastTask.end_time != null
@@ -472,10 +482,14 @@ namespace AMMS.Infrastructure.Repositories
                 prodToUpdate.status = "Finished";
                 prodToUpdate.end_date = lastTask.end_time;
 
+                if (header.pr.actual_start_date == null)
+                    prodToUpdate.actual_start_date = lastTask.end_time;
+
                 await _db.SaveChangesAsync(ct);
 
                 dto.production_status = "Finished";
                 dto.end_date = lastTask.end_time;
+                dto.actual_start_date ??= lastTask.end_time;
             }
 
             var taskIds = tasks.Select(x => x.task_id).ToList();
@@ -491,7 +505,8 @@ namespace AMMS.Infrastructure.Repositories
                     qty_good = l.qty_good ?? 0,
                     log_time = l.log_time,
                     scanned_code = l.scanned_code
-                }).ToListAsync(ct);
+                })
+                .ToListAsync(ct);
 
             var ptId = header.pr.product_type_id;
             List<ProductTypeProcessStepDto> steps = new();
@@ -556,7 +571,7 @@ namespace AMMS.Infrastructure.Repositories
                     seq_num = s.seq_num,
                     process_name = s.process_name ?? "",
                     process_code = s.process_code,
-                    machine = s.machine,
+                    machine = task?.machine ?? s.machine,
                     task_id = task?.task_id,
                     task_name = task?.name,
                     status = task?.status,
@@ -697,6 +712,8 @@ namespace AMMS.Infrastructure.Repositories
 
             prod.end_date = finishedAt;
             prod.status = "Finished";
+            if (prod.actual_start_date == null)
+                prod.actual_start_date = finishedAt;
 
             await _db.SaveChangesAsync(ct);
             return true;
@@ -717,9 +734,13 @@ namespace AMMS.Infrastructure.Repositories
                     return (int?)null;
 
                 prod.status = "InProcessing";
+                prod.actual_start_date ??= now;
 
-                if (prod.start_date == null)
-                    prod.start_date = now;
+                if (prod.created_at == null)
+                    prod.created_at = now;
+
+                if (prod.planned_start_date == null)
+                    prod.planned_start_date = now;
 
                 if (prod.order_id.HasValue)
                 {
@@ -732,8 +753,7 @@ namespace AMMS.Infrastructure.Repositories
 
                 await _db.SaveChangesAsync(ct);
 
-                // Promote task đầu tiên -> Ready
-                await _taskRepo.PromoteFirstTaskToReadyAsync(prod.prod_id, now, ct);
+                await _taskRepo.PromoteInitialTasksAsync(prod.prod_id, now, ct);
                 await _taskRepo.SaveChangesAsync(ct);
 
                 await tx.CommitAsync(ct);
@@ -1014,6 +1034,209 @@ namespace AMMS.Infrastructure.Repositories
                 return "InProcessing";
 
             return "Unassigned";
+        }
+
+        public async Task<List<MachineScheduleBoardDto>> GetMachineScheduleBoardAsync(
+    DateTime from,
+    DateTime to,
+    CancellationToken ct = default)
+        {
+            if (to <= from)
+                to = from.AddDays(1);
+
+            var machines = await _db.machines
+                .AsNoTracking()
+                .Where(x => x.is_active)
+                .OrderBy(x => x.process_code)
+                .ThenBy(x => x.machine_code)
+                .Select(x => new
+                {
+                    x.machine_code,
+                    x.process_code,
+                    x.process_name,
+                    x.quantity,
+                    busy_quantity = x.busy_quantity ?? 0,
+                    free_quantity = x.free_quantity ?? (x.quantity - (x.busy_quantity ?? 0))
+                })
+                .ToListAsync(ct);
+
+            var rawRows = await _db.tasks
+                .AsNoTracking()
+                .Where(t => t.machine != null && t.machine != "")
+                .Select(t => new
+                {
+                    TaskId = t.task_id,
+                    ProdId = t.prod_id,
+                    ProcessId = t.process_id,
+                    SeqNum = t.seq_num,
+                    Status = t.status,
+                    MachineCode = t.machine,
+                    PlannedStart = t.planned_start_time,
+                    PlannedEnd = t.planned_end_time,
+                    ActualStart = t.start_time,
+                    ActualEnd = t.end_time,
+
+                    OrderId = _db.productions
+                        .Where(pr => pr.prod_id == t.prod_id)
+                        .Select(pr => pr.order_id)
+                        .FirstOrDefault(),
+
+                    OrderCode = (
+                        from pr in _db.productions
+                        join o in _db.orders on pr.order_id equals o.order_id
+                        where pr.prod_id == t.prod_id
+                        select o.code
+                    ).FirstOrDefault(),
+
+                    ProcessCode = _db.product_type_processes
+                        .Where(p => p.process_id == t.process_id)
+                        .Select(p => p.process_code)
+                        .FirstOrDefault(),
+
+                    ProcessName = _db.product_type_processes
+                        .Where(p => p.process_id == t.process_id)
+                        .Select(p => p.process_name)
+                        .FirstOrDefault()
+                })
+                .ToListAsync(ct);
+
+            var rawSlots = rawRows
+                .Select(x =>
+                {
+                    var start = x.PlannedStart ?? x.ActualStart;
+                    var end = x.PlannedEnd
+                              ?? x.ActualEnd
+                              ?? (start.HasValue ? start.Value.AddHours(1) : (DateTime?)null);
+
+                    return new
+                    {
+                        x.TaskId,
+                        x.ProdId,
+                        x.OrderId,
+                        x.OrderCode,
+                        x.ProcessId,
+                        x.ProcessCode,
+                        x.ProcessName,
+                        x.SeqNum,
+                        x.Status,
+                        x.MachineCode,
+                        Start = start,
+                        End = end,
+                        x.ActualStart,
+                        x.ActualEnd
+                    };
+                })
+                .Where(x =>
+                    !string.IsNullOrWhiteSpace(x.MachineCode) &&
+                    x.Start.HasValue &&
+                    x.End.HasValue &&
+                    x.Start.Value < to &&
+                    x.End.Value > from)
+                .Select(x => new MachineScheduleTaskDto
+                {
+                    task_id = x.TaskId,
+                    prod_id = x.ProdId,
+                    order_id = x.OrderId,
+                    order_code = x.OrderCode,
+
+                    process_id = x.ProcessId,
+                    process_code = x.ProcessCode,
+                    process_name = !string.IsNullOrWhiteSpace(x.ProcessName) ? x.ProcessName : null,
+
+                    seq_num = x.SeqNum,
+                    status = x.Status,
+
+                    machine_code = x.MachineCode!,
+                    lane_no = 0,
+
+                    planned_start_time = x.Start,
+                    planned_end_time = x.End,
+
+                    actual_start_time = x.ActualStart,
+                    actual_end_time = x.ActualEnd
+                })
+                .OrderBy(x => x.machine_code)
+                .ThenBy(x => x.planned_start_time)
+                .ThenBy(x => x.planned_end_time)
+                .ThenBy(x => x.task_id)
+                .ToList();
+
+            var slotsByMachine = rawSlots
+                .GroupBy(x => x.machine_code, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.ToList(),
+                    StringComparer.OrdinalIgnoreCase);
+
+            var result = new List<MachineScheduleBoardDto>();
+
+            foreach (var m in machines)
+            {
+                slotsByMachine.TryGetValue(m.machine_code, out var slots);
+                slots ??= new List<MachineScheduleTaskDto>();
+
+                AssignLaneNumbers(slots, Math.Max(1, m.quantity), from);
+
+                result.Add(new MachineScheduleBoardDto
+                {
+                    machine_code = m.machine_code,
+                    process_code = m.process_code,
+                    process_name = m.process_name,
+                    quantity = m.quantity,
+                    busy_quantity = m.busy_quantity,
+                    free_quantity = m.free_quantity,
+                    from_time = from,
+                    to_time = to,
+                    slots = slots
+                });
+            }
+
+            return result;
+        }
+
+        private static void AssignLaneNumbers(
+            List<MachineScheduleTaskDto> slots,
+            int laneCount,
+            DateTime anchor)
+        {
+            if (slots == null || slots.Count == 0)
+                return;
+
+            var laneAvailableAt = Enumerable.Repeat(anchor, laneCount).ToArray();
+
+            foreach (var s in slots
+                         .OrderBy(x => x.planned_start_time)
+                         .ThenBy(x => x.planned_end_time)
+                         .ThenBy(x => x.task_id))
+            {
+                var start = s.planned_start_time ?? anchor;
+                var end = s.planned_end_time ?? start.AddHours(1);
+
+                var bestLane = 0;
+                var bestAvailable = laneAvailableAt[0];
+
+                for (var i = 0; i < laneAvailableAt.Length; i++)
+                {
+                    if (laneAvailableAt[i] <= start)
+                    {
+                        bestLane = i;
+                        bestAvailable = laneAvailableAt[i];
+                        break;
+                    }
+
+                    if (laneAvailableAt[i] < bestAvailable)
+                    {
+                        bestLane = i;
+                        bestAvailable = laneAvailableAt[i];
+                    }
+                }
+
+                var actualStart = bestAvailable > start ? bestAvailable : start;
+                var actualEnd = end > actualStart ? end : actualStart;
+
+                s.lane_no = bestLane + 1;
+                laneAvailableAt[bestLane] = actualEnd;
+            }
         }
     }
 }

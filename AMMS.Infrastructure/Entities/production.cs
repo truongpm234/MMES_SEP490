@@ -15,7 +15,11 @@ public partial class production
 
     public int? manager_id { get; set; }
 
-    public DateTime? start_date { get; set; }
+    public DateTime? created_at { get; set; }
+
+    public DateTime? planned_start_date { get; set; }
+
+    public DateTime? actual_start_date { get; set; }
 
     public DateTime? end_date { get; set; }
 

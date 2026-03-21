@@ -1,6 +1,8 @@
 ﻿using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
+using AMMS.Shared.DTOs.Productions;
+using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
 
 namespace AMMS.Infrastructure.Repositories
@@ -57,9 +59,29 @@ namespace AMMS.Infrastructure.Repositories
                 .FirstOrDefaultAsync(ct);
         }
 
-        public async Task<bool> PromoteFirstTaskToReadyAsync(int prodId, DateTime now, CancellationToken ct = default)
+        public async Task<List<TaskFlowDto>> GetTasksWithCodesByProductionAsync(int prodId, CancellationToken ct = default)
+        {
+            return await _db.tasks
+                .AsNoTracking()
+                .Where(x => x.prod_id == prodId)
+                .Select(x => new TaskFlowDto
+                {
+                    task_id = x.task_id,
+                    prod_id = x.prod_id ?? 0,
+                    seq_num = x.seq_num,
+                    status = x.status,
+                    machine = x.machine,
+                    process_code = x.process != null ? x.process.process_code : null
+                })
+                .OrderBy(x => x.seq_num)
+                .ThenBy(x => x.task_id)
+                .ToListAsync(ct);
+        }
+
+        public async Task<bool> PromoteInitialTasksAsync(int prodId, DateTime now, CancellationToken ct = default)
         {
             var tasks = await _db.tasks
+                .Include(x => x.process)
                 .Where(x => x.prod_id == prodId)
                 .OrderBy(x => x.seq_num)
                 .ThenBy(x => x.task_id)
@@ -68,31 +90,78 @@ namespace AMMS.Infrastructure.Repositories
             if (tasks.Count == 0)
                 return false;
 
-            if (tasks.Any(x => string.Equals(x.status, "Ready", StringComparison.OrdinalIgnoreCase)))
-                return true;
+            var promoted = false;
 
-            foreach (var t in tasks)
+            var initialTasks = tasks
+                .Where(x => !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase))
+                .Where(x => ProductionFlowHelper.IsInitialParallel(x.process?.process_code))
+                .ToList();
+
+            if (initialTasks.Count == 0)
             {
-                if (!string.Equals(t.status, "Finished", StringComparison.OrdinalIgnoreCase))
-                {
-                    t.status = "Unassigned";
-                    t.start_time = null;
-                }
+                var first = tasks.FirstOrDefault(x => !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase));
+                if (first != null)
+                    initialTasks.Add(first);
             }
 
-            var first = tasks.FirstOrDefault(x => !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase));
-            if (first == null)
+            foreach (var t in initialTasks)
+            {
+                if (string.Equals(t.status, "Ready", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                t.status = "Ready";
+                t.start_time ??= now;
+                await TryAllocateMachineWhenReadyAsync(t, ct);
+                promoted = true;
+            }
+
+            return promoted;
+        }
+
+        public async Task<bool> PromoteFirstTaskToReadyAsync(int prodId, DateTime now, CancellationToken ct = default)
+        {
+            return await PromoteInitialTasksAsync(prodId, now, ct);
+        }
+
+        public async Task<bool> PromoteAllTasksAfterRaloAsync(int prodId, DateTime now, CancellationToken ct = default)
+        {
+            var tasks = await _db.tasks
+                .Include(x => x.process)
+                .Where(x => x.prod_id == prodId)
+                .OrderBy(x => x.seq_num)
+                .ThenBy(x => x.task_id)
+                .ToListAsync(ct);
+
+            if (tasks.Count == 0)
                 return false;
 
-            first.status = "Ready";
-            first.start_time ??= now;
+            var ralo = tasks.FirstOrDefault(x => ProductionFlowHelper.IsRalo(x.process?.process_code));
+            if (ralo == null || !ralo.seq_num.HasValue)
+                return false;
 
-            return true;
+            var promoted = false;
+
+            foreach (var t in tasks.Where(x =>
+                         x.seq_num.HasValue &&
+                         x.seq_num.Value > ralo.seq_num.Value &&
+                         !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (string.Equals(t.status, "Ready", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                t.status = "Ready";
+                t.start_time ??= now;
+                await TryAllocateMachineWhenReadyAsync(t, ct);
+                promoted = true;
+            }
+
+            return promoted;
         }
 
         public async Task<bool> PromoteNextTaskToReadyAsync(int currentTaskId, DateTime now, CancellationToken ct = default)
         {
             var current = await _db.tasks
+                .Include(x => x.process)
                 .FirstOrDefaultAsync(x => x.task_id == currentTaskId, ct);
 
             if (current == null || !current.prod_id.HasValue || !current.seq_num.HasValue)
@@ -102,28 +171,29 @@ namespace AMMS.Infrastructure.Repositories
             var currentSeq = current.seq_num.Value;
 
             var hasOtherReady = await _db.tasks
-        .AnyAsync(x =>
-            x.prod_id == prodId &&
-            x.task_id != currentTaskId &&
-            x.status == "Ready", ct);
+                .AnyAsync(x =>
+                    x.prod_id == prodId &&
+                    x.task_id != currentTaskId &&
+                    x.status == "Ready", ct);
 
             if (hasOtherReady)
-                return true;
+                return false;
 
             var next = await _db.tasks
-        .Where(x =>
-            x.prod_id == prodId &&
-            x.seq_num > currentSeq &&
-            x.status != "Finished")
-        .OrderBy(x => x.seq_num)
-        .ThenBy(x => x.task_id)
-        .FirstOrDefaultAsync(ct);
+                .Where(x =>
+                    x.prod_id == prodId &&
+                    x.seq_num > currentSeq &&
+                    x.status != "Finished")
+                .OrderBy(x => x.seq_num)
+                .ThenBy(x => x.task_id)
+                .FirstOrDefaultAsync(ct);
 
             if (next == null)
                 return false;
 
             next.status = "Ready";
             next.start_time ??= now;
+            await TryAllocateMachineWhenReadyAsync(next, ct);
 
             return true;
         }
@@ -169,6 +239,27 @@ namespace AMMS.Infrastructure.Repositories
                 sheetsTotal,
                 fallback: SafeInt(sheetsRequired, fallback: SafeInt(orderQty, 1))
             );
+        }
+
+        private async Task TryAllocateMachineWhenReadyAsync(task t, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(t.machine))
+                return;
+
+            var m = await _db.machines
+                .FirstOrDefaultAsync(x => x.machine_code == t.machine && x.is_active, ct);
+
+            if (m == null)
+                return;
+
+            m.busy_quantity ??= 0;
+            m.free_quantity ??= (m.quantity - m.busy_quantity.Value);
+
+            if (m.free_quantity <= 0)
+                return;
+
+            m.free_quantity -= 1;
+            m.busy_quantity += 1;
         }
 
         private static int SafeInt(int v, int fallback = 1) => v > 0 ? v : fallback;
