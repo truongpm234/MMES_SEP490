@@ -179,6 +179,7 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.customer_name).HasMaxLength(100);
             entity.Property(e => e.customer_phone).HasMaxLength(20);
             entity.Property(e => e.delivery_date).HasColumnType("timestamp without time zone");
+            entity.Property(e => e.assigned_at).HasColumnType("timestamp without time zone");
             entity.Property(e => e.order_request_date).HasColumnType("timestamp without time zone");
             entity.Property(e => e.verified_at).HasColumnName("verified_at").HasColumnType("timestamp without time zone");
             entity.Property(e => e.quote_expires_at).HasColumnName("quote_expire_at").HasColumnType("timestamp without time zone");
@@ -196,8 +197,11 @@ public partial class AppDbContext : DbContext
                 .HasForeignKey(d => d.quote_id)
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("fk_order_request_quote");
+            entity.HasOne(x => x.assigned_consultants)
+    .WithMany(x => x.assigned_order_requests)
+    .HasForeignKey(x => x.assigned_consultant)
+    .OnDelete(DeleteBehavior.Restrict);
         });
-
 
         modelBuilder.Entity<product_type>(entity =>
         {

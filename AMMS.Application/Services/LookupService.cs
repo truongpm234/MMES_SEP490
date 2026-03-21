@@ -66,7 +66,8 @@ namespace AMMS.Application.Services
             phone = phone.Trim();
 
             var orders = await _requestRepo.GetOrdersByPhonePagedAsync(phone, page, pageSize, ct);
-            var requests = await _requestRepo.GetRequestsByPhonePagedAsync(phone, page, pageSize, ct);
+
+            var requests = await _requestRepo.GetRequestsByPhonePagedAsync(phone, page, pageSize, null, ct);
 
             return new PhoneHistoryWithOtpResult
             {

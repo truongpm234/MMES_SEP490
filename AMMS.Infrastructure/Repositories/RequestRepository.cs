@@ -24,9 +24,13 @@ namespace AMMS.Infrastructure.Repositories
                 .FirstOrDefaultAsync(x => x.order_request_id == id);
         }
 
-        public async Task<RequestWithCostDto?> GetByIdWithCostAsync(int id)
+        public async Task<RequestWithCostDto?> GetByIdWithCostAsync(int id, int? consultantUserId = null)
         {
-            var query = from r in _db.order_requests.AsNoTracking()
+            var requestQuery = ApplyConsultantScope(
+                _db.order_requests.AsNoTracking(),
+                consultantUserId);
+
+            var query = from r in requestQuery
                         where r.order_request_id == id
                         join ce in _db.cost_estimates.AsNoTracking()
                         on r.order_request_id equals ce.order_request_id into ceJoin
@@ -114,20 +118,21 @@ namespace AMMS.Infrastructure.Repositories
             return _db.order_requests.AsNoTracking().CountAsync();
         }
 
-        public Task<List<RequestPagedDto>> GetPagedAsync(int skip, int takePlusOne)
+        public Task<List<RequestPagedDto>> GetPagedAsync(int skip, int takePlusOne, int? consultantUserId = null)
         {
-            return (
-                from r in _db.order_requests.AsNoTracking()
+            var requestQuery = ApplyConsultantScope(
+                _db.order_requests.AsNoTracking(),
+                consultantUserId);
 
+            return (
+                from r in requestQuery
                 join ce in _db.cost_estimates.AsNoTracking()
                     on r.order_request_id equals ce.order_request_id into ceJoin
                 from ce in ceJoin
                     .OrderByDescending(x => x.estimate_id)
                     .Take(1)
                     .DefaultIfEmpty()
-
                 orderby r.order_request_date descending
-
                 select new RequestPagedDto
                 {
                     order_request_id = r.order_request_id,
@@ -182,14 +187,14 @@ namespace AMMS.Infrastructure.Repositories
         }
 
         public async Task<PagedResultLite<RequestSortedDto>> GetSortedByQuantityPagedAsync(
-    bool ascending, int page, int pageSize, CancellationToken ct = default)
+    bool ascending, int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default)
         {
             if (page <= 0) page = 1;
             if (pageSize <= 0) pageSize = 10;
 
             var skip = (page - 1) * pageSize;
 
-            var query = _db.order_requests.AsNoTracking();
+            var query = ApplyConsultantScope(_db.order_requests.AsNoTracking(), consultantUserId);
 
             query = ascending
                 ? query.OrderBy(x => x.quantity ?? 0)
@@ -224,14 +229,15 @@ namespace AMMS.Infrastructure.Repositories
         }
 
         public async Task<PagedResultLite<RequestSortedDto>> GetSortedByDatePagedAsync(
-    bool ascending, int page, int pageSize, CancellationToken ct = default)
+    bool ascending, int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default)
         {
             if (page <= 0) page = 1;
             if (pageSize <= 0) pageSize = 10;
 
             var skip = (page - 1) * pageSize;
 
-            var query = _db.order_requests.AsNoTracking();
+            var query = ApplyConsultantScope(_db.order_requests.AsNoTracking(), consultantUserId);
+            
             query = ascending
                 ? query.OrderBy(x => x.order_request_date == null)
                        .ThenBy(x => x.order_request_date)
@@ -267,14 +273,15 @@ namespace AMMS.Infrastructure.Repositories
         }
 
         public async Task<PagedResultLite<RequestSortedDto>> GetSortedByDeliveryDatePagedAsync(
-    bool nearestFirst, int page, int pageSize, CancellationToken ct = default)
+    bool nearestFirst, int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default)
         {
             if (page <= 0) page = 1;
             if (pageSize <= 0) pageSize = 10;
 
             var skip = (page - 1) * pageSize;
 
-            var query = _db.order_requests.AsNoTracking();
+            var query = ApplyConsultantScope(_db.order_requests.AsNoTracking(), consultantUserId);
+            
             query = nearestFirst
                 ? query.OrderBy(x => x.delivery_date == null).ThenBy(x => x.delivery_date)
                 : query.OrderBy(x => x.delivery_date == null).ThenByDescending(x => x.delivery_date);
@@ -342,15 +349,17 @@ namespace AMMS.Infrastructure.Repositories
         }
 
         public async Task<PagedResultLite<RequestStockCoverageDto>> GetSortedByStockCoveragePagedAsync(
-    int page, int pageSize, CancellationToken ct = default)
+    int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default)
         {
             if (page <= 0) page = 1;
             if (pageSize <= 0) pageSize = 10;
 
             var skip = (page - 1) * pageSize;
 
+            var scopedRequests = ApplyConsultantScope(_db.order_requests.AsNoTracking(), consultantUserId);
+
             var baseQuery =
-                from r in _db.order_requests.AsNoTracking()
+                from r in scopedRequests
                 join m in _db.materials.AsNoTracking()
                     on r.product_name equals m.name into mj
                 from m in mj.DefaultIfEmpty()
@@ -399,7 +408,7 @@ namespace AMMS.Infrastructure.Repositories
             };
         }
         public async Task<PagedResultLite<RequestSortedDto>> GetByOrderRequestDatePagedAsync(
-    DateOnly date, int page, int pageSize, CancellationToken ct = default)
+    DateOnly date, int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default)
         {
             if (page <= 0) page = 1;
             if (pageSize <= 0) pageSize = 10;
@@ -407,13 +416,12 @@ namespace AMMS.Infrastructure.Repositories
             var skip = (page - 1) * pageSize;
 
             var start = date.ToDateTime(TimeOnly.MinValue);     
-            var end = start.AddDays(1);                         
+            var end = start.AddDays(1);
 
-            var query = _db.order_requests
-                .AsNoTracking()
-                .Where(x => x.order_request_date != null)
-                .Where(x => x.order_request_date >= start && x.order_request_date < end)
-                .OrderByDescending(x => x.order_request_date);
+            var query = ApplyConsultantScope(_db.order_requests.AsNoTracking(), consultantUserId)
+    .Where(x => x.order_request_date != null)
+    .Where(x => x.order_request_date >= start && x.order_request_date < end)
+    .OrderByDescending(x => x.order_request_date);
 
             var list = await query
                 .Skip(skip)
@@ -443,7 +451,7 @@ namespace AMMS.Infrastructure.Repositories
             };
         }
         public async Task<PagedResultLite<RequestSortedDto>> SearchPagedAsync(
-     string keyword, int page, int pageSize, CancellationToken ct = default)
+    string keyword, int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default)
         {
             if (page <= 0) page = 1;
             if (pageSize <= 0) pageSize = 10;
@@ -463,29 +471,28 @@ namespace AMMS.Infrastructure.Repositories
             var skip = (page - 1) * pageSize;
             var pattern = $"%{keyword}%";
 
-            var query = _db.order_requests
-                .AsNoTracking()
-                .Where(o =>
-                    (o.product_name != null && EF.Functions.ILike(o.product_name, pattern)) ||
-                    (o.product_type != null && EF.Functions.ILike(o.product_type, pattern)) ||
-                    (o.customer_email != null && EF.Functions.ILike(o.customer_email, pattern)) ||
-                    (o.customer_name != null && EF.Functions.ILike(o.customer_name, pattern)) ||
-                    (o.customer_phone != null && EF.Functions.ILike(o.customer_phone, pattern)) ||
-                    (o.process_status != null && EF.Functions.ILike(o.process_status, pattern))
-                )
-                .Select(o => new
-                {
-                    Entity = o,
-                    Rank =
-                        o.product_name != null && EF.Functions.ILike(o.product_name, pattern) ? 1 :
-                        o.product_type != null && EF.Functions.ILike(o.product_type, pattern) ? 2 :
-                        o.customer_email != null && EF.Functions.ILike(o.customer_email, pattern) ? 3 :
-                        o.customer_name != null && EF.Functions.ILike(o.customer_name, pattern) ? 4 :
-                        o.customer_phone != null && EF.Functions.ILike(o.customer_phone, pattern) ? 5 :
-                        6
-                })
-                .OrderBy(x => x.Rank)
-                .ThenByDescending(x => x.Entity.order_request_date);
+            var query = ApplyConsultantScope(_db.order_requests.AsNoTracking(), consultantUserId)
+    .Where(o =>
+        (o.product_name != null && EF.Functions.ILike(o.product_name, pattern)) ||
+        (o.product_type != null && EF.Functions.ILike(o.product_type, pattern)) ||
+        (o.customer_email != null && EF.Functions.ILike(o.customer_email, pattern)) ||
+        (o.customer_name != null && EF.Functions.ILike(o.customer_name, pattern)) ||
+        (o.customer_phone != null && EF.Functions.ILike(o.customer_phone, pattern)) ||
+        (o.process_status != null && EF.Functions.ILike(o.process_status, pattern))
+    )
+    .Select(o => new
+    {
+        Entity = o,
+        Rank =
+            o.product_name != null && EF.Functions.ILike(o.product_name, pattern) ? 1 :
+            o.product_type != null && EF.Functions.ILike(o.product_type, pattern) ? 2 :
+            o.customer_email != null && EF.Functions.ILike(o.customer_email, pattern) ? 3 :
+            o.customer_name != null && EF.Functions.ILike(o.customer_name, pattern) ? 4 :
+            o.customer_phone != null && EF.Functions.ILike(o.customer_phone, pattern) ? 5 :
+            6
+    })
+    .OrderBy(x => x.Rank)
+    .ThenByDescending(x => x.Entity.order_request_date);
 
             var list = await query
                 .Skip(skip)
@@ -574,17 +581,18 @@ namespace AMMS.Infrastructure.Repositories
             };
         }
 
-        public Task<string?> GetDesignFilePathAsync(int orderRequestId, CancellationToken ct = default)
+        public Task<string?> GetDesignFilePathAsync(int orderRequestId, int? consultantUserId = null, CancellationToken ct = default)
         {
-            return _db.order_requests
-                .AsNoTracking()
+            return ApplyConsultantScope(
+                    _db.order_requests.AsNoTracking(),
+                    consultantUserId)
                 .Where(x => x.order_request_id == orderRequestId)
                 .Select(x => x.design_file_path)
                 .FirstOrDefaultAsync(ct);
         }
 
         public async Task<PagedResultLite<RequestSortedDto>> GetRequestsByPhonePagedAsync(
-    string phone, int page, int pageSize, CancellationToken ct = default)
+    string phone, int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default)
         {
             if (page <= 0) page = 1;
             if (pageSize <= 0) pageSize = 10;
@@ -592,11 +600,10 @@ namespace AMMS.Infrastructure.Repositories
             var skip = (page - 1) * pageSize;
             phone = phone.Trim();
 
-            var query = _db.order_requests
-                .AsNoTracking()
-                .Where(r => r.customer_phone == phone)
-                .OrderByDescending(r => r.order_request_date)   
-                .ThenByDescending(r => r.order_request_id);
+            var query = ApplyConsultantScope(_db.order_requests.AsNoTracking(), consultantUserId)
+    .Where(r => r.customer_phone == phone)
+    .OrderByDescending(r => r.order_request_date)
+    .ThenByDescending(r => r.order_request_id);
 
             var list = await query
                 .Skip(skip)
@@ -626,10 +633,12 @@ namespace AMMS.Infrastructure.Repositories
             };
         }
 
-        public async Task<RequestDetailDto?> GetInformationRequestById(int requestId, CancellationToken ct = default)
+        public async Task<RequestDetailDto?> GetInformationRequestById(
+    int requestId, int? consultantUserId = null, CancellationToken ct = default)
         {
-            var request = await _db.order_requests
-                .AsNoTracking()
+            var request = await ApplyConsultantScope(
+                    _db.order_requests.AsNoTracking(),
+                    consultantUserId)
                 .FirstOrDefaultAsync(x => x.order_request_id == requestId, ct);
 
             if (request == null)
@@ -750,10 +759,12 @@ namespace AMMS.Infrastructure.Repositories
             };
         }
 
-        public async Task<RequestWithTwoEstimatesDto?> GetActiveEstimatesInProcessAsync(int requestId, CancellationToken ct = default)
+        public async Task<RequestWithTwoEstimatesDto?> GetActiveEstimatesInProcessAsync(
+    int requestId, int? consultantUserId = null, CancellationToken ct = default)
         {
-            var req = await _db.order_requests
-                .AsNoTracking()
+            var req = await ApplyConsultantScope(
+                    _db.order_requests.AsNoTracking(),
+                    consultantUserId)
                 .Where(r => r.order_request_id == requestId)
                 .Select(r => new RequestWithTwoEstimatesDto
                 {
@@ -809,7 +820,7 @@ namespace AMMS.Infrastructure.Repositories
                     discount_amount = e.discount_amount,
                     final_total_cost = e.final_total_cost,
                     deposit_amount = e.deposit_amount,
-                    created_at = e.created_at,                   
+                    created_at = e.created_at,
                     estimated_finish_date = e.estimated_finish_date,
                     desired_delivery_date = e.desired_delivery_date,
                     sheets_required = e.sheets_required,
@@ -842,11 +853,17 @@ namespace AMMS.Infrastructure.Repositories
                     ct);
         }
 
-        public async Task<List<cost_estimate>> GetActiveEstimatesWithProcessesByRequestIdAsync(int requestId, CancellationToken ct = default)
+        public async Task<List<cost_estimate>> GetActiveEstimatesWithProcessesByRequestIdAsync(int requestId, int? consultantUserId = null, CancellationToken ct = default)
         {
+            var allowedRequestIds = ApplyConsultantScope(
+                    _db.order_requests.AsNoTracking(),
+                    consultantUserId)
+                .Where(x => x.order_request_id == requestId)
+                .Select(x => x.order_request_id);
+
             return await _db.cost_estimates
                 .Include(x => x.process_costs)
-                .Where(x => x.order_request_id == requestId && x.is_active)
+                .Where(x => allowedRequestIds.Contains(x.order_request_id) && x.is_active)
                 .OrderByDescending(x => x.estimate_id)
                 .ToListAsync(ct);
         }
@@ -897,6 +914,55 @@ namespace AMMS.Infrastructure.Repositories
                     .SetProperty(x => x.process_status, "Waiting"), ct);
 
             return affected == 1;
+        }
+
+        private static readonly string[] ClosedStatuses = new[]
+{
+    "Cancel", "Declined", "Rejected"
+};
+
+        private IQueryable<order_request> ApplyConsultantScope(
+            IQueryable<order_request> query,
+            int? consultantUserId)
+        {
+            if (!consultantUserId.HasValue)
+                return query;
+
+            return query.Where(x => x.assigned_consultant == consultantUserId.Value);
+        }
+
+        public async Task<int?> GetLeastLoadedConsultantUserIdAsync(CancellationToken ct = default)
+        {
+            var query =
+                from u in _db.users.AsNoTracking()
+                where u.role_id == 2 && (u.is_active ?? true)
+                join req in _db.order_requests.AsNoTracking()
+                        .Where(x =>
+                            x.assigned_consultant != null &&
+                            x.order_id == null &&
+                            !ClosedStatuses.Contains(x.process_status ?? ""))
+                    on u.user_id equals req.assigned_consultant into reqGroup
+                select new
+                {
+                    u.user_id,
+                    workload = reqGroup.Count()
+                };
+
+            return await query
+                .OrderBy(x => x.workload)
+                .ThenBy(x => x.user_id)
+                .Select(x => (int?)x.user_id)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        public async Task<bool> CanConsultantAccessRequestAsync(int requestId, int consultantUserId, CancellationToken ct = default)
+        {
+            return await _db.order_requests
+                .AsNoTracking()
+                .AnyAsync(x =>
+                    x.order_request_id == requestId &&
+                    x.assigned_consultant == consultantUserId,
+                    ct);
         }
     }
 }

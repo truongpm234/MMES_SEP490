@@ -6,16 +6,10 @@ namespace AMMS.Application.Interfaces
     public interface IUserService
     {
         Task<UserLoginResponseDto?> Login(UserLoginRequestDto request);
-
         Task<UserRegisterResponseDto> Register(UserRegisterRequestDto request, string otp);
-
         Task<user?> GetUserForGoogleAuth(string email, string name);
-
         Task<user?> AdminCreateUpdateNewUser(UserUpdateCreateDto new_user, int? user_id);
-
         Task<List<user>> GetAllUser();
-
         Task ResetPasswordAsync(ResetPasswordRequest request);
-
     }
 }

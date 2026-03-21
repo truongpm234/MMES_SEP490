@@ -32,4 +32,7 @@ public partial class user
     public virtual role? role { get; set; }
 
     public virtual ICollection<stock_move> stock_moves { get; set; } = new List<stock_move>();
+
+    public virtual ICollection<order_request> assigned_order_requests { get; set; } = new List<order_request>();
+
 }

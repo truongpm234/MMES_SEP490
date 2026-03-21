@@ -284,6 +284,8 @@ builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddSingleton<IRealtimePublisher, RealtimePublisher>();
 builder.Services.AddSingleton<IEmailBackgroundQueue, EmailBackgroundQueue>();
 builder.Services.AddHostedService<EmailDispatcherHostedService>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<IAccessService, AccessService>();
 
 // Logging
 builder.Logging.ClearProviders();
@@ -328,6 +330,26 @@ if (hangfireRunServer)
         }
     });
 }
+
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next();
+    }
+    catch (UnauthorizedAccessException ex)
+    {
+        if (!context.Response.HasStarted)
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsJsonAsync(new
+            {
+                message = ex.Message
+            });
+        }
+    }
+});
 
 app.UseSwagger();
 app.UseSwaggerUI(c =>

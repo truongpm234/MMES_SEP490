@@ -23,6 +23,7 @@ namespace AMMS.Application.Services
             var claims = new[]
             {
             new Claim("user_id", userId.ToString()),
+            new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
             new Claim("roleid", roleId.ToString()),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
@@ -49,14 +50,18 @@ namespace AMMS.Application.Services
         public async Task<string> GenerateTokenForGoogle(string email, string name, string googleId)
         {
             var user = await _userService.GetUserForGoogleAuth(email, name);
+            if (user == null)
+                throw new InvalidOperationException("Google user not found or cannot be created.");
             var claims = new[]
             {
+                 new Claim("user_id", user.user_id.ToString()),
+                 new Claim(ClaimTypes.NameIdentifier, user.user_id.ToString()),
                  new Claim(ClaimTypes.Email, email),
                  new Claim(ClaimTypes.Name, name),
                  new Claim("roleid", user.role_id.ToString()),
-                 new Claim("GoogleId", googleId)
+                 new Claim("GoogleId", googleId),
+                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
             };
-
 
             var key = new SymmetricSecurityKey(
                 Encoding.UTF8.GetBytes(_config["Jwt:Key"])

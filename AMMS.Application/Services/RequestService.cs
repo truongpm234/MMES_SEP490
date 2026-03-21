@@ -19,7 +19,7 @@ namespace AMMS.Application.Services
         private readonly IMaterialRepository _materialRepo;
         private readonly IBomRepository _bomRepo;
         private readonly IRealtimePublisher _rt;
-
+        private readonly IAccessService _currentUser;
         public RequestService(
             IRequestRepository requestRepo,
             IOrderRepository orderRepo,
@@ -27,7 +27,8 @@ namespace AMMS.Application.Services
             IMaterialRepository materialRepo,
             IBomRepository bomRepo,
             IRealtimePublisher rt,
-            AppDbContext db)
+            AppDbContext db,
+            IAccessService currentUser)
         {
             _requestRepo = requestRepo;
             _orderRepo = orderRepo;
@@ -36,6 +37,7 @@ namespace AMMS.Application.Services
             _bomRepo = bomRepo;
             _db = db;
             _rt = rt;
+            _currentUser = currentUser;
         }
 
         private DateTime? ToDeliveryDate(DateTime? dateTime)
@@ -52,6 +54,12 @@ namespace AMMS.Application.Services
 
         public async Task<CreateRequestResponse> CreateAsync(CreateResquest req)
         {
+            var now = AppTime.NowVnUnspecified();
+
+            var assignedConsultantId = _currentUser.IsConsultant && _currentUser.UserId.HasValue
+                ? _currentUser.UserId.Value
+                : await _requestRepo.GetLeastLoadedConsultantUserIdAsync();
+
             var entity = new order_request
             {
                 customer_name = req.customer_name,
@@ -62,7 +70,7 @@ namespace AMMS.Application.Services
                 quantity = req.quantity,
                 description = req.description,
                 design_file_path = req.design_file_path,
-                order_request_date = AppTime.NowVnUnspecified(),
+                order_request_date = now,
                 detail_address = req.detail_address,
                 process_status = "Pending",
                 is_send_design = req.is_send_design,
@@ -70,40 +78,69 @@ namespace AMMS.Application.Services
                 product_length_mm = req.product_length_mm,
                 product_width_mm = req.product_width_mm,
                 preliminary_estimated_price = req.preliminary_estimated_price ?? null,
+
+                assigned_consultant = assignedConsultantId,
+                assigned_at = assignedConsultantId.HasValue ? now : null
             };
 
             await _requestRepo.AddAsync(entity);
             await _requestRepo.SaveChangesAsync();
 
-            await _rt.PublishRequestChangedAsync(new(request_id: entity.order_request_id, old_status: null, new_status: entity.process_status, action: "created", changed_at: AppTime.NowVnUnspecified(), changed_by: null));
-
-            return new CreateRequestResponse();
-        }
-
-        public async Task<CreateRequestResponse> CreateRequestByConsultantAsync(CreateResquestConsultant req)
-        {
-            var entity = new order_request
-            {
-                customer_name = req.customer_name,
-                customer_phone = req.customer_phone,
-                customer_email = req.customer_email,
-                detail_address = req.detail_address,
-                order_request_date = AppTime.NowVnUnspecified(),
-                process_status = "Pending"
-            };
-
-            await _requestRepo.AddAsync(entity);
-            await _requestRepo.SaveChangesAsync();
-
-            await _rt.PublishRequestChangedAsync(new(request_id: entity.order_request_id, old_status: null, new_status: entity.process_status, action: "created", changed_at: AppTime.NowVnUnspecified(), changed_by: null));
+            await _rt.PublishRequestChangedAsync(new(
+                request_id: entity.order_request_id,
+                old_status: null,
+                new_status: entity.process_status,
+                action: "created",
+                changed_at: now,
+                changed_by: null));
 
             return new CreateRequestResponse
             {
                 order_request_id = entity.order_request_id
             };
         }
+
+        public async Task<CreateRequestResponse> CreateRequestByConsultantAsync(CreateResquestConsultant req)
+        {
+            var now = AppTime.NowVnUnspecified();
+
+            var assignedConsultantId = _currentUser.IsConsultant && _currentUser.UserId.HasValue
+                ? _currentUser.UserId.Value
+                : await _requestRepo.GetLeastLoadedConsultantUserIdAsync();
+
+            var entity = new order_request
+            {
+                customer_name = req.customer_name,
+                customer_phone = req.customer_phone,
+                customer_email = req.customer_email,
+                detail_address = req.detail_address,
+                order_request_date = now,
+                process_status = "Pending",
+
+                assigned_consultant = assignedConsultantId,
+                assigned_at = assignedConsultantId.HasValue ? now : null
+            };
+
+            await _requestRepo.AddAsync(entity);
+            await _requestRepo.SaveChangesAsync();
+
+            await _rt.PublishRequestChangedAsync(new(
+                request_id: entity.order_request_id,
+                old_status: null,
+                new_status: entity.process_status,
+                action: "created",
+                changed_at: now,
+                changed_by: null));
+
+            return new CreateRequestResponse
+            {
+                order_request_id = entity.order_request_id
+            };
+        }
+
         public async Task<UpdateRequestResponse> UpdateAsync(int id, UpdateOrderRequest req)
         {
+            await _currentUser.EnsureCanAccessAssignedRequestAsync(id);
             var entity = await _requestRepo.GetByIdAsync(id);
             var ce = await _estimateRepo.GetByOrderRequestIdAsync(id);
             if (entity == null)
@@ -176,6 +213,7 @@ namespace AMMS.Application.Services
 
         public async Task CancelAsync(int id, string? reason, CancellationToken ct = default)
         {
+            await _currentUser.EnsureCanAccessAssignedRequestAsync(id, ct);
             var entity = await _requestRepo.GetByIdAsync(id);
             if (entity == null) return;
 
@@ -188,9 +226,10 @@ namespace AMMS.Application.Services
 
         public Task<order_request?> GetByIdAsync(int id) => _requestRepo.GetByIdAsync(id);
 
-        public Task<RequestWithCostDto?> GetByIdWithCostAsync(int id)
+        public async Task<RequestWithCostDto?> GetByIdWithCostAsync(int id)
         {
-            return _requestRepo.GetByIdWithCostAsync(id);
+            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync();
+            return await _requestRepo.GetByIdWithCostAsync(id, consultantUserId);
         }
 
         public async Task<PagedResultLite<RequestPagedDto>> GetPagedAsync(int page, int pageSize)
@@ -199,8 +238,9 @@ namespace AMMS.Application.Services
             if (pageSize <= 0) pageSize = 10;
 
             var skip = (page - 1) * pageSize;
+            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync();
 
-            var list = await _requestRepo.GetPagedAsync(skip, pageSize + 1);
+            var list = await _requestRepo.GetPagedAsync(skip, pageSize + 1, consultantUserId);
 
             var hasNext = list.Count > pageSize;
             var data = hasNext ? list.Take(pageSize).ToList() : list;
@@ -244,35 +284,56 @@ namespace AMMS.Application.Services
         }
         public async Task<RequestDetailDto?> GetInformationRequestById(int requestId, CancellationToken ct = default)
         {
-            return await _requestRepo.GetInformationRequestById(requestId, ct);
+            await _currentUser.EnsureCanAccessAssignedRequestAsync(requestId, ct);
+
+            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
+            return await _requestRepo.GetInformationRequestById(requestId, consultantUserId, ct);
         }
-        public Task<PagedResultLite<RequestSortedDto>> GetSortedByQuantityPagedAsync(
-            bool ascending, int page, int pageSize, CancellationToken ct = default)
-            => _requestRepo.GetSortedByQuantityPagedAsync(ascending, page, pageSize, ct);
+        public async Task<PagedResultLite<RequestSortedDto>> GetSortedByQuantityPagedAsync(
+    bool ascending, int page, int pageSize, CancellationToken ct = default)
+        {
+            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
+            return await _requestRepo.GetSortedByQuantityPagedAsync(ascending, page, pageSize, consultantUserId, ct);
+        }
 
-        public Task<PagedResultLite<RequestSortedDto>> GetSortedByDatePagedAsync(
-            bool ascending, int page, int pageSize, CancellationToken ct = default)
-            => _requestRepo.GetSortedByDatePagedAsync(ascending, page, pageSize, ct);
+        public async Task<PagedResultLite<RequestSortedDto>> GetSortedByDatePagedAsync(
+    bool ascending, int page, int pageSize, CancellationToken ct = default)
+        {
+            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
+            return await _requestRepo.GetSortedByDatePagedAsync(ascending, page, pageSize, consultantUserId, ct);
+        }
 
-        public Task<PagedResultLite<RequestSortedDto>> GetSortedByDeliveryDatePagedAsync(
-            bool nearestFirst, int page, int pageSize, CancellationToken ct = default)
-            => _requestRepo.GetSortedByDeliveryDatePagedAsync(nearestFirst, page, pageSize, ct);
+        public async Task<PagedResultLite<RequestSortedDto>> GetSortedByDeliveryDatePagedAsync(
+    bool nearestFirst, int page, int pageSize, CancellationToken ct = default)
+        {
+            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
+            return await _requestRepo.GetSortedByDeliveryDatePagedAsync(nearestFirst, page, pageSize, consultantUserId, ct);
+        }
 
         public Task<PagedResultLite<RequestEmailStatsDto>> GetEmailsByAcceptedCountPagedAsync(
             int page, int pageSize, CancellationToken ct = default)
             => _requestRepo.GetEmailsByAcceptedCountPagedAsync(page, pageSize, ct);
 
-        public Task<PagedResultLite<RequestStockCoverageDto>> GetSortedByStockCoveragePagedAsync(
-            int page, int pageSize, CancellationToken ct = default)
-            => _requestRepo.GetSortedByStockCoveragePagedAsync(page, pageSize, ct);
+        public async Task<PagedResultLite<RequestStockCoverageDto>> GetSortedByStockCoveragePagedAsync(
+    int page, int pageSize, CancellationToken ct = default)
+        {
+            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
+            return await _requestRepo.GetSortedByStockCoveragePagedAsync(page, pageSize, consultantUserId, ct);
+        }
 
-        public Task<PagedResultLite<RequestSortedDto>> GetByOrderRequestDatePagedAsync(
-            DateOnly date, int page, int pageSize, CancellationToken ct = default)
-            => _requestRepo.GetByOrderRequestDatePagedAsync(date, page, pageSize, ct);
+        public async Task<PagedResultLite<RequestSortedDto>> GetByOrderRequestDatePagedAsync(
+    DateOnly date, int page, int pageSize, CancellationToken ct = default)
+        {
+            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
+            return await _requestRepo.GetByOrderRequestDatePagedAsync(date, page, pageSize, consultantUserId, ct);
+        }
 
-        public Task<PagedResultLite<RequestSortedDto>> SearchPagedAsync(
-            string keyword, int page, int pageSize, CancellationToken ct = default)
-            => _requestRepo.SearchPagedAsync(keyword, page, pageSize, ct);
+        public async Task<PagedResultLite<RequestSortedDto>> SearchPagedAsync(
+    string keyword, int page, int pageSize, CancellationToken ct = default)
+        {
+            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
+            return await _requestRepo.SearchPagedAsync(keyword, page, pageSize, consultantUserId, ct);
+        }
 
         public async Task<int> CreateOrderRequestAsync(CreateOrderRequestDto dto, CancellationToken ct = default)
         {
@@ -282,6 +343,10 @@ namespace AMMS.Application.Services
                 throw new ArgumentException("product_name is required");
 
             var now = AppTime.NowVnUnspecified();
+
+            var assignedConsultantId = _currentUser.IsConsultant && _currentUser.UserId.HasValue
+                ? _currentUser.UserId.Value
+                : await _requestRepo.GetLeastLoadedConsultantUserIdAsync(ct);
 
             var entity = new order_request
             {
@@ -305,8 +370,11 @@ namespace AMMS.Application.Services
                 is_one_side_box = dto.is_one_side_box,
                 print_width_mm = dto.print_width_mm,
                 print_height_mm = dto.print_height_mm,
-                order_request_date = AppTime.NowVnUnspecified(),
-                process_status = "Pending"
+                order_request_date = now,
+                process_status = "Pending",
+
+                assigned_consultant = assignedConsultantId,
+                assigned_at = assignedConsultantId.HasValue ? now : null
             };
 
             await _requestRepo.AddAsync(entity);
@@ -317,7 +385,10 @@ namespace AMMS.Application.Services
 
         public async Task<OrderRequestDesignFileResponse?> GetDesignFileAsync(int orderRequestId, CancellationToken ct = default)
         {
-            var path = await _requestRepo.GetDesignFilePathAsync(orderRequestId, ct);
+            await _currentUser.EnsureCanAccessAssignedRequestAsync(orderRequestId, ct);
+
+            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
+            var path = await _requestRepo.GetDesignFilePathAsync(orderRequestId, consultantUserId, ct);
 
             if (path == null)
                 return null;
@@ -409,6 +480,7 @@ namespace AMMS.Application.Services
 
         public async Task SubmitEstimateForApprovalAsync(SubmitForApprovalRequestDto input)
         {
+            await _currentUser.EnsureCanAccessAssignedRequestAsync(input.request_id);
             if (input.request_id <= 0)
                 throw new ArgumentException("request_id is required");
 
@@ -473,11 +545,16 @@ namespace AMMS.Application.Services
         public async Task<RequestWithTwoEstimatesDto?> GetCompareQuotesAsync(int requestId, CancellationToken ct = default)
         {
             if (requestId <= 0) return null;
-            return await _requestRepo.GetActiveEstimatesInProcessAsync(requestId, ct);
+
+            await _currentUser.EnsureCanAccessAssignedRequestAsync(requestId, ct);
+            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
+
+            return await _requestRepo.GetActiveEstimatesInProcessAsync(requestId, consultantUserId, ct);
         }
 
         public async Task<CloneRequestResponseDto> CloneRequestAsync(int requestId, CancellationToken ct = default)
         {
+            await _currentUser.EnsureCanAccessAssignedRequestAsync(requestId, ct);
             if (requestId <= 0)
                 throw new ArgumentException("request_id is required");
 
@@ -485,7 +562,8 @@ namespace AMMS.Application.Services
             if (source == null)
                 throw new InvalidOperationException("Order request not found");
 
-            var activeEstimates = await _requestRepo.GetActiveEstimatesWithProcessesByRequestIdAsync(requestId, ct);
+            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
+            var activeEstimates = await _requestRepo.GetActiveEstimatesWithProcessesByRequestIdAsync(requestId, consultantUserId, ct);
 
             var now = AppTime.NowVnUnspecified();
 
@@ -658,6 +736,7 @@ namespace AMMS.Application.Services
 
         public async Task UpdateConsultantMessageToCustomerAsync(int requestId, string? message, CancellationToken ct = default)
         {
+            await _currentUser.EnsureCanAccessAssignedRequestAsync(requestId, ct);
             if (requestId <= 0)
                 throw new ArgumentException("request_id is required");
 
@@ -957,5 +1036,11 @@ namespace AMMS.Application.Services
         {
             return ConvertToOrderInternalAsync(requestId);
         }
+
+        public Task<int?> GetConsultantScopeUserIdAsync(CancellationToken ct = default)
+    => _currentUser.GetConsultantScopeUserIdAsync(ct);
+
+        public Task EnsureCanAccessAssignedRequestAsync(int requestId, CancellationToken ct = default)
+            => _currentUser.EnsureCanAccessAssignedRequestAsync(requestId, ct);
     }
 }

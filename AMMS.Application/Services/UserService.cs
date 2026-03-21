@@ -2,7 +2,9 @@
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.User;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -113,16 +115,6 @@ namespace AMMS.Application.Services
             using var sha = SHA256.Create();
             var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(input));
             return Convert.ToHexString(bytes);
-        }
-
-        private static bool IsValidPassword(string password)
-        {
-            if (password.Length < 8) return false;
-            if (!password.Any(char.IsUpper)) return false;
-            if (!password.Any(char.IsLower)) return false;
-            if (!password.Any(char.IsDigit)) return false;
-            if (!password.Any(c => !char.IsLetterOrDigit(c))) return false;
-            return true;
         }
     }
 }

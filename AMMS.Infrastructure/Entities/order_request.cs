@@ -74,6 +74,13 @@ public partial class order_request
     [Column(TypeName = "numeric(18,2)")]
     public decimal? preliminary_estimated_price { get; set; }
 
+    public int? assigned_consultant { get; set; }
+    public DateTime? assigned_at { get; set; }
+
+    [ForeignKey(nameof(assigned_consultant))]
+
+    public virtual user? assigned_consultants { get; set; }
+
     public virtual quote? quote { get; set; }
 
     public virtual order? order { get; set; }

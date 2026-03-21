@@ -13,15 +13,20 @@ namespace AMMS.Application.Services
         private readonly ICostEstimateRepository _estimateRepo;
         private readonly IQuoteRepository _quoteRepo;
         private readonly IUploadFileService _uploadFileService;
-        public EstimateService(ICostEstimateRepository costEstimateRepository, IQuoteRepository quoteRepo, IUploadFileService uploadFileService)
+        private readonly IAccessService _accessService;
+
+        public EstimateService(ICostEstimateRepository costEstimateRepository, IQuoteRepository quoteRepo, IUploadFileService uploadFileService, IAccessService accessService)
         {
             _estimateRepo = costEstimateRepository;
             _quoteRepo = quoteRepo;
             _uploadFileService = uploadFileService;
+            _accessService = accessService;
         }
 
         public async Task UpdateFinalCostAsync(int orderRequestId, decimal? finalCostInput)
         {
+            await _accessService.EnsureCanAccessAssignedRequestAsync(orderRequestId);
+
             var estimate = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId)
                 ?? throw new Exception("Estimate not found for this order_request_id");
 
@@ -58,6 +63,8 @@ namespace AMMS.Application.Services
 
         public async Task<int> SaveFeCostEstimateAsync(CostEstimateInsertRequest req, CancellationToken ct = default)
         {
+            await _accessService.EnsureCanAccessAssignedRequestAsync(req.order_request_id, ct);
+
             if (req.order_request_id <= 0)
                 throw new ArgumentException("order_request_id must be > 0");
 
@@ -230,11 +237,13 @@ namespace AMMS.Application.Services
 
         public async Task<List<RequestEstimateDto>> GetAllEstimatesFlatByRequestIdAsync(int requestId, CancellationToken ct = default)
         {
+            await _accessService.EnsureCanAccessAssignedRequestAsync(requestId, ct);
             return await _estimateRepo.GetAllEstimatesFlatByRequestIdAsync(requestId, ct);
         }
 
         public async Task<QuoteEmailComparePreviewResponse> BuildPreviewAsync(int requestId, CancellationToken ct = default)
         {
+            await _accessService.EnsureCanAccessAssignedRequestAsync(requestId, ct);
             return await _quoteRepo.BuildPreviewAsync(requestId, ct);
         }
 
