@@ -1,9 +1,13 @@
 ﻿using AMMS.Application.Interfaces;
 using AMMS.Application.Services;
+using AMMS.Infrastructure.DBContext;
+using AMMS.Infrastructure.Entities;
 using AMMS.Shared.DTOs.Google;
 using AMMS.Shared.DTOs.User;
+using ExcelDataReader;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace AMMS.API.Controllers
 {
@@ -16,13 +20,15 @@ namespace AMMS.API.Controllers
         private readonly JWTService _jwt;
         private readonly GoogleAuthService _googleAuthService;
         private readonly IEmailService _emailService;
+        private readonly AppDbContext _db;
 
-        public UserController(IUserService userService, JWTService jwt, GoogleAuthService googleAuthService, IEmailService emailService)
+        public UserController(IUserService userService, JWTService jwt, GoogleAuthService googleAuthService, IEmailService emailService, AppDbContext dbContext)
         {
             _userService = userService;
             _jwt = jwt;
             _googleAuthService = googleAuthService;
             _emailService = emailService;
+            _db = dbContext;
         }
 
         [HttpPost("/login")]
@@ -105,6 +111,174 @@ namespace AMMS.API.Controllers
         {
             await _emailService.SendMailResetPassword(email);
             return Ok();
+        }
+
+        [HttpPost("upload-users")]
+        public async Task<IActionResult> UploadUsers(IFormFile file)
+        {
+            if (file == null || file.Length == 0)
+                return BadRequest("File không hợp lệ");
+
+            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+
+            var users = new List<user>();
+            var errors = new List<object>();
+
+            var roleMap = new Dictionary<string, int>()
+            {
+                {"admin",1},
+                {"consultant",2},
+                {"manager",3},
+                {"warehouse_manager",4},
+                {"user",5},
+                {"production_manager",6},
+                {"staff_ralo",7},
+                {"staff_cat",8},
+                {"staff_in",9},
+                {"staff_phu",10},
+                {"staff_can",11},
+                {"staff_boi",12},
+                {"staff_be",13},
+                {"staff_dut",14},
+                {"staff_dan",15},
+            };
+
+            using var stream = file.OpenReadStream();
+
+            ExcelDataReader.IExcelDataReader reader;
+
+            try
+            {
+                // 🔥 detect loại file chuẩn
+                if (file.FileName.EndsWith(".xls"))
+                {
+                    reader = ExcelDataReader.ExcelReaderFactory.CreateBinaryReader(stream);
+                }
+                else if (file.FileName.EndsWith(".xlsx"))
+                {
+                    reader = ExcelDataReader.ExcelReaderFactory.CreateOpenXmlReader(stream);
+                }
+                else if (file.FileName.EndsWith(".csv"))
+                {
+                    reader = ExcelDataReader.ExcelReaderFactory.CreateCsvReader(stream);
+                }
+                else
+                {
+                    return BadRequest("Chỉ hỗ trợ file .xls, .xlsx, .csv");
+                }
+            }
+            catch
+            {
+                return BadRequest("File không đúng định dạng Excel hoặc bị lỗi");
+            }
+
+            var result = reader.AsDataSet(new ExcelDataReader.ExcelDataSetConfiguration()
+            {
+                ConfigureDataTable = (_) => new ExcelDataReader.ExcelDataTableConfiguration()
+                {
+                    UseHeaderRow = true
+                }
+            });
+
+            var table = result.Tables[0];
+
+            for (int i = 0; i < table.Rows.Count; i++)
+            {
+                var row = table.Rows[i];
+
+                try
+                {
+                    var username = row["username"]?.ToString()?.Trim();
+                    var password = row["password"]?.ToString()?.Trim();
+                    var fullName = row["full_name"]?.ToString()?.Trim();
+                    var roleRaw = row["role_id"]?.ToString()?.Trim()?.ToLower();
+                    var email = row["email"]?.ToString()?.Trim();
+                    var phone = row["phone_number"]?.ToString()?.Trim();
+                    var isActiveRaw = row["is_active"]?.ToString()?.Trim()?.ToLower();
+
+                    if (string.IsNullOrEmpty(username))
+                        throw new Exception("Username không được trống");
+
+                    if (string.IsNullOrEmpty(password))
+                        throw new Exception("Password không được trống");
+
+                    var isActive = isActiveRaw == "true" || isActiveRaw == "1";
+
+                    int roleId;
+
+                    // ✅ role dạng số
+                    if (int.TryParse(roleRaw, out int parsedRoleId))
+                    {
+                        if (parsedRoleId < 1 || parsedRoleId > 15)
+                            throw new Exception("Role ID không hợp lệ");
+
+                        roleId = parsedRoleId;
+                    }
+                    // ✅ role dạng string
+                    else
+                    {
+                        if (!roleMap.ContainsKey(roleRaw))
+                            throw new Exception($"Role '{roleRaw}' không hợp lệ");
+
+                        roleId = roleMap[roleRaw];
+                    }
+
+                    var passwordHash = BCrypt.Net.BCrypt.HashPassword(password);
+
+                    var existing = await _db.users
+                        .FirstOrDefaultAsync(x => x.username == username);
+
+                    if (existing != null)
+                    {
+                        existing.full_name = fullName;
+                        existing.role_id = roleId;
+                        existing.email = email;
+                        existing.phone_number = phone;
+                        existing.is_active = isActive;
+
+                        if (!string.IsNullOrEmpty(password))
+                            existing.password_hash = passwordHash;
+                    }
+                    else
+                    {
+                        users.Add(new user
+                        {
+                            username = username,
+                            password_hash = passwordHash,
+                            full_name = fullName,
+                            role_id = roleId,
+                            email = email,
+                            phone_number = phone,
+                            is_active = isActive,
+                            created_at = DateTime.Now
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errors.Add(new
+                    {
+                        row = i + 2,
+                        error = ex.Message
+                    });
+                }
+            }
+
+            if (errors.Any())
+            {
+                return BadRequest(new
+                {
+                    message = "Import có lỗi",
+                    errors
+                });
+            }
+
+            if (users.Any())
+                await _db.users.AddRangeAsync(users);
+
+            await _db.SaveChangesAsync();
+
+            return Ok("Upload thành công");
         }
     }
 }
