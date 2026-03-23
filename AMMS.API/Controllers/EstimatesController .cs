@@ -149,5 +149,101 @@ namespace AMMS.API.Controllers
                 });
             }
         }
+
+        [HttpPost("upload-couple-contract")]
+        [RequestSizeLimit(100_000_000)]
+        public async Task<IActionResult> UploadContractBatch(
+    [FromForm] UploadEstimateContractsBatchRequest req,
+    CancellationToken ct)
+        {
+            try
+            {
+                if (req.request_id <= 0)
+                    return BadRequest(new { message = "request_id must be > 0" });
+
+                if (req.files == null || req.files.Count == 0)
+                    return BadRequest(new { message = "At least 1 file is required" });
+
+                if (req.files.Count > 2)
+                    return BadRequest(new { message = "Only up to 2 files are allowed per upload" });
+
+                var allowedExtensions = new[] { ".pdf" };
+
+                foreach (var file in req.files)
+                {
+                    if (file == null || file.Length == 0)
+                        return BadRequest(new { message = "One of the uploaded files is empty" });
+
+                    var ext = Path.GetExtension(file.FileName)?.ToLowerInvariant();
+                    if (string.IsNullOrWhiteSpace(ext) || !allowedExtensions.Contains(ext))
+                    {
+                        return BadRequest(new
+                        {
+                            message = $"File '{file.FileName}' is invalid. Only .pdf files are allowed"
+                        });
+                    }
+                }
+
+                var estimateIds = await _service.GetActiveEstimateIdsForContractUploadAsync(req.request_id, ct);
+
+                if (req.files.Count > estimateIds.Count)
+                {
+                    return BadRequest(new
+                    {
+                        message = $"This request only has {estimateIds.Count} active estimate(s), but received {req.files.Count} file(s)"
+                    });
+                }
+
+                var results = new List<UploadEstimateContractBatchItemResponse>();
+
+                for (int i = 0; i < req.files.Count; i++)
+                {
+                    var file = req.files[i];
+                    var estimateId = estimateIds[i];
+
+                    await using var stream = file.OpenReadStream();
+
+                    var url = await _service.UploadContractFileAsync(
+                        req.request_id,
+                        estimateId,
+                        stream,
+                        file.FileName,
+                        file.ContentType ?? "application/octet-stream",
+                        ct);
+
+                    results.Add(new UploadEstimateContractBatchItemResponse
+                    {
+                        file_index = i,
+                        original_file_name = file.FileName,
+                        estimate_id = estimateId,
+                        contract_file_path = url
+                    });
+                }
+
+                return Ok(new
+                {
+                    message = "Upload contract files successfully",
+                    request_id = req.request_id,
+                    uploaded_count = results.Count,
+                    uploads = results
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Upload contract files failed",
+                    detail = ex.Message
+                });
+            }
+        }
     }
 }

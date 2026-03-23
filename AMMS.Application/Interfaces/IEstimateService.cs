@@ -21,5 +21,6 @@ namespace AMMS.Application.Interfaces
         Task<List<RequestEstimateDto>> GetAllEstimatesFlatByRequestIdAsync(int requestId, CancellationToken ct = default);
         Task<QuoteEmailComparePreviewResponse> BuildPreviewAsync(int requestId, CancellationToken ct = default);
         Task<string> UploadContractFileAsync(int requestId, int estimateId, Stream fileStream, string fileName, string contentType, CancellationToken ct = default);
+        Task<List<int>> GetActiveEstimateIdsForContractUploadAsync(int requestId, CancellationToken ct = default);
     }
 }

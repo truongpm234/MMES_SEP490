@@ -288,5 +288,22 @@ namespace AMMS.Application.Services
 
             return uploadedUrl;
         }
+
+        public async Task<List<int>> GetActiveEstimateIdsForContractUploadAsync(int requestId, CancellationToken ct = default)
+        {
+            if (requestId <= 0)
+                throw new ArgumentException("request_id must be > 0");
+
+            var exists = await _estimateRepo.OrderRequestExistsAsync(requestId);
+            if (!exists)
+                throw new InvalidOperationException("Order request not found");
+
+            var estimateIds = await _estimateRepo.GetTopActiveEstimateIdsByRequestIdAsync(requestId, 2, ct);
+
+            if (estimateIds.Count == 0)
+                throw new InvalidOperationException("No active estimate found for this request");
+
+            return estimateIds;
+        }
     }
 }

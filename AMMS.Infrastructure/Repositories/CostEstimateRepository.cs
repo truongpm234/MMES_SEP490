@@ -219,5 +219,18 @@ namespace AMMS.Infrastructure.Repositories
                 .AsNoTracking()
                 .AnyAsync(x => x.estimate_id == estimateId && x.order_request_id == requestId, ct);
         }
+
+        public async Task<List<int>> GetTopActiveEstimateIdsByRequestIdAsync(int requestId, int take = 2, CancellationToken ct = default)
+        {
+            if (take <= 0) take = 2;
+
+            return await _db.cost_estimates
+                .AsNoTracking()
+                .Where(x => x.order_request_id == requestId && x.is_active)
+                .OrderByDescending(x => x.estimate_id)
+                .Take(take)
+                .Select(x => x.estimate_id)
+                .ToListAsync(ct);
+        }
     }
 }
