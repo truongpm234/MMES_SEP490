@@ -141,11 +141,16 @@ namespace AMMS.Application.Services
                             .AsTracking()
                             .FirstOrDefaultAsync(o => o.order_id == prod.order_id.Value);
 
+                        var order_req = await _db.order_requests.AsTracking().FirstOrDefaultAsync(or => or.order_id == prod.order_id.Value);
+
                         if (order != null &&
-                            !string.Equals(order.status, "Finished", StringComparison.OrdinalIgnoreCase))
+                            !string.Equals(order.status, "Finished", StringComparison.OrdinalIgnoreCase) && order_req != null &&
+                            !string.Equals(order_req.process_status, "Finished", StringComparison.OrdinalIgnoreCase))
                         {
                             order.status = "Finished";
+                            order_req.process_status = "Finished";
                             await _db.SaveChangesAsync();
+                            await _hub.Clients.All.SendAsync("Noti-Consultant", order_req.order_request_id);
                         }
                     }
 
