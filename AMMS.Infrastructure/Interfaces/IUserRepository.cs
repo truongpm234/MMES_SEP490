@@ -18,5 +18,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task<user?> GetUserByEmail(string email);
 
         Task<bool> ResetPassword(string newPassword, string email);
+        Task<user?> GetByIdAsync(int userId, CancellationToken ct = default);
+        Task<AssignedConsultantSummaryDto?> GetAssignedConsultantSummaryAsync(int userId, CancellationToken ct = default);
     }
 }

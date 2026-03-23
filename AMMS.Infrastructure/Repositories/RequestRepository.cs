@@ -933,23 +933,27 @@ namespace AMMS.Infrastructure.Repositories
 
         public async Task<int?> GetLeastLoadedConsultantUserIdAsync(CancellationToken ct = default)
         {
+            const int ConsultantRoleId = 2;
+
             var query =
                 from u in _db.users.AsNoTracking()
-                where u.role_id == 2 && (u.is_active ?? true)
+                where u.role_id == ConsultantRoleId && (u.is_active ?? true)
                 join req in _db.order_requests.AsNoTracking()
                         .Where(x =>
                             x.assigned_consultant != null &&
                             x.order_id == null &&
-                            !ClosedStatuses.Contains(x.process_status ?? ""))
+                            !ClosedStatuses.Contains((x.process_status ?? "").Trim()))
                     on u.user_id equals req.assigned_consultant into reqGroup
                 select new
                 {
                     u.user_id,
-                    workload = reqGroup.Count()
+                    workload = reqGroup.Count(),
+                    last_assigned_at = reqGroup.Max(x => x.assigned_at)
                 };
 
             return await query
                 .OrderBy(x => x.workload)
+                .ThenBy(x => x.last_assigned_at ?? DateTime.MinValue)
                 .ThenBy(x => x.user_id)
                 .Select(x => (int?)x.user_id)
                 .FirstOrDefaultAsync(ct);

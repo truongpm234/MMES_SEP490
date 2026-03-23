@@ -15,7 +15,6 @@ namespace AMMS.Application.Services
     {
         private readonly IRequestRepository _requestRepo;
         private readonly ICostEstimateRepository _estimateRepo;
-        private readonly IOrderRepository _orderRepo;
         private readonly IConfiguration _config;
         private readonly IEmailService _emailService;
         private readonly IQuoteRepository _quoteRepo;
@@ -24,10 +23,11 @@ namespace AMMS.Application.Services
         private readonly IRealtimePublisher _rt;
         private readonly ILogger<DealService> _logger;
         private readonly IEmailBackgroundQueue _emailQueue;
+        private readonly IUserRepository _userRepo;
+
         public DealService(
     IRequestRepository requestRepo,
     ICostEstimateRepository estimateRepo,
-    IOrderRepository orderRepo,
     IConfiguration config,
     IEmailService emailService,
     IQuoteRepository quoteRepo,
@@ -35,11 +35,11 @@ namespace AMMS.Application.Services
     IPaymentsService payment,
     IRealtimePublisher rt,
     ILogger<DealService> logger,
-    IEmailBackgroundQueue emailQueue)
+    IEmailBackgroundQueue emailQueue,
+    IUserRepository userRepo)
         {
             _requestRepo = requestRepo;
             _estimateRepo = estimateRepo;
-            _orderRepo = orderRepo;
             _config = config;
             _emailService = emailService;
             _quoteRepo = quoteRepo;
@@ -48,6 +48,7 @@ namespace AMMS.Application.Services
             _rt = rt;
             _logger = logger;
             _emailQueue = emailQueue;
+            _userRepo = userRepo;
         }
 
         public async Task SendDealAndEmailAsync(int orderRequestId, int? estimateId = null)
@@ -106,7 +107,7 @@ namespace AMMS.Application.Services
             }
 
             var baseUrlFe = _config["Deal:BaseUrlFe"]!;
-            var consultantEmail = _config["Deal:ConsultantEmail"]?.Trim();
+            var consultantEmail = await ResolveConsultantEmailAsync(req);
             var quotePairs = new List<(cost_estimate est, quote q, string checkoutUrl)>();
 
             try
@@ -245,25 +246,30 @@ namespace AMMS.Application.Services
             await _requestRepo.SaveChangesAsync();
 
             cost_estimate? est = null;
-            try { est = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId); } catch { }
+            try 
+            { 
+                est = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId); 
+            } 
+            catch { }
 
             var safeReason = System.Net.WebUtility.HtmlEncode(reason ?? "");
-            //signalr reject
+
             RequestChangedEvent evt = new RequestChangedEvent(orderRequestId, "", req.process_status, "customer_rejected", DateTime.Now, "Customer");
             await _rt.PublishRequestChangedAsync(evt);
-            //
+
             await SendConsultantStatusEmailAsync(req, est, $"KHACH TU CHOI (LY DO: {safeReason})");
         }
 
-        
+
         public async Task SendConsultantStatusEmailAsync(
     order_request req,
     cost_estimate? est,
     string statusText,
     decimal? paidAmount = null,
-    DateTime? paidAt = null)
+    DateTime? paidAt = null,
+    CancellationToken ct = default)
         {
-            var consultantEmail = _config["Deal:ConsultantEmail"];
+            var consultantEmail = await ResolveConsultantEmailAsync(req, ct);
             if (string.IsNullOrWhiteSpace(consultantEmail))
                 return;
 
@@ -738,6 +744,18 @@ namespace AMMS.Application.Services
                     ? live!.order_code
                     : ((saved?.order_code ?? 0) > 0 ? saved!.order_code : dbPayment?.order_code ?? 0)
             };
+        }
+
+        private async Task<string?> ResolveConsultantEmailAsync(order_request req, CancellationToken ct = default)
+        {
+            if (req.assigned_consultant.HasValue)
+            {
+                var assignedUser = await _userRepo.GetByIdAsync(req.assigned_consultant.Value, ct);
+                if (!string.IsNullOrWhiteSpace(assignedUser?.email))
+                    return assignedUser.email.Trim();
+            }
+
+            return _config["Deal:ConsultantEmail"]?.Trim();
         }
     }
 }
