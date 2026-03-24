@@ -1,4 +1,5 @@
 ﻿using AMMS.Application.Interfaces;
+using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Estimates;
 using AMMS.Shared.DTOs.Planning;
 using Microsoft.AspNetCore.Mvc;
@@ -12,12 +13,16 @@ namespace AMMS.API.Controllers
         private readonly IEstimateService _service;
         private readonly IBaseConfigService _baseConfig;
         private readonly IOrderPlanningService _planning;
+        private readonly IAccessService _accessService;
+        private readonly ICloudinaryFileStorageService _cloudinaryStorage;
 
-        public EstimatesController(IEstimateService service, IBaseConfigService baseConfig, IOrderPlanningService planning)
+        public EstimatesController(IEstimateService service, IBaseConfigService baseConfig, IOrderPlanningService planning, IAccessService accessService, ICloudinaryFileStorageService cloudinaryFileStorageService)
         {
             _service = service;
             _baseConfig = baseConfig;
             _planning = planning;
+            _accessService = accessService;
+            _cloudinaryStorage = cloudinaryFileStorageService;
         }
 
         [HttpGet("estimate-finish/{orderRequestId:int}")]
@@ -86,146 +91,38 @@ namespace AMMS.API.Controllers
             return Ok(res);
         }
 
-        [HttpPost("upload-contract")]
+        [HttpPost("upload-consultant-contract")]
         [RequestSizeLimit(50_000_000)]
-        public async Task<IActionResult> UploadContract(
-            [FromForm] UploadEstimateContractRequest req,
-            CancellationToken ct)
-        {
-            try
-            {
-                if (req.request_id <= 0)
-                    return BadRequest(new { message = "request_id must be > 0" });
-
-                if (req.estimate_id <= 0)
-                    return BadRequest(new { message = "estimate_id must be > 0" });
-
-                if (req.file == null || req.file.Length == 0)
-                    return BadRequest(new { message = "file is required" });
-
-                var allowedExtensions = new[] { ".pdf", ".doc", ".docx" };
-                var ext = Path.GetExtension(req.file.FileName)?.ToLowerInvariant();
-
-                if (string.IsNullOrWhiteSpace(ext) || !allowedExtensions.Contains(ext))
-                {
-                    return BadRequest(new
-                    {
-                        message = "Only .pdf, .doc, .docx files are allowed"
-                    });
-                }
-
-                await using var stream = req.file.OpenReadStream();
-
-                var url = await _service.UploadContractFileAsync(
-                    req.request_id,
-                    req.estimate_id,
-                    stream,
-                    req.file.FileName,
-                    req.file.ContentType ?? "application/octet-stream",
-                    ct);
-
-                return Ok(new
-                {
-                    message = "Upload contract file successfully",
-                    request_id = req.request_id,
-                    estimate_id = req.estimate_id,
-                    contract_file_path = url
-                });
-            }
-            catch (ArgumentException ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
-            catch (InvalidOperationException ex)
-            {
-                return NotFound(new { message = ex.Message });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(StatusCodes.Status500InternalServerError, new
-                {
-                    message = "Upload contract file failed",
-                    detail = ex.Message
-                });
-            }
-        }
-
-        [HttpPost("upload-couple-contract")]
-        [RequestSizeLimit(100_000_000)]
-        public async Task<IActionResult> UploadContractBatch(
-    [FromForm] UploadEstimateContractsBatchRequest req,
+        public async Task<IActionResult> UploadConsultantContract(
+    [FromForm] UploadConsultantContractRequest req,
     CancellationToken ct)
         {
             try
             {
-                if (req.request_id <= 0)
-                    return BadRequest(new { message = "request_id must be > 0" });
+                if (req.request_id <= 0) return BadRequest(new { message = "request_id must be > 0" });
+                if (req.estimate_id <= 0) return BadRequest(new { message = "estimate_id must be > 0" });
+                if (req.file == null || req.file.Length == 0) return BadRequest(new { message = "file is required" });
 
-                if (req.files == null || req.files.Count == 0)
-                    return BadRequest(new { message = "At least 1 file is required" });
+                var ext = Path.GetExtension(req.file.FileName)?.ToLowerInvariant();
+                if (ext != ".docx")
+                    return BadRequest(new { message = "Only .docx is allowed" });
 
-                if (req.files.Count > 2)
-                    return BadRequest(new { message = "Only up to 2 files are allowed per upload" });
+                await using var stream = req.file.OpenReadStream();
 
-                var allowedExtensions = new[] { ".pdf" };
-
-                foreach (var file in req.files)
-                {
-                    if (file == null || file.Length == 0)
-                        return BadRequest(new { message = "One of the uploaded files is empty" });
-
-                    var ext = Path.GetExtension(file.FileName)?.ToLowerInvariant();
-                    if (string.IsNullOrWhiteSpace(ext) || !allowedExtensions.Contains(ext))
-                    {
-                        return BadRequest(new
-                        {
-                            message = $"File '{file.FileName}' is invalid. Only .pdf files are allowed"
-                        });
-                    }
-                }
-
-                var estimateIds = await _service.GetActiveEstimateIdsForContractUploadAsync(req.request_id, ct);
-
-                if (req.files.Count > estimateIds.Count)
-                {
-                    return BadRequest(new
-                    {
-                        message = $"This request only has {estimateIds.Count} active estimate(s), but received {req.files.Count} file(s)"
-                    });
-                }
-
-                var results = new List<UploadEstimateContractBatchItemResponse>();
-
-                for (int i = 0; i < req.files.Count; i++)
-                {
-                    var file = req.files[i];
-                    var estimateId = estimateIds[i];
-
-                    await using var stream = file.OpenReadStream();
-
-                    var url = await _service.UploadContractFileAsync(
-                        req.request_id,
-                        estimateId,
-                        stream,
-                        file.FileName,
-                        file.ContentType ?? "application/octet-stream",
-                        ct);
-
-                    results.Add(new UploadEstimateContractBatchItemResponse
-                    {
-                        file_index = i,
-                        original_file_name = file.FileName,
-                        estimate_id = estimateId,
-                        contract_file_path = url
-                    });
-                }
+                var url = await _service.UploadConsultantContractAsync(
+                    req.request_id,
+                    req.estimate_id,
+                    stream,
+                    req.file.FileName,
+                    req.file.ContentType ?? "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    ct);
 
                 return Ok(new
                 {
-                    message = "Upload contract files successfully",
+                    message = "Upload consultant contract successfully",
                     request_id = req.request_id,
-                    uploaded_count = results.Count,
-                    uploads = results
+                    estimate_id = req.estimate_id,
+                    consultant_contract_path = url
                 });
             }
             catch (ArgumentException ex)
@@ -236,13 +133,47 @@ namespace AMMS.API.Controllers
             {
                 return NotFound(new { message = ex.Message });
             }
-            catch (Exception ex)
+        }
+
+        [HttpPost("upload-customer-signed-contract")]
+        [RequestSizeLimit(50_000_000)]
+        public async Task<IActionResult> UploadCustomerSignedContract(
+    [FromForm] UploadCustomerSignedContractRequest req,
+    CancellationToken ct)
+        {
+            try
             {
-                return StatusCode(StatusCodes.Status500InternalServerError, new
+                if (req.request_id <= 0) return BadRequest(new { message = "request_id must be > 0" });
+                if (req.estimate_id <= 0) return BadRequest(new { message = "estimate_id must be > 0" });
+                if (req.file == null || req.file.Length == 0) return BadRequest(new { message = "file is required" });
+
+                var ext = Path.GetExtension(req.file.FileName)?.ToLowerInvariant();
+                if (ext != ".pdf")
+                    return BadRequest(new { message = "Only .pdf is allowed" });
+
+                await using var stream = req.file.OpenReadStream();
+
+                var result = await _service.UploadCustomerSignedContractAsync(
+                    req.request_id,
+                    req.estimate_id,
+                    stream,
+                    req.file.FileName,
+                    req.file.ContentType ?? "application/pdf",
+                    ct);
+
+                return Ok(new
                 {
-                    message = "Upload contract files failed",
-                    detail = ex.Message
+                    message = "Upload signed contract successfully",
+                    data = result
                 });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(new { message = ex.Message });
             }
         }
     }
