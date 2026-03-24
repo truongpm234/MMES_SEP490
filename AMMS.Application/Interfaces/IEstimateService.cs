@@ -20,7 +20,9 @@ namespace AMMS.Application.Interfaces
         Task<int> SaveFeCostEstimateAsync(CostEstimateInsertRequest req, CancellationToken ct = default);
         Task<List<RequestEstimateDto>> GetAllEstimatesFlatByRequestIdAsync(int requestId, CancellationToken ct = default);
         Task<QuoteEmailComparePreviewResponse> BuildPreviewAsync(int requestId, CancellationToken ct = default);
-        Task<string> UploadContractFileAsync(int requestId, int estimateId, Stream fileStream, string fileName, string contentType, CancellationToken ct = default);
-        Task<List<int>> GetActiveEstimateIdsForContractUploadAsync(int requestId, CancellationToken ct = default);
+        Task<string> UploadConsultantContractAsync(int requestId, int estimateId, Stream fileStream, string fileName, string contentType, CancellationToken ct = default);
+        Task<UploadCustomerSignedContractResponse> UploadCustomerSignedContractAsync(int requestId, int estimateId, Stream fileStream, string fileName, string contentType, CancellationToken ct = default);
+        Task<CompareContractResponse> CompareContractsAsync(int requestId, int estimateId, CancellationToken ct = default);
+        Task<cost_estimate?> GetTrackingByIdAsync(int estimateId, CancellationToken ct = default);
     }
 }

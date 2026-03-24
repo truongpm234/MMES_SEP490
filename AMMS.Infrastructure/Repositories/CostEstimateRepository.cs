@@ -163,9 +163,7 @@ namespace AMMS.Infrastructure.Repositories
                     total_area_m2 = ce.total_area_m2,
                     design_cost = ce.design_cost,
                     cost_note = ce.cost_note,
-                    deposit_amount = ce.deposit_amount,
-                    contract_file_path = ce.contract_file_path,
-                    contract_uploaded_at = ce.contract_uploaded_at
+                    deposit_amount = ce.deposit_amount
                 };
 
             return await q.ToListAsync(ct);

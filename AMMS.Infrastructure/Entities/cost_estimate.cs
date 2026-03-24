@@ -99,9 +99,9 @@ public partial class cost_estimate
     [Column("previous_estimate_id")]
     public int? previous_estimate_id { get; set; }
 
-    public string? contract_file_path { get; set; }
+    public string? consultant_contract_path { get; set; }
 
-    public DateTime? contract_uploaded_at { get; set; }
+    public string? customer_signed_contract_path { get; set; }
 
     public virtual cost_estimate? previous_estimate { get; set; }
 
