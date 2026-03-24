@@ -78,6 +78,8 @@ namespace AMMS.Infrastructure.Repositories
                             message_to_customer = r.message_to_customer,
                             production_processes = ce != null ? ce.production_processes : null,
                             preliminary_estimated_price = r.preliminary_estimated_price,
+                            consultant_contract_path = ce != null ? ce.consultant_contract_path : null,
+                            customer_signed_contract_path = ce != null ? ce.customer_signed_contract_path : null
                         };
 
             return await query.FirstOrDefaultAsync();
@@ -693,6 +695,7 @@ namespace AMMS.Infrastructure.Repositories
                 verified_at = request.verified_at,
                 quote_expires_at = request.quote_expires_at,
                 message_to_customer = SafeText(request.message_to_customer),
+                
                 cost_estimate = estimates.Select(ce =>
                 {
                     var discountAmount = ce.discount_amount < 0m ? 0m : ce.discount_amount;
@@ -742,6 +745,8 @@ namespace AMMS.Infrastructure.Repositories
                         discount_amount = discountAmount,
                         vat_percent = vatPercent,
                         vat_amount = vatAmount,
+                        consultant_contract_path = SafeText(ce.consultant_contract_path),
+                        customer_signed_contract_path = SafeText(ce.customer_signed_contract_path),
 
                         process_cost = ce.process_costs
                             .OrderBy(pc => pc.process_cost_id)

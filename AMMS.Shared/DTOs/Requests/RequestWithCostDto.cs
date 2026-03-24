@@ -45,5 +45,7 @@ namespace AMMS.Shared.DTOs.Requests
         public decimal? final_total_cost { get; set; }
         public decimal? deposit_amount { get; set; }
         public decimal? preliminary_estimated_price { get; set; }
+        public string? consultant_contract_path { get; set; }
+        public string? customer_signed_contract_path { get; set; }
     }
 }
