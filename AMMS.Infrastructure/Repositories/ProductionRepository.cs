@@ -795,6 +795,34 @@ namespace AMMS.Infrastructure.Repositories
             return true;
         }
 
+        public async Task<bool> SetCompletedByOrderIdAsync(int orderId, CancellationToken ct = default)
+        {
+            var prod = await _db.productions
+                .FirstOrDefaultAsync(p => p.order_id == orderId, ct);
+
+            if (prod == null)
+                return false;
+
+            var order = await _db.orders
+                .FirstOrDefaultAsync(o => o.order_id == orderId, ct);
+
+            if (order == null)
+                return false;
+
+            var request = await _db.order_requests
+                .FirstOrDefaultAsync(o => o.order_id == orderId, ct);
+
+            if (request == null)
+                return false;
+
+            prod.status = "Completed";
+            order.status = "Completed";
+            request.process_status = "Completed";
+
+            await _db.SaveChangesAsync(ct);
+            return true;
+        }
+
         public Task SaveChangesAsync(CancellationToken ct = default)
             => _db.SaveChangesAsync(ct);
 

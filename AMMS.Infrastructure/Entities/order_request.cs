@@ -75,7 +75,10 @@ public partial class order_request
     public decimal? preliminary_estimated_price { get; set; }
 
     public int? assigned_consultant { get; set; }
+
     public DateTime? assigned_at { get; set; }
+
+    public string? delivery_note { get; set; }
 
     [ForeignKey(nameof(assigned_consultant))]
 

@@ -69,6 +69,11 @@ namespace AMMS.Application.Services
             return await _repo.SetProductionDeliveryByOrderIdAsync(orderId, ct);
         }
 
+        public async Task<bool> SetCompletedAsync(int orderId, CancellationToken ct = default)
+        {
+            return await _repo.SetCompletedByOrderIdAsync(orderId, ct);
+        }
+
         public async Task<int?> StartProductionAndPromoteFirstTaskAsync(int orderId, CancellationToken ct = default)
         {
             var evt = new RequestChangedEvent(orderId, "Scheduled", "InProcessing", "Start", AppTime.NowVnUnspecified(), "production-manager");

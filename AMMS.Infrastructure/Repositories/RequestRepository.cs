@@ -964,5 +964,19 @@ namespace AMMS.Infrastructure.Repositories
                     x.assigned_consultant == consultantUserId,
                     ct);
         }
+
+        public async Task<bool> UpdateDeliveryNoteAsync(int orderRequestId, string note, CancellationToken ct = default)
+        {
+            var entity = await _db.order_requests
+                .FirstOrDefaultAsync(x => x.order_request_id == orderRequestId, ct);
+
+            if (entity == null)
+                return false;
+
+            entity.delivery_note = note;
+
+            await _db.SaveChangesAsync(ct);
+            return true;
+        }
     }
 }

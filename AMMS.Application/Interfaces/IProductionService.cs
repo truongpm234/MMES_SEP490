@@ -18,6 +18,7 @@ namespace AMMS.Application.Interfaces
         Task<ProductionWasteReportDto?> GetProductionWasteAsync(int prodId, CancellationToken ct = default);
         Task<bool> StartProductionByOrderIdAsync(int orderId, CancellationToken ct = default);
         Task<bool> SetProductionDeliveryAsync(int orderId, CancellationToken ct = default);
+        Task<bool> SetCompletedAsync(int orderId, CancellationToken ct = default);
         Task<int?> StartProductionAndPromoteFirstTaskAsync(int orderId, CancellationToken ct = default);
         Task<List<MachineScheduleBoardDto>> GetMachineScheduleBoardAsync(DateTime from, DateTime to, CancellationToken ct = default);
     }

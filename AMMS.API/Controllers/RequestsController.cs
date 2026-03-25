@@ -990,5 +990,16 @@ namespace AMMS.API.Controllers
 
             return (true, "");
         }
+
+        [HttpPut("{id:int}/delivery-note")]
+        public async Task<IActionResult> UpdateDeliveryNote( int id, [FromBody] UpdateDeliveryNoteRequest req, CancellationToken ct)
+        {
+            var ok = await _service.UpdateDeliveryNoteAsync(id, req.delivery_note, ct);
+
+            if (!ok)
+                return NotFound(new { message = "OrderRequest not found" });
+
+            return NoContent();
+        }
     }
 }

@@ -1042,5 +1042,13 @@ namespace AMMS.Application.Services
 
         public Task EnsureCanAccessAssignedRequestAsync(int requestId, CancellationToken ct = default)
             => _currentUser.EnsureCanAccessAssignedRequestAsync(requestId, ct);
+
+        public async Task<bool> UpdateDeliveryNoteAsync(int orderRequestId, string note, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(note))
+                note = "";
+
+            return await _requestRepo.UpdateDeliveryNoteAsync(orderRequestId, note.Trim(), ct);
+        }
     }
 }
