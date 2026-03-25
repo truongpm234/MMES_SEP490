@@ -680,7 +680,6 @@ namespace AMMS.API.Controllers
 
                     orderId = convert.OrderId.Value;
 
-                    // refresh request sau convert
                     req = await _service.GetRequestForUpdateAsync(orderRequestId, ct)
                         ?? throw new InvalidOperationException("Request disappeared after convert");
                 }
@@ -689,50 +688,24 @@ namespace AMMS.API.Controllers
                     orderId = req.order_id.Value;
                 }
 
-                await tx.CommitAsync(ct);
-
-                // scheduling để ngoài tx lớn cũng được, nhưng phải idempotent
-                var prod = await _db.productions.AsNoTracking()
-                    .Where(p => p.order_id == orderId && p.end_date == null)
-                    .OrderByDescending(p => p.prod_id)
-                    .FirstOrDefaultAsync(ct);
-
-                var hasTasks = prod != null &&
-                               await _db.tasks.AsNoTracking().AnyAsync(t => t.prod_id == prod.prod_id, ct);
-
-                if (prod == null || !hasTasks)
+                var ord = await _db.orders.FirstOrDefaultAsync(x => x.order_id == orderId, ct);
+                if (ord == null)
                 {
-                    var productTypeId = await _db.product_types
-                        .Where(x => x.code == req.product_type)
-                        .Select(x => x.product_type_id)
-                        .FirstOrDefaultAsync(ct);
-
-                    if (productTypeId <= 0)
-                        return (false, "product_type invalid (cannot map product_type_id)");
-
-                    var item = await _db.order_items.AsNoTracking()
-                        .Where(x => x.order_id == orderId)
-                        .OrderBy(x => x.item_id)
-                        .FirstOrDefaultAsync(ct);
-
-                    try
-                    {
-                        await _schedulingService.ScheduleOrderAsync(
-                            orderId: orderId,
-                            productTypeId: productTypeId,
-                            productionProcessCsv: item?.production_process,
-                            managerId: 3
-                        );
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex,
-                            "ScheduleOrderAsync failed. RequestId={RequestId}, OrderId={OrderId}",
-                            orderRequestId, orderId);
-
-                        return (false, "ScheduleOrder failed: " + ex.Message);
-                    }
+                    await tx.RollbackAsync(ct);
+                    return (false, "Order not found after convert");
                 }
+
+                // sau khi thanh toán chờ designer confirm
+                if (!ord.layout_confirmed)
+                {
+                    ord.layout_confirmed = false;
+                    ord.status = "LayoutPending";
+                }
+
+                ord.payment_status = "Paid";
+
+                await _db.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
 
                 try
                 {
@@ -743,7 +716,7 @@ namespace AMMS.API.Controllers
                 {
                 }
 
-                return (true, $"Processed successfully: order_id={orderId}");
+                return (true, $"Payment recorded successfully, waiting for designer layout confirmation: order_id={orderId}");
             });
         }
 
@@ -989,6 +962,136 @@ namespace AMMS.API.Controllers
                 return (false, $"Quote expired at {req.quote_expires_at:yyyy-MM-dd HH:mm:ss}");
 
             return (true, "");
+        }
+
+        [HttpPut("designer-confirm-layout")]
+        public async Task<IActionResult> DesignerConfirmLayout(
+    [FromBody] ConfirmLayoutRequestDto dto,
+    CancellationToken ct)
+        {
+            try
+            {
+                if (dto == null || dto.request_id <= 0)
+                    return BadRequest(new { message = "request_id is required" });
+
+                var strategy = _db.Database.CreateExecutionStrategy();
+                int orderId = 0;
+
+                await strategy.ExecuteAsync(async () =>
+                {
+                    await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
+                    var req = await _service.GetRequestForUpdateAsync(dto.request_id, ct);
+                    if (req == null)
+                        throw new InvalidOperationException("Order request not found");
+
+                    if (!req.order_id.HasValue || req.order_id.Value <= 0)
+                        throw new InvalidOperationException("Order has not been created yet");
+
+                    if (!string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("Only paid/accepted requests can be layout-confirmed");
+
+                    orderId = req.order_id.Value;
+
+                    var ord = await _db.orders.FirstOrDefaultAsync(x => x.order_id == orderId, ct);
+                    if (ord == null)
+                        throw new InvalidOperationException("Order not found");
+
+                    if (!ord.layout_confirmed)
+                    {
+                        ord.layout_confirmed = true;
+
+                        if (string.IsNullOrWhiteSpace(ord.status) ||
+                            string.Equals(ord.status, "LayoutPending", StringComparison.OrdinalIgnoreCase))
+                        {
+                            ord.status = "Scheduled";
+                        }
+
+                        await _db.SaveChangesAsync(ct);
+                    }
+
+                    await tx.CommitAsync(ct);
+                });
+
+                await EnsureProductionAndTasksCreatedAsync(orderId, ct);
+
+                return Ok(new
+                {
+                    ok = true,
+                    request_id = dto.request_id,
+                    order_id = orderId,
+                    message = "Designer confirmed layout. Production flow released successfully."
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new
+                {
+                    ok = false,
+                    message = ex.Message
+                });
+            }
+        }
+
+        private async Task EnsureProductionAndTasksCreatedAsync(int orderId, CancellationToken ct)
+        {
+            var req = await _db.order_requests
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.order_id == orderId, ct);
+
+            if (req == null)
+                throw new InvalidOperationException("Order request not found for this order");
+
+            var ord = await _db.orders
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.order_id == orderId, ct);
+
+            if (ord == null)
+                throw new InvalidOperationException("Order not found");
+
+            if (!ord.layout_confirmed)
+                throw new InvalidOperationException("Layout has not been confirmed yet");
+
+            var prod = await _db.productions
+                .AsNoTracking()
+                .Where(p => p.order_id == orderId && p.end_date == null)
+                .OrderByDescending(p => p.prod_id)
+                .FirstOrDefaultAsync(ct);
+
+            var hasTasks = prod != null &&
+                           await _db.tasks.AsNoTracking().AnyAsync(t => t.prod_id == prod.prod_id, ct);
+
+            if (prod != null && hasTasks)
+                return;
+
+            var productTypeId = await _db.product_types
+                .Where(x => x.code == req.product_type)
+                .Select(x => x.product_type_id)
+                .FirstOrDefaultAsync(ct);
+
+            if (productTypeId <= 0)
+                throw new InvalidOperationException("product_type invalid (cannot map product_type_id)");
+
+            var item = await _db.order_items
+                .AsNoTracking()
+                .Where(x => x.order_id == orderId)
+                .OrderBy(x => x.item_id)
+                .FirstOrDefaultAsync(ct);
+
+            await _schedulingService.ScheduleOrderAsync(
+                orderId: orderId,
+                productTypeId: productTypeId,
+                productionProcessCsv: item?.production_process,
+                managerId: 3
+            );
+
+            var trackedOrder = await _db.orders.FirstOrDefaultAsync(x => x.order_id == orderId, ct);
+            if (trackedOrder != null &&
+                string.Equals(trackedOrder.status, "LayoutPending", StringComparison.OrdinalIgnoreCase))
+            {
+                trackedOrder.status = "Scheduled";
+                await _db.SaveChangesAsync(ct);
+            }
         }
     }
 }

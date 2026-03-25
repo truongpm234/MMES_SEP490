@@ -147,7 +147,8 @@ public partial class AppDbContext : DbContext
                 .HasMaxLength(20)
                 .HasDefaultValueSql("'New'::character varying");
             entity.Property(e => e.total_amount).HasPrecision(15, 2);
-
+            entity.Property(e => e.status)
+        .HasMaxLength(30);
             entity.HasOne(d => d.quote).WithMany(p => p.orders)
                 .HasForeignKey(d => d.quote_id)
                 .HasConstraintName("orders_quote_id_fkey");
@@ -156,6 +157,11 @@ public partial class AppDbContext : DbContext
                 .HasForeignKey(o => o.production_id)
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("fk_orders_production");
+            entity.Property(e => e.layout_confirmed)
+        .HasDefaultValue(false);
+
+            entity.HasIndex(e => e.layout_confirmed)
+                .HasDatabaseName("ix_orders_layout_confirmed");
         });
 
         modelBuilder.Entity<order_item>(entity =>

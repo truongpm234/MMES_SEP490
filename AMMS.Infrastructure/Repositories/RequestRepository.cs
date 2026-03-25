@@ -695,7 +695,6 @@ namespace AMMS.Infrastructure.Repositories
                 verified_at = request.verified_at,
                 quote_expires_at = request.quote_expires_at,
                 message_to_customer = SafeText(request.message_to_customer),
-                
                 cost_estimate = estimates.Select(ce =>
                 {
                     var discountAmount = ce.discount_amount < 0m ? 0m : ce.discount_amount;
