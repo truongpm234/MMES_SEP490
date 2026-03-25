@@ -45,6 +45,17 @@ namespace AMMS.Application.Services
             if (!_tokenSvc.TryValidate(req.token, out var taskId, out var qtyGood, out var reason))
                 throw new ArgumentException(reason);
 
+            var policy = await _taskRepo.GetQtyPolicyAsync(taskId);
+            if (policy == null)
+                throw new InvalidOperationException("Không xác định được policy số lượng cho task.");
+
+            if (qtyGood < policy.min_allowed || qtyGood > policy.max_allowed)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(req.token),
+                    $"qty_good={qtyGood} vượt ngoài khoảng cho phép {policy.min_allowed}..{policy.max_allowed} {policy.qty_unit} của công đoạn {policy.process_code}.");
+            }
+
             var strategy = _db.Database.CreateExecutionStrategy();
 
             return await strategy.ExecuteAsync(async () =>
@@ -192,7 +203,8 @@ namespace AMMS.Application.Services
 
         public async Task<int> SuggestQtyGoodAsync(int taskId, CancellationToken ct = default)
         {
-            return await _taskRepo.SuggestQtyGoodAsync(taskId, ct);
+            var policy = await _taskRepo.GetQtyPolicyAsync(taskId, ct);
+            return policy?.suggested_qty ?? 1;
         }
     }
 }
