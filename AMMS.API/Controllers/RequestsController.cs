@@ -146,7 +146,7 @@ namespace AMMS.API.Controllers
                 if (string.IsNullOrWhiteSpace(dto.status))
                     return BadRequest(new { message = "status is required" });
 
-                var validStatuses = new[] { "Verified", "Declined"};
+                var validStatuses = new[] { "Verified", "Declined" };
                 if (!validStatuses.Contains(dto.status, StringComparer.OrdinalIgnoreCase))
                     return BadRequest(new
                     {
@@ -186,7 +186,7 @@ namespace AMMS.API.Controllers
             try
             {
                 await _dealService.SendDealAndEmailAsync(req.request_id);
-                return Ok(new { message = "Báo giá đã được hệ thống gửi.", request_id = req.request_id});
+                return Ok(new { message = "Báo giá đã được hệ thống gửi.", request_id = req.request_id });
             }
             catch (Exception ex)
             {
@@ -964,9 +964,8 @@ namespace AMMS.API.Controllers
             return (true, "");
         }
 
-<<<<<<< HEAD
         [HttpPut("{id:int}/delivery-note")]
-        public async Task<IActionResult> UpdateDeliveryNote( int id, [FromBody] UpdateDeliveryNoteRequest req, CancellationToken ct)
+        public async Task<IActionResult> UpdateDeliveryNote(int id, [FromBody] UpdateDeliveryNoteRequest req, CancellationToken ct)
         {
             var ok = await _service.UpdateDeliveryNoteAsync(id, req.delivery_note, ct);
 
@@ -974,7 +973,7 @@ namespace AMMS.API.Controllers
                 return NotFound(new { message = "OrderRequest not found" });
 
             return NoContent();
-=======
+        }
         [HttpPut("designer-confirm-layout")]
         public async Task<IActionResult> DesignerConfirmLayout(
     [FromBody] ConfirmLayoutRequestDto dto,
@@ -1103,7 +1102,6 @@ namespace AMMS.API.Controllers
                 trackedOrder.status = "Scheduled";
                 await _db.SaveChangesAsync(ct);
             }
->>>>>>> main
         }
     }
 }
