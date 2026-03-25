@@ -230,5 +230,21 @@ namespace AMMS.Infrastructure.Repositories
                 .Select(x => x.estimate_id)
                 .ToListAsync(ct);
         }
+
+        public async Task<CostSummaryByRequestDto?> GetCostSummaryByRequestIdAsync(int requestId, CancellationToken ct = default)
+        {
+            return await _db.cost_estimates
+                .AsNoTracking()
+                .Where(x => x.order_request_id == requestId)
+                .OrderByDescending(x => x.created_at)
+                .ThenByDescending(x => x.estimate_id)
+                .Select(x => new CostSummaryByRequestDto
+                {
+                    order_request_id = x.order_request_id,
+                    final_total_cost = x.final_total_cost,
+                    deposit_amount = x.deposit_amount
+                })
+                .FirstOrDefaultAsync(ct);
+        }
     }
 }

@@ -50,6 +50,16 @@ namespace AMMS.API.Controllers
             return Ok(result);
         }
 
+        [HttpGet("remaining/by-request/{requestId:int}")]
+        public async Task<IActionResult> GetRemainingByRequestId(int requestId, CancellationToken ct)
+        {
+            var result = await _service.GetRemainingByRequestIdAsync(requestId, ct);
+            if (result == null)
+                return NotFound(new { message = "Cost estimate not found for this requestId" });
+
+            return Ok(result);
+        }
+
         [HttpGet("base-config")]
         [ProducesResponseType(typeof(EstimateBaseConfigDto), StatusCodes.Status200OK)]
         public async Task<IActionResult> GetBaseConfig(CancellationToken ct)
