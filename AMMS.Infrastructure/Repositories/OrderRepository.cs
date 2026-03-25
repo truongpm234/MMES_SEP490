@@ -17,10 +17,8 @@ namespace AMMS.Infrastructure.Repositories
             _db = db;
         }
 
-        // ===== MAIN PAGED WITH FULFILL ===================================
         public async Task<List<OrderResponseDto>> GetPagedWithFulfillAsync(int skip, int take, CancellationToken ct = default)
         {
-            // ===== Helpers ===================================================
             static string ToUtcString(DateTime? dt)
             {
                 if (dt is null) return "";
@@ -342,7 +340,6 @@ namespace AMMS.Infrastructure.Repositories
             {
                 var codes = new List<string>();
 
-                // ✅ NEW: lấy theo estimate.production_processes
                 if (!string.IsNullOrWhiteSpace(est.production_processes))
                 {
                     codes = est.production_processes
@@ -354,7 +351,6 @@ namespace AMMS.Infrastructure.Repositories
                 }
                 else if (est.process_costs is { Count: > 0 })
                 {
-                    // fallback: nếu estimate chưa lưu production_processes
                     codes = est.process_costs
                         .Select(p => p.process_code)
                         .Where(c => !string.IsNullOrWhiteSpace(c))
@@ -450,7 +446,6 @@ namespace AMMS.Infrastructure.Repositories
 
             if (req != null && est != null && q != null)
             {
-                // giống QuoteEmail
                 var address = $"{req.detail_address}";
                 var delivery = req.delivery_date?.ToString("dd/MM/yyyy") ?? "N/A";
                 var request_date = req.order_request_date?.ToString("dd/MM/yyyy HH:mm") ?? "N/A";
@@ -507,7 +502,6 @@ namespace AMMS.Infrastructure.Repositories
                 };
             }
 
-            // ===== return =======================================================
             return new OrderDetailDto
             {
                 order_id = order.order_id,
@@ -517,7 +511,7 @@ namespace AMMS.Infrastructure.Repositories
                 order_date = AsUnspecified(order.order_date) ?? default,
                 delivery_date = AsUnspecified(order.delivery_date),
                 production_id = order.production_id,
-
+                layout_confirmed = order.layout_confirmed,
                 customer_name = customerName,
                 customer_email = customerEmail,
                 customer_phone = customerPhone,

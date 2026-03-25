@@ -403,6 +403,7 @@ namespace AMMS.Infrastructure.Repositories
             cost_estimate? estimate = null;
 
             int sheetsRequired = 0;
+            int sheetsWaste = 0;
             int sheetsTotal = 0;
             int nUp = 1;
 
@@ -434,6 +435,7 @@ namespace AMMS.Infrastructure.Repositories
                     if (estimate != null)
                     {
                         sheetsRequired = estimate.sheets_required;
+                        sheetsWaste = estimate.sheets_waste;
                         sheetsTotal = estimate.sheets_total;
                         nUp = estimate.n_up > 0 ? estimate.n_up : 1;
                     }
@@ -535,9 +537,11 @@ namespace AMMS.Infrastructure.Repositories
 
             var stages = new List<ProductionStageDto>();
             StageOutputRef? prevOutput = null;
+            var routeCodes = steps.Select(x => x.process_code).ToList();
 
-            foreach (var s in steps)
+            for (var stageIndex = 0; stageIndex < steps.Count; stageIndex++)
             {
+                var s = steps[stageIndex];
                 var pcode = (s.process_code ?? "").Trim().ToUpperInvariant();
 
                 var task = tasks.FirstOrDefault(t => t.process_id == s.process_id)
@@ -558,11 +562,14 @@ namespace AMMS.Infrastructure.Repositories
                     detail: dto,
                     prevOutput: prevOutput,
                     sheetsRequired: sheetsRequired,
+                    sheetsWaste: sheetsWaste,
                     sheetsTotal: sheetsTotal,
                     nUp: nUp,
                     qtyGood: qtyGood,
                     numberOfPlates: numberOfPlates,
-                    estInkWeightKg: estInkWeightKg
+                    estInkWeightKg: estInkWeightKg,
+                    currentStageIndex: stageIndex,
+                    routeProcessCodes: routeCodes
                 );
 
                 var stage = new ProductionStageDto
@@ -795,6 +802,34 @@ namespace AMMS.Infrastructure.Repositories
             return true;
         }
 
+        public async Task<bool> SetCompletedByOrderIdAsync(int orderId, CancellationToken ct = default)
+        {
+            var prod = await _db.productions
+                .FirstOrDefaultAsync(p => p.order_id == orderId, ct);
+
+            if (prod == null)
+                return false;
+
+            var order = await _db.orders
+                .FirstOrDefaultAsync(o => o.order_id == orderId, ct);
+
+            if (order == null)
+                return false;
+
+            var request = await _db.order_requests
+                .FirstOrDefaultAsync(o => o.order_id == orderId, ct);
+
+            if (request == null)
+                return false;
+
+            prod.status = "Completed";
+            order.status = "Completed";
+            request.process_status = "Completed";
+
+            await _db.SaveChangesAsync(ct);
+            return true;
+        }
+
         public Task SaveChangesAsync(CancellationToken ct = default)
             => _db.SaveChangesAsync(ct);
 
@@ -832,45 +867,131 @@ namespace AMMS.Infrastructure.Repositories
         }
 
         private static (List<StageMaterialDto> inputs, StageMaterialDto output, StageOutputRef nextOutput) BuildStageIO(
-            string processCode,
-            string processName,
-            ProductionDetailDto detail,
-            StageOutputRef? prevOutput,
-            int sheetsRequired,
-            int sheetsTotal,
-            int nUp,
-            int qtyGood,
-            int? numberOfPlates,
-            decimal estInkWeightKg)
+    string processCode,
+    string processName,
+    ProductionDetailDto detail,
+    StageOutputRef? prevOutput,
+    int sheetsRequired,
+    int sheetsWaste,
+    int sheetsTotal,
+    int nUp,
+    int qtyGood,
+    int? numberOfPlates,
+    decimal estInkWeightKg,
+    int currentStageIndex,
+    IReadOnlyList<string?> routeProcessCodes)
         {
             var inputs = new List<StageMaterialDto>();
             var code = NormalizeProcessCode(processCode);
 
-            string sizeSuffix =
-                detail.length_mm.HasValue && detail.width_mm.HasValue && detail.height_mm.HasValue
-                    ? $" ({detail.length_mm}×{detail.width_mm}×{detail.height_mm})mm"
-                    : string.Empty;
+            var orderQty = detail.quantity > 0 ? detail.quantity : 1;
+            nUp = nUp > 0 ? nUp : 1;
 
-            var baseSheets = sheetsTotal > 0 ? sheetsTotal : (sheetsRequired > 0 ? sheetsRequired : detail.quantity);
-            if (baseSheets <= 0) baseSheets = 1;
+            if (sheetsRequired <= 0)
+                sheetsRequired = Math.Max(1, (int)Math.Ceiling(orderQty / (decimal)nUp));
 
-            if (code == "RALO" || code == "RA_LO")
+            sheetsWaste = Math.Max(0, sheetsWaste);
+
+            if (sheetsTotal <= 0)
+                sheetsTotal = sheetsRequired + sheetsWaste;
+
+            if (sheetsTotal <= 0)
+                sheetsTotal = sheetsRequired;
+
+            var maxSheetQty = Math.Max(sheetsTotal, sheetsRequired);
+            var happyProductQty = Math.Max(orderQty, SafeMulLocal(sheetsRequired, nUp));
+            var maxProductQty = Math.Max(happyProductQty, SafeMulLocal(sheetsTotal, nUp));
+            var finalSuggestedTarget = Math.Min(
+                maxProductQty,
+                Math.Max(orderQty, (int)Math.Ceiling(orderQty * 1.10m)));
+
+            var normalizedRoute = routeProcessCodes
+                .Select(NormalizeProcessCode)
+                .ToList();
+
+            var cutIndex = normalizedRoute.FindIndex(x => x == "CAT");
+            var isSheetStage = cutIndex >= 0
+                ? currentStageIndex <= cutIndex
+                : IsSheetBasedStageLocal(code);
+
+            if (code is "RALO" or "Ralo" or "ralo")
             {
+                var minPlateQty = Math.Max(1, numberOfPlates.GetValueOrDefault());
+                var maxPlateQty = minPlateQty * 2;
+
+                var finalQty = qtyGood > 0 ? qtyGood : minPlateQty;
+
                 inputs.Add(new StageMaterialDto
                 {
-                    name = "Cuộn giấy ralo",
-                    code = "RALO",
-                    quantity = 1,
+                    name = "Kẽm đầu vào",
+                    code = "PLATE_INPUT",
+                    quantity = minPlateQty,
                     unit = "cuộn"
                 });
 
-                var outSheets = qtyGood > 0 ? qtyGood : baseSheets;
+                var output = new StageMaterialDto
+                {
+                    name = "Bản kẽm đã ra lô",
+                    code = processCode,
+                    quantity = finalQty,
+                    unit = "bản"
+                };
+
+                var next = new StageOutputRef
+                {
+                    Name = output.name ?? "",
+                    Code = output.code,
+                    Unit = "bản",
+                    Quantity = finalQty
+                };
+
+                return (inputs, output, next);
+            }
+
+            if (isSheetStage)
+            {
+                var inputQty = prevOutput?.Quantity > 0 ? prevOutput.Quantity : maxSheetQty;
+
+                inputs.Add(new StageMaterialDto
+                {
+                    name = prevOutput?.Name ?? "Giấy bán thành phẩm",
+                    code = prevOutput?.Code ?? "SHEET",
+                    quantity = inputQty,
+                    unit = prevOutput?.Unit ?? "tờ"
+                });
+
+                if (code == "IN")
+                {
+                    if (numberOfPlates.GetValueOrDefault() > 0)
+                    {
+                        inputs.Add(new StageMaterialDto
+                        {
+                            name = "Bản kẽm",
+                            code = "PLATE",
+                            quantity = numberOfPlates.Value,
+                            unit = "bản"
+                        });
+                    }
+
+                    if (estInkWeightKg > 0)
+                    {
+                        inputs.Add(new StageMaterialDto
+                        {
+                            name = "Mực in",
+                            code = "INK",
+                            quantity = estInkWeightKg,
+                            unit = "kg"
+                        });
+                    }
+                }
+
+                var outQty = qtyGood > 0 ? qtyGood : maxSheetQty;
 
                 var output = new StageMaterialDto
                 {
-                    name = $"Giấy đã ralo{sizeSuffix}",
+                    name = $"Bán thành phẩm {processName}".Trim(),
                     code = processCode,
-                    quantity = outSheets,
+                    quantity = outQty,
                     unit = "tờ"
                 };
 
@@ -879,104 +1000,94 @@ namespace AMMS.Infrastructure.Repositories
                     Name = output.name ?? "",
                     Code = output.code,
                     Unit = output.unit ?? "tờ",
-                    Quantity = outSheets
+                    Quantity = outQty
                 };
 
                 return (inputs, output, next);
             }
 
-            if (code == "DAN")
+            if (code == "CAT")
             {
-                var danQty = qtyGood > 0 ? qtyGood : (detail.quantity > 0 ? detail.quantity : 1);
+                var minCutQty = Math.Max(1, sheetsRequired);
+                var maxCutQty = Math.Max(minCutQty, sheetsTotal);
+
+                var sheetInputQty = prevOutput?.Quantity > 0 ? prevOutput.Quantity : maxCutQty;
+                var outQty = qtyGood > 0 ? qtyGood : maxCutQty;
 
                 inputs.Add(new StageMaterialDto
                 {
-                    name = "Phôi đã bế",
-                    code = prevOutput?.Code ?? "BE",
-                    quantity = detail.quantity > 0 ? detail.quantity : danQty,
-                    unit = "sp"
+                    name = prevOutput?.Name ?? "Tờ bán thành phẩm",
+                    code = prevOutput?.Code ?? "SHEET",
+                    quantity = sheetInputQty,
+                    unit = "tờ"
                 });
 
                 var output = new StageMaterialDto
                 {
-                    name = $"Thành phẩm {processName}".Trim(),
+                    name = $"Tờ đã cắt {detail.product_name}".Trim(),
                     code = processCode,
-                    quantity = detail.quantity > 0 ? detail.quantity : danQty,
-                    unit = "sp"
+                    quantity = outQty,
+                    unit = "tờ"
                 };
 
                 var next = new StageOutputRef
                 {
                     Name = output.name ?? "",
                     Code = output.code,
-                    Unit = output.unit ?? "sp",
-                    Quantity = output.quantity
+                    Unit = "tờ",
+                    Quantity = outQty
                 };
 
                 return (inputs, output, next);
             }
 
-            var inputName = prevOutput?.Name ?? (detail.product_name ?? "Bán thành phẩm");
-            var inputCode = prevOutput?.Code;
-            var inputUnit = prevOutput?.Unit ?? "tờ";
+            var productStageIndexes = BuildProductStageIndexesLocal(normalizedRoute, cutIndex);
+            if (productStageIndexes.Count == 0)
+                productStageIndexes.Add(currentStageIndex);
 
-            var inputQty = (qtyGood > 0)
-                ? qtyGood
-                : (prevOutput?.Quantity > 0 ? prevOutput.Quantity : baseSheets);
+            var position = productStageIndexes.IndexOf(currentStageIndex);
+            if (position < 0)
+                position = Math.Max(0, productStageIndexes.Count - 1);
 
-            if (inputQty <= 0) inputQty = baseSheets;
+            var stageSuggested = ComputeProgressiveSuggestedQtyLocal(
+                maxQty: maxProductQty,
+                finalSuggestedQty: finalSuggestedTarget,
+                position: position,
+                count: productStageIndexes.Count);
+
+            var inputProductQty = prevOutput?.Quantity > 0 ? prevOutput.Quantity : maxProductQty;
 
             inputs.Add(new StageMaterialDto
             {
-                name = inputName,
-                code = inputCode,
-                quantity = inputQty,
-                unit = inputUnit
+                name = prevOutput?.Name ?? "Phôi sau cắt",
+                code = prevOutput?.Code ?? "CAT",
+                quantity = inputProductQty,
+                unit = prevOutput?.Unit ?? "sp"
             });
 
-            if (code == "IN")
+            var finalOutputQty = qtyGood > 0 ? qtyGood : stageSuggested;
+
+            var outputName = code == "DAN"
+                ? $"Thành phẩm {detail.product_name}".Trim()
+                : $"Bán thành phẩm {processName}".Trim();
+
+            var outputFinal = new StageMaterialDto
             {
-                if (numberOfPlates.GetValueOrDefault() > 0)
-                {
-                    inputs.Add(new StageMaterialDto
-                    {
-                        name = "Kẽm in",
-                        quantity = numberOfPlates.Value,
-                        unit = "bản"
-                    });
-                }
-
-                if (estInkWeightKg > 0)
-                {
-                    inputs.Add(new StageMaterialDto
-                    {
-                        name = "Mực các loại",
-                        quantity = estInkWeightKg,
-                        unit = "kg"
-                    });
-                }
-            }
-
-            var outQty = qtyGood > 0 ? qtyGood : inputQty;
-            if (outQty <= 0) outQty = inputQty;
-
-            var outputDefault = new StageMaterialDto
-            {
-                name = $"Thành phẩm {processName}".Trim(),
+                name = outputName,
                 code = processCode,
-                quantity = outQty,
-                unit = "tờ"
+                quantity = finalOutputQty,
+                unit = "sp"
             };
 
-            var nextOutput = new StageOutputRef
+            var nextFinal = new StageOutputRef
             {
-                Name = outputDefault.name ?? "",
-                Code = outputDefault.code,
-                Unit = outputDefault.unit ?? "tờ",
-                Quantity = outQty
+                Name = outputFinal.name ?? "",
+                Code = outputFinal.code,
+                Unit = outputFinal.unit ?? "sp",
+                Quantity = finalOutputQty
             };
 
-            return (inputs, outputDefault, nextOutput);
+            return (inputs, outputFinal, nextFinal);
         }
 
         private static List<TaskLogDto> LogsByTaskId(List<TaskLogDto> all, int taskId)
@@ -1244,6 +1355,57 @@ namespace AMMS.Infrastructure.Repositories
                 s.lane_no = bestLane + 1;
                 laneAvailableAt[bestLane] = actualEnd;
             }
+        }
+            private static bool IsSheetBasedStageLocal(string? code)
+    => NormalizeProcessCode(code) is "IN" or "PHU" or "CAN" or "BOI";
+
+        private static int SafeMulLocal(int a, int b)
+        {
+            try
+            {
+                return checked(a * b);
+            }
+            catch
+            {
+                return int.MaxValue;
+            }
+        }
+
+        private static List<int> BuildProductStageIndexesLocal(IReadOnlyList<string> routeCodes, int cutIndex)
+        {
+            if (cutIndex >= 0 && cutIndex + 1 < routeCodes.Count)
+                return Enumerable.Range(cutIndex + 1, routeCodes.Count - (cutIndex + 1)).ToList();
+
+            return routeCodes
+                .Select((code, index) => new { code, index })
+                .Where(x => x.code is "BE" or "DUT" or "DAN")
+                .Select(x => x.index)
+                .ToList();
+        }
+
+        private static int ComputeProgressiveSuggestedQtyLocal(
+            int maxQty,
+            int finalSuggestedQty,
+            int position,
+            int count)
+        {
+            if (count <= 1)
+                return finalSuggestedQty;
+
+            if (position <= 0)
+                return maxQty;
+
+            if (position >= count - 1)
+                return finalSuggestedQty;
+
+            var extra = maxQty - finalSuggestedQty;
+            if (extra <= 0)
+                return finalSuggestedQty;
+
+            var reduction = (int)Math.Ceiling(extra * (position / (decimal)(count - 1)));
+            var value = maxQty - reduction;
+
+            return value < finalSuggestedQty ? finalSuggestedQty : value;
         }
     }
 }

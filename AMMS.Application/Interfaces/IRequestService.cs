@@ -42,5 +42,6 @@ namespace AMMS.Application.Interfaces
         Task<ConvertRequestToOrderResponse> ConvertToOrderInCurrentTransactionAsync(int requestId);
         Task<int?> GetConsultantScopeUserIdAsync(CancellationToken ct = default);
         Task EnsureCanAccessAssignedRequestAsync(int requestId, CancellationToken ct = default);
+        Task<bool> UpdateDeliveryNoteAsync(int orderRequestId, string note, CancellationToken ct = default);
     }
 }

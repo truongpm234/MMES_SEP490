@@ -16,7 +16,6 @@ namespace AMMS.Infrastructure.Interfaces
         Task<task?> GetByIdAsync(int taskId);
         Task<task?> GetNextTaskAsync(int prodId, int currentSeqNum);
         Task<task?> GetPrevTaskAsync(int prodId, int seqNum);
-        Task<int> SuggestQtyGoodAsync(int taskId, CancellationToken ct = default);
         Task<List<task>> GetTasksByProductionAsync(int prodId, CancellationToken ct = default);
         Task<task?> GetFirstTaskByProductionAsync(int prodId, CancellationToken ct = default);
         Task<bool> PromoteFirstTaskToReadyAsync(int prodId, DateTime now, CancellationToken ct = default);
@@ -24,5 +23,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task<List<TaskFlowDto>> GetTasksWithCodesByProductionAsync(int prodId, CancellationToken ct = default);
         Task<bool> PromoteInitialTasksAsync(int prodId, DateTime now, CancellationToken ct = default);
         Task<bool> PromoteAllTasksAfterRaloAsync(int prodId, DateTime now, CancellationToken ct = default);
+        Task<TaskQtyPolicyDto?> GetQtyPolicyAsync(int taskId, CancellationToken ct = default);
+        Task<int> SuggestQtyGoodAsync(int taskId, CancellationToken ct = default);
     }
 }

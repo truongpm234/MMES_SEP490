@@ -42,6 +42,7 @@
         public string? message_to_customer { get; set; }
         public DateTime? verified_at { get; set; }
         public DateTime? quote_expires_at { get; set; }
+        public bool layout_confirmed { get; set; }
         public List<CostEstimateDetailDto> cost_estimate { get; set; } = new();
     }
 

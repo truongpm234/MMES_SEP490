@@ -27,6 +27,8 @@ public partial class order
 
     public int? production_id { get; set; }
 
+    public bool layout_confirmed { get; set; } = false;
+
     public virtual production? production { get; set; }
 
     public virtual ICollection<delivery> deliveries { get; set; } = new List<delivery>();

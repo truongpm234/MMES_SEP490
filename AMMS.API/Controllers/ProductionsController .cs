@@ -149,6 +149,17 @@ namespace AMMS.API.Controllers
             return NoContent();
         }
 
+        [HttpPut("competed/{orderId:int}")]
+        public async Task<IActionResult> SetCompleted(int orderId, CancellationToken ct)
+        {
+            var ok = await _service.SetCompletedAsync(orderId, ct);
+
+            if (!ok)
+                return NotFound(new { message = "Production not found for this orderId" });
+
+            return NoContent();
+        }
+
         [HttpGet("machine-schedule")]
         public async Task<IActionResult> GetMachineSchedule(
     [FromQuery] DateTime? from,

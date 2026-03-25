@@ -695,7 +695,6 @@ namespace AMMS.Infrastructure.Repositories
                 verified_at = request.verified_at,
                 quote_expires_at = request.quote_expires_at,
                 message_to_customer = SafeText(request.message_to_customer),
-                
                 cost_estimate = estimates.Select(ce =>
                 {
                     var discountAmount = ce.discount_amount < 0m ? 0m : ce.discount_amount;
@@ -968,6 +967,20 @@ namespace AMMS.Infrastructure.Repositories
                     x.order_request_id == requestId &&
                     x.assigned_consultant == consultantUserId,
                     ct);
+        }
+
+        public async Task<bool> UpdateDeliveryNoteAsync(int orderRequestId, string note, CancellationToken ct = default)
+        {
+            var entity = await _db.order_requests
+                .FirstOrDefaultAsync(x => x.order_request_id == orderRequestId, ct);
+
+            if (entity == null)
+                return false;
+
+            entity.delivery_note = note;
+
+            await _db.SaveChangesAsync(ct);
+            return true;
         }
     }
 }
