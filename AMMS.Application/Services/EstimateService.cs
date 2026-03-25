@@ -12,15 +12,22 @@ namespace AMMS.Application.Services
     {
         private readonly ICostEstimateRepository _estimateRepo;
         private readonly IQuoteRepository _quoteRepo;
-        private readonly IUploadFileService _uploadFileService;
         private readonly IAccessService _accessService;
+        private readonly ICloudinaryFileStorageService _cloudinaryStorage;
+        private readonly IContractCompareService _contractCompareService;
 
-        public EstimateService(ICostEstimateRepository costEstimateRepository, IQuoteRepository quoteRepo, IUploadFileService uploadFileService, IAccessService accessService)
+        public EstimateService(
+            ICostEstimateRepository costEstimateRepository,
+            IQuoteRepository quoteRepo,
+            IAccessService accessService,
+            ICloudinaryFileStorageService cloudinaryStorage,
+            IContractCompareService contractCompareService)
         {
             _estimateRepo = costEstimateRepository;
             _quoteRepo = quoteRepo;
-            _uploadFileService = uploadFileService;
             _accessService = accessService;
+            _cloudinaryStorage = cloudinaryStorage;
+            _contractCompareService = contractCompareService;
         }
 
         public async Task UpdateFinalCostAsync(int orderRequestId, decimal? finalCostInput)
@@ -43,6 +50,11 @@ namespace AMMS.Application.Services
             await _estimateRepo.SaveChangesAsync();
         }
 
+        public async Task<cost_estimate?> GetTrackingByIdAsync(int estimateId, CancellationToken ct = default)
+        {
+            return await _estimateRepo.GetTrackingByIdAsync(estimateId, ct);
+        }
+
         private static decimal RoundToThousand(decimal value)
         {
             return Math.Round(value / 1000m, MidpointRounding.AwayFromZero) * 1000m;
@@ -53,7 +65,7 @@ namespace AMMS.Application.Services
             return await _estimateRepo.GetByIdAsync(estimateId);
         }
 
-        public Task<DepositByRequestResponse?> GetDepositByRequestIdAsync(int requestId, CancellationToken ct = default) 
+        public Task<DepositByRequestResponse?> GetDepositByRequestIdAsync(int requestId, CancellationToken ct = default)
             => _estimateRepo.GetDepositByRequestIdAsync(requestId, ct);
 
         public async Task<bool> OrderRequestExistsAsync(int orderRequestId)
@@ -95,8 +107,6 @@ namespace AMMS.Application.Services
                 estimated_finish_date = ToUnspecified(req.estimated_finish_date ?? now),
                 production_processes = req.production_processes?.Trim(),
                 desired_delivery_date = ToUnspecified(req.desired_delivery_date ?? (orderReq.delivery_date ?? now)),
-                contract_file_path = string.IsNullOrWhiteSpace(req.contract_file_path) ? null : req.contract_file_path.Trim(),
-                contract_uploaded_at = string.IsNullOrWhiteSpace(req.contract_file_path) ? null : AppTime.NowVnUnspecified(),
             };
 
             static void SetIfHasValue<T>(T? value, Action<T> setter) where T : struct
@@ -247,46 +257,160 @@ namespace AMMS.Application.Services
             return await _quoteRepo.BuildPreviewAsync(requestId, ct);
         }
 
-        public async Task<string> UploadContractFileAsync(int requestId, int estimateId, Stream fileStream, string fileName, string contentType, CancellationToken ct = default)
+        public async Task<string> UploadConsultantContractAsync(
+    int requestId,
+    int estimateId,
+    Stream fileStream,
+    string fileName,
+    string contentType,
+    CancellationToken ct = default)
         {
-            if (requestId <= 0)
-                throw new ArgumentException("request_id must be > 0");
+            if (requestId <= 0) throw new ArgumentException("request_id must be > 0");
+            if (estimateId <= 0) throw new ArgumentException("estimate_id must be > 0");
+            if (fileStream == null) throw new ArgumentException("file is required");
+            if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("fileName is required");
 
-            if (estimateId <= 0)
-                throw new ArgumentException("estimate_id must be > 0");
-
-            if (fileStream == null)
-                throw new ArgumentException("file is required");
-
-            if (string.IsNullOrWhiteSpace(fileName))
-                throw new ArgumentException("fileName is required");
-
-            var orderReq = await _estimateRepo.GetOrderRequestTrackingAsync(requestId, ct);
-            if (orderReq == null)
-                throw new InvalidOperationException("Order request not found");
+            await _accessService.EnsureCanAccessAssignedRequestAsync(requestId, ct);
 
             var estimate = await _estimateRepo.GetTrackingByIdAsync(estimateId, ct);
-            if (estimate == null)
-                throw new InvalidOperationException("Cost estimate not found");
+            if (estimate == null || estimate.order_request_id != requestId)
+                throw new InvalidOperationException("Estimate not found");
 
-            if (estimate.order_request_id != requestId)
-                throw new InvalidOperationException("Estimate does not belong to request_id");
+            var ext = Path.GetExtension(fileName)?.Trim().ToLowerInvariant();
+            if (ext != ".docx")
+                throw new ArgumentException("Consultant draft contract must be .docx");
 
+            var publicId = $"contracts/request_{requestId}/estimate_{estimateId}/consultant_draft";
             var safeFileName = Path.GetFileName(fileName);
-            var module = $"contracts/request_{requestId}/estimate_{estimateId}";
 
-            var uploadedUrl = await _uploadFileService.UploadAsync(
+            var url = await _cloudinaryStorage.UploadRawWithPublicIdAsync(
                 fileStream,
                 safeFileName,
-                contentType,
-                module);
+                string.IsNullOrWhiteSpace(contentType)
+                    ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    : contentType,
+                publicId);
 
-            estimate.contract_file_path = uploadedUrl;
-            estimate.contract_uploaded_at = AppTime.NowVnUnspecified();
+            estimate.consultant_contract_path = url;
 
             await _estimateRepo.SaveChangesAsync();
 
-            return uploadedUrl;
+            return url;
         }
+
+        public async Task<UploadCustomerSignedContractResponse> UploadCustomerSignedContractAsync(
+    int requestId,
+    int estimateId,
+    Stream fileStream,
+    string fileName,
+    string contentType,
+    CancellationToken ct = default)
+        {
+            if (requestId <= 0) throw new ArgumentException("request_id must be > 0");
+            if (estimateId <= 0) throw new ArgumentException("estimate_id must be > 0");
+            if (fileStream == null) throw new ArgumentException("file is required");
+            if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("fileName is required");
+
+            await _accessService.EnsureCanAccessAssignedRequestAsync(requestId, ct);
+
+            var estimate = await _estimateRepo.GetTrackingByIdAsync(estimateId, ct);
+            if (estimate == null || estimate.order_request_id != requestId)
+                throw new InvalidOperationException("Estimate not found");
+
+            var ext = Path.GetExtension(fileName)?.Trim().ToLowerInvariant();
+            if (ext != ".pdf")
+                throw new ArgumentException("Customer signed contract must be .pdf");
+
+            var safeFileName = Path.GetFileName(fileName);
+            var publicId = $"contracts/request_{requestId}/estimate_{estimateId}/customer_signed";
+
+            byte[] pdfBytes;
+            await using (var buffer = new MemoryStream())
+            {
+                if (fileStream.CanSeek) fileStream.Position = 0;
+                await fileStream.CopyToAsync(buffer, ct);
+                pdfBytes = buffer.ToArray();
+            }
+
+            string pdfUrl;
+            await using (var uploadPdfStream = new MemoryStream(pdfBytes, writable: false))
+            {
+                pdfUrl = await _cloudinaryStorage.UploadRawWithPublicIdAsync(
+                    uploadPdfStream,
+                    safeFileName,
+                    string.IsNullOrWhiteSpace(contentType) ? "application/pdf" : contentType,
+                    publicId);
+            }
+
+            estimate.customer_signed_contract_path = pdfUrl;
+
+            await _estimateRepo.SaveChangesAsync();
+
+            CompareContractResponse? compareResult = null;
+            string? compareWarning = null;
+
+            if (!string.IsNullOrWhiteSpace(estimate.consultant_contract_path))
+            {
+                try
+                {
+                    compareResult = await _contractCompareService.CompareAsync(
+                        requestId,
+                        estimateId,
+                        estimate.consultant_contract_path!,
+                        pdfBytes,
+                        ct);
+
+                    if (!compareResult.is_match_90)
+                    {
+                        compareWarning =
+                            $"Hợp đồng khách hàng chỉ tương đồng {compareResult.similarity_percent}% so với bản consultant. Cần kiểm tra lại trước khi duyệt.";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    compareWarning = $"Upload thành công nhưng so sánh tự động thất bại: {ex.Message}";
+                }
+            }
+            else
+            {
+                compareWarning = "Upload thành công nhưng chưa có hợp đồng consultant để đối chiếu tự động.";
+            }
+
+            return new UploadCustomerSignedContractResponse
+            {
+                request_id = requestId,
+                estimate_id = estimateId,
+                customer_signed_contract_path = estimate.customer_signed_contract_path,
+                compare_result = compareResult,
+                compare_warning = compareWarning
+            };
+        }
+
+        public async Task<CompareContractResponse> CompareContractsAsync(
+    int requestId,
+    int estimateId,
+    CancellationToken ct = default)
+        {
+            await _accessService.EnsureCanAccessAssignedRequestAsync(requestId, ct);
+
+            var estimate = await _estimateRepo.GetTrackingByIdAsync(estimateId, ct);
+            if (estimate == null || estimate.order_request_id != requestId)
+                throw new InvalidOperationException("Estimate not found");
+
+            if (string.IsNullOrWhiteSpace(estimate.consultant_contract_path))
+                throw new InvalidOperationException("Consultant draft contract not uploaded");
+
+            if (string.IsNullOrWhiteSpace(estimate.customer_signed_contract_path))
+                throw new InvalidOperationException("Customer signed contract not uploaded");
+
+            return await _contractCompareService.CompareAsync(
+                requestId,
+                estimateId,
+                estimate.consultant_contract_path,
+                estimate.customer_signed_contract_path,
+                ct);
+        }
+
+
     }
 }

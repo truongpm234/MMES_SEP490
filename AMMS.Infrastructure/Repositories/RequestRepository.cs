@@ -78,6 +78,8 @@ namespace AMMS.Infrastructure.Repositories
                             message_to_customer = r.message_to_customer,
                             production_processes = ce != null ? ce.production_processes : null,
                             preliminary_estimated_price = r.preliminary_estimated_price,
+                            consultant_contract_path = ce != null ? ce.consultant_contract_path : null,
+                            customer_signed_contract_path = ce != null ? ce.customer_signed_contract_path : null
                         };
 
             return await query.FirstOrDefaultAsync();
@@ -735,8 +737,6 @@ namespace AMMS.Infrastructure.Repositories
                         mounting_glue_cost = ce.mounting_glue_cost,
                         lamination_cost = ce.lamination_cost,
                         material_cost = ce.material_cost,
-                        contract_file_path = ce.contract_file_path,
-                        contract_uploaded_at = ce.contract_uploaded_at,
                         base_cost = ce.base_cost,
                         design_cost = ce.design_cost,
                         subtotal = ce.subtotal,
@@ -744,6 +744,8 @@ namespace AMMS.Infrastructure.Repositories
                         discount_amount = discountAmount,
                         vat_percent = vatPercent,
                         vat_amount = vatAmount,
+                        consultant_contract_path = SafeText(ce.consultant_contract_path),
+                        customer_signed_contract_path = SafeText(ce.customer_signed_contract_path),
 
                         process_cost = ce.process_costs
                             .OrderBy(pc => pc.process_cost_id)
@@ -834,9 +836,7 @@ namespace AMMS.Infrastructure.Repositories
                     paper_name = e.paper_name,
                     coating_type = e.coating_type,
                     wave_type = e.wave_type,
-                    cost_note = e.cost_note,
-                    contract_file_path = e.contract_file_path,
-                    contract_uploaded_at = e.contract_uploaded_at
+                    cost_note = e.cost_note
                 })
                 .ToListAsync(ct);
 
@@ -933,23 +933,27 @@ namespace AMMS.Infrastructure.Repositories
 
         public async Task<int?> GetLeastLoadedConsultantUserIdAsync(CancellationToken ct = default)
         {
+            const int ConsultantRoleId = 2;
+
             var query =
                 from u in _db.users.AsNoTracking()
-                where u.role_id == 2 && (u.is_active ?? true)
+                where u.role_id == ConsultantRoleId && (u.is_active ?? true)
                 join req in _db.order_requests.AsNoTracking()
                         .Where(x =>
                             x.assigned_consultant != null &&
                             x.order_id == null &&
-                            !ClosedStatuses.Contains(x.process_status ?? ""))
+                            !ClosedStatuses.Contains((x.process_status ?? "").Trim()))
                     on u.user_id equals req.assigned_consultant into reqGroup
                 select new
                 {
                     u.user_id,
-                    workload = reqGroup.Count()
+                    workload = reqGroup.Count(),
+                    last_assigned_at = reqGroup.Max(x => x.assigned_at)
                 };
 
             return await query
                 .OrderBy(x => x.workload)
+                .ThenBy(x => x.last_assigned_at ?? DateTime.MinValue)
                 .ThenBy(x => x.user_id)
                 .Select(x => (int?)x.user_id)
                 .FirstOrDefaultAsync(ct);

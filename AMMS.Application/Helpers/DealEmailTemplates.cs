@@ -79,7 +79,7 @@ namespace AMMS.Application.Helpers
         private static string ContractLinksBlock(IEnumerable<cost_estimate> estimates)
         {
             var items = estimates
-                .Where(x => !string.IsNullOrWhiteSpace(x.contract_file_path))
+                .Where(x => !string.IsNullOrWhiteSpace(x.consultant_contract_path))
                 .GroupBy(x => x.estimate_id)
                 .Select(g => g.First())
                 .OrderBy(x => x.estimate_id)
@@ -90,7 +90,7 @@ namespace AMMS.Application.Helpers
 
             var rows = string.Join("", items.Select(x =>
             {
-                var rawUrl = x.contract_file_path!.Trim();
+                var rawUrl = x.consultant_contract_path!.Trim();
                 var safeUrl = System.Net.WebUtility.HtmlEncode(rawUrl);
 
                 return $@"

@@ -15,7 +15,7 @@ namespace AMMS.Infrastructure.Repositories
         public async Task<UserLoginResponseDto?> GetUserByUsernamePassword(UserLoginRequestDto req)
         {
             var user = await _db.users
-                .SingleOrDefaultAsync(u => u.username == req.user_name || u.email == req.email);
+                .FirstOrDefaultAsync(u => u.username == req.user_name || u.email == req.email);
 
             if (user == null)
                 return null;
@@ -141,6 +141,32 @@ namespace AMMS.Infrastructure.Repositories
         public async Task<List<user>> GetAllUser()
         {
             return await _db.users.ToListAsync();
+        }
+
+        public async Task<user?> GetByIdAsync(int userId, CancellationToken ct = default)
+        {
+            return await _db.users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.user_id == userId, ct);
+        }
+
+        public async Task<AssignedConsultantSummaryDto?> GetAssignedConsultantSummaryAsync(int userId, CancellationToken ct = default)
+        {
+            return await _db.users
+                .AsNoTracking()
+                .Where(x => x.user_id == userId)
+                .Select(x => new AssignedConsultantSummaryDto
+                {
+                    user_id = x.user_id,
+                    username = x.username,
+                    full_name = x.full_name,
+                    email = x.email,
+                    phone_number = x.phone_number,
+                    role_id = x.role_id,
+                    is_active = x.is_active,
+                    created_at = x.created_at
+                })
+                .FirstOrDefaultAsync(ct);
         }
     }
 }

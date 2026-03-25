@@ -198,47 +198,309 @@ namespace AMMS.Infrastructure.Repositories
             return true;
         }
 
+        public async Task<TaskQtyPolicyDto?> GetQtyPolicyAsync(int taskId, CancellationToken ct = default)
+        {
+            const int TokenQtyMax = 0xFFFF; // 65535
+
+            var taskRow = await _db.tasks
+                .AsNoTracking()
+                .Where(x => x.task_id == taskId)
+                .Select(x => new
+                {
+                    x.task_id,
+                    x.prod_id,
+                    x.process_id,
+                    x.seq_num
+                })
+                .FirstOrDefaultAsync(ct);
+
+            if (taskRow == null || !taskRow.prod_id.HasValue)
+                return null;
+
+            var prod = await _db.productions
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.prod_id == taskRow.prod_id.Value, ct);
+
+            if (prod == null)
+                return null;
+
+            order? ord = null;
+            if (prod.order_id.HasValue)
+            {
+                ord = await _db.orders
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.order_id == prod.order_id.Value, ct);
+            }
+
+            order_request? req = null;
+
+            if (ord?.quote_id is int quoteId && quoteId > 0)
+            {
+                req = await (
+                    from q in _db.quotes.AsNoTracking()
+                    join r in _db.order_requests.AsNoTracking()
+                        on q.order_request_id equals r.order_request_id
+                    where q.quote_id == quoteId
+                    select r
+                ).FirstOrDefaultAsync(ct);
+            }
+
+            req ??= prod.order_id.HasValue
+                ? await _db.order_requests
+                    .AsNoTracking()
+                    .Where(x => x.order_id == prod.order_id.Value)
+                    .OrderByDescending(x => x.order_request_id)
+                    .FirstOrDefaultAsync(ct)
+                : null;
+
+            var currentStep = taskRow.process_id.HasValue
+                ? await _db.product_type_processes
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.process_id == taskRow.process_id.Value, ct)
+                : null;
+
+            int? productTypeId = prod.product_type_id ?? currentStep?.product_type_id;
+
+            if (!productTypeId.HasValue && !string.IsNullOrWhiteSpace(req?.product_type))
+            {
+                productTypeId = await _db.product_types
+                    .AsNoTracking()
+                    .Where(x => x.code == req!.product_type)
+                    .Select(x => (int?)x.product_type_id)
+                    .FirstOrDefaultAsync(ct);
+            }
+
+            if (!productTypeId.HasValue)
+                return null;
+
+            cost_estimate? est = null;
+            if (req != null)
+            {
+                var estQuery = _db.cost_estimates
+                    .AsNoTracking()
+                    .Where(x => x.order_request_id == req.order_request_id);
+
+                if (req.accepted_estimate_id.HasValue && req.accepted_estimate_id.Value > 0)
+                {
+                    est = await estQuery
+                        .FirstOrDefaultAsync(x => x.estimate_id == req.accepted_estimate_id.Value, ct);
+                }
+
+                est ??= await estQuery
+                    .OrderByDescending(x => x.is_active)
+                    .ThenByDescending(x => x.estimate_id)
+                    .FirstOrDefaultAsync(ct);
+            }
+
+            var itemProcessCsv = prod.order_id.HasValue
+                ? await _db.order_items
+                    .AsNoTracking()
+                    .Where(x => x.order_id == prod.order_id.Value)
+                    .OrderBy(x => x.item_id)
+                    .Select(x => x.production_process)
+                    .FirstOrDefaultAsync(ct)
+                : null;
+
+            var allSteps = await _db.product_type_processes
+                .AsNoTracking()
+                .Where(x => x.product_type_id == productTypeId.Value && (x.is_active ?? true))
+                .OrderBy(x => x.seq_num)
+                .ToListAsync(ct);
+
+            if (allSteps.Count == 0)
+                return null;
+
+            var route = ResolveFixedRoute(
+                allSteps,
+                x => x.process_code,
+                !string.IsNullOrWhiteSpace(itemProcessCsv) ? itemProcessCsv : est?.production_processes);
+
+            if (route.Count == 0)
+                route = allSteps;
+
+            var currentIndex = route.FindIndex(x =>
+                (taskRow.process_id.HasValue && x.process_id == taskRow.process_id.Value) ||
+                (taskRow.seq_num.HasValue && x.seq_num == taskRow.seq_num.Value));
+
+            if (currentIndex < 0)
+                currentIndex = 0;
+
+            var stage = route[currentIndex];
+            var pcode = Norm(stage.process_code);
+            var pname = string.IsNullOrWhiteSpace(stage.process_name)
+                ? pcode
+                : stage.process_name!;
+
+            var orderQty = SafePositive(req?.quantity ?? 0, 1);
+
+            var sheetsRequired = Math.Max(est?.sheets_required ?? 0, 0);
+            var sheetsWaste = Math.Max(est?.sheets_waste ?? 0, 0);
+            var sheetsTotal = Math.Max(est?.sheets_total ?? 0, sheetsRequired + sheetsWaste);
+            var nUp = SafePositive(est?.n_up ?? 0, 1);
+            var numberOfPlates = SafePositive(req?.number_of_plates ?? 0, 1);
+
+            if (sheetsRequired <= 0)
+            {
+                sheetsRequired = Math.Max(1, (int)Math.Ceiling(orderQty / (decimal)nUp));
+            }
+
+            if (sheetsTotal <= 0)
+            {
+                sheetsTotal = sheetsRequired + sheetsWaste;
+            }
+
+            if (sheetsTotal <= 0)
+            {
+                sheetsTotal = sheetsRequired;
+            }
+
+            var happyCaseQty = Math.Max(orderQty, SafeMul(sheetsRequired, nUp));
+            var maxProductQty = Math.Max(happyCaseQty, SafeMul(Math.Max(sheetsTotal, 1), nUp));
+            var clampedMaxProductQty = Math.Min(maxProductQty, TokenQtyMax);
+
+            var maxSheetQty = Math.Min(Math.Max(sheetsTotal, Math.Max(sheetsRequired, 1)), TokenQtyMax);
+
+            var finalSuggestedTarget = Math.Min(
+                clampedMaxProductQty,
+                Math.Max(orderQty, (int)Math.Ceiling(orderQty * 1.10m)));
+
+            var routeCodes = route.Select(x => Norm(x.process_code)).ToList();
+            var cutIndex = routeCodes.FindIndex(x => x == "CAT");
+
+            if (IsRalo(pcode))
+            {
+                var minPlateQty = Math.Max(1, numberOfPlates);
+                var maxPlateQty = minPlateQty + 1;
+
+                minPlateQty = Math.Min(minPlateQty, TokenQtyMax);
+                maxPlateQty = Math.Min(maxPlateQty, TokenQtyMax);
+
+                return new TaskQtyPolicyDto
+                {
+                    task_id = taskId,
+                    process_code = pcode,
+                    process_name = pname,
+                    qty_unit = "bản",
+
+                    min_allowed = minPlateQty,
+                    max_allowed = maxPlateQty,
+                    suggested_qty = minPlateQty,
+
+                    order_qty = orderQty,
+                    sheets_required = sheetsRequired,
+                    sheets_waste = sheetsWaste,
+                    sheets_total = sheetsTotal,
+                    n_up = nUp,
+                    number_of_plates = numberOfPlates,
+
+                    happy_case_qty = minPlateQty,
+                    stage_index = currentIndex,
+                    stage_count = route.Count
+                };
+            }
+
+            var isSheetStage = cutIndex >= 0
+    ? currentIndex <= cutIndex
+    : IsSheetBasedStage(pcode);
+
+            if (pcode == "CAT")
+            {
+                var minCutQty = Math.Max(1, sheetsRequired);
+                var maxCutQty = Math.Max(minCutQty, sheetsTotal);
+
+                minCutQty = Math.Min(minCutQty, TokenQtyMax);
+                maxCutQty = Math.Min(maxCutQty, TokenQtyMax);
+
+                return new TaskQtyPolicyDto
+                {
+                    task_id = taskId,
+                    process_code = pcode,
+                    process_name = pname,
+                    qty_unit = "tờ",
+
+                    min_allowed = minCutQty,
+                    max_allowed = maxCutQty,
+                    suggested_qty = maxCutQty,
+
+                    order_qty = orderQty,
+                    sheets_required = sheetsRequired,
+                    sheets_waste = sheetsWaste,
+                    sheets_total = sheetsTotal,
+                    n_up = nUp,
+                    number_of_plates = numberOfPlates,
+
+                    happy_case_qty = Math.Max(sheetsRequired, 1),
+                    stage_index = currentIndex,
+                    stage_count = route.Count
+                };
+            }
+
+            if (isSheetStage)
+            {
+                return new TaskQtyPolicyDto
+                {
+                    task_id = taskId,
+                    process_code = pcode,
+                    process_name = pname,
+                    qty_unit = "tờ",
+                    min_allowed = 1,
+                    max_allowed = maxSheetQty,
+                    suggested_qty = maxSheetQty,
+                    order_qty = orderQty,
+                    sheets_required = sheetsRequired,
+                    sheets_waste = sheetsWaste,
+                    sheets_total = sheetsTotal,
+                    n_up = nUp,
+                    number_of_plates = numberOfPlates,
+                    happy_case_qty = Math.Min(Math.Max(sheetsRequired, 1), TokenQtyMax),
+                    stage_index = currentIndex,
+                    stage_count = route.Count
+                };
+            }
+
+            var productStageIndexes = BuildProductStageIndexes(routeCodes, cutIndex);
+            if (productStageIndexes.Count == 0)
+            {
+                productStageIndexes.Add(currentIndex);
+            }
+
+            var position = productStageIndexes.IndexOf(currentIndex);
+            if (position < 0)
+                position = Math.Max(0, productStageIndexes.Count - 1);
+
+            var suggestedQty = ComputeProgressiveSuggestedQty(
+                maxQty: clampedMaxProductQty,
+                finalSuggestedQty: finalSuggestedTarget,
+                position: position,
+                count: productStageIndexes.Count);
+
+            suggestedQty = Clamp(suggestedQty, 1, clampedMaxProductQty);
+
+            return new TaskQtyPolicyDto
+            {
+                task_id = taskId,
+                process_code = pcode,
+                process_name = pname,
+                qty_unit = "sp",
+                min_allowed = 1,
+                max_allowed = clampedMaxProductQty,
+                suggested_qty = suggestedQty,
+                order_qty = orderQty,
+                sheets_required = sheetsRequired,
+                sheets_waste = sheetsWaste,
+                sheets_total = sheetsTotal,
+                n_up = nUp,
+                number_of_plates = numberOfPlates,
+                happy_case_qty = happyCaseQty,
+                stage_index = currentIndex,
+                stage_count = route.Count
+            };
+        }
+
         public async Task<int> SuggestQtyGoodAsync(int taskId, CancellationToken ct = default)
         {
-            var row = await (
-                from t in _db.tasks.AsNoTracking()
-                join pr in _db.productions.AsNoTracking() on t.prod_id equals pr.prod_id
-                join o in _db.orders.AsNoTracking() on pr.order_id equals o.order_id
-                join q in _db.quotes.AsNoTracking() on o.quote_id equals q.quote_id into qj
-                from q in qj.DefaultIfEmpty()
-                join req in _db.order_requests.AsNoTracking() on q.order_request_id equals req.order_request_id into rj
-                from req in rj.DefaultIfEmpty()
-                join ce in _db.cost_estimates.AsNoTracking() on req.order_request_id equals ce.order_request_id into cej
-                from ce in cej.DefaultIfEmpty()
-                join ptp in _db.product_type_processes.AsNoTracking() on t.process_id equals ptp.process_id into ptpj
-                from ptp in ptpj.DefaultIfEmpty()
-                where t.task_id == taskId
-                select new
-                {
-                    process_code = ptp.process_code,
-                    order_qty = (int?)req.quantity,
-                    sheets_total = (int?)ce.sheets_total,
-                    sheets_required = (int?)ce.sheets_required,
-                    n_up = (int?)ce.n_up,
-                }
-            ).FirstOrDefaultAsync(ct);
-
-            if (row == null)
-                return 1;
-
-            var pcode = (row.process_code ?? "").Trim().ToUpperInvariant();
-
-            var orderQty = row.order_qty ?? 0;
-            var sheetsTotal = row.sheets_total ?? 0;
-            var sheetsRequired = row.sheets_required ?? 0;
-
-            if (pcode == "DAN")
-                return SafeInt(orderQty, 1);
-
-            return SafeInt(
-                sheetsTotal,
-                fallback: SafeInt(sheetsRequired, fallback: SafeInt(orderQty, 1))
-            );
+            var policy = await GetQtyPolicyAsync(taskId, ct);
+            return policy?.suggested_qty ?? 1;
         }
 
         private async Task TryAllocateMachineWhenReadyAsync(task t, CancellationToken ct)
@@ -263,5 +525,105 @@ namespace AMMS.Infrastructure.Repositories
         }
 
         private static int SafeInt(int v, int fallback = 1) => v > 0 ? v : fallback;
+
+        private static string Norm(string? code)
+    => (code ?? "").Trim().ToUpperInvariant();
+
+        private static bool IsRalo(string? code)
+            => Norm(code) is "RALO" or "RA_LO";
+
+        private static bool IsSheetBasedStage(string? code)
+            => Norm(code) is "IN" or "PHU" or "CAN" or "BOI";
+
+        private static int SafePositive(int value, int fallback = 1)
+            => value > 0 ? value : fallback;
+
+        private static int SafeMul(int a, int b)
+        {
+            try
+            {
+                return checked(a * b);
+            }
+            catch
+            {
+                return int.MaxValue;
+            }
+        }
+
+        private static int Clamp(int value, int min, int max)
+        {
+            if (value < min) return min;
+            if (value > max) return max;
+            return value;
+        }
+
+        private static int ComputeProgressiveSuggestedQty(
+            int maxQty,
+            int finalSuggestedQty,
+            int position,
+            int count)
+        {
+            if (count <= 1)
+                return finalSuggestedQty;
+
+            if (position <= 0)
+                return maxQty;
+
+            if (position >= count - 1)
+                return finalSuggestedQty;
+
+            var extra = maxQty - finalSuggestedQty;
+            if (extra <= 0)
+                return finalSuggestedQty;
+
+            var reduction = (int)Math.Ceiling(extra * (position / (decimal)(count - 1)));
+            var value = maxQty - reduction;
+
+            return value < finalSuggestedQty ? finalSuggestedQty : value;
+        }
+
+        private static List<int> BuildProductStageIndexes(IReadOnlyList<string> routeCodes, int cutIndex)
+        {
+            if (cutIndex >= 0 && cutIndex + 1 < routeCodes.Count)
+            {
+                return Enumerable.Range(cutIndex + 1, routeCodes.Count - (cutIndex + 1)).ToList();
+            }
+
+            return routeCodes
+                .Select((code, index) => new { code, index })
+                .Where(x => x.code is "BE" or "DUT" or "DAN")
+                .Select(x => x.index)
+                .ToList();
+        }
+
+        private static HashSet<string> ParseSelectedProcessCodes(string? csv)
+        {
+            if (string.IsNullOrWhiteSpace(csv))
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            return csv.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => Norm(x))
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static List<T> ResolveFixedRoute<T>(
+            List<T> allSteps,
+            Func<T, string?> processCodeSelector,
+            string? selectedProcessesCsv)
+        {
+            if (allSteps == null || allSteps.Count == 0)
+                return new List<T>();
+
+            var selected = ParseSelectedProcessCodes(selectedProcessesCsv);
+            if (selected.Count == 0)
+                return allSteps;
+
+            var filtered = allSteps
+                .Where(x => selected.Contains(Norm(processCodeSelector(x))))
+                .ToList();
+
+            return filtered.Count > 0 ? filtered : allSteps;
+        }
     }
 }

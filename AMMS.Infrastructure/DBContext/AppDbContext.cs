@@ -147,7 +147,8 @@ public partial class AppDbContext : DbContext
                 .HasMaxLength(20)
                 .HasDefaultValueSql("'New'::character varying");
             entity.Property(e => e.total_amount).HasPrecision(15, 2);
-
+            entity.Property(e => e.status)
+        .HasMaxLength(30);
             entity.HasOne(d => d.quote).WithMany(p => p.orders)
                 .HasForeignKey(d => d.quote_id)
                 .HasConstraintName("orders_quote_id_fkey");
@@ -156,6 +157,11 @@ public partial class AppDbContext : DbContext
                 .HasForeignKey(o => o.production_id)
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("fk_orders_production");
+            entity.Property(e => e.layout_confirmed)
+        .HasDefaultValue(false);
+
+            entity.HasIndex(e => e.layout_confirmed)
+                .HasDatabaseName("ix_orders_layout_confirmed");
         });
 
         modelBuilder.Entity<order_item>(entity =>
@@ -471,12 +477,6 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.sheets_waste).HasDefaultValue(0);
             entity.Property(e => e.sheets_total).HasDefaultValue(0);
             entity.Property(e => e.total_area_m2).HasPrecision(18, 4).HasDefaultValue(0);
-            entity.Property(e => e.contract_file_path)
-                .HasColumnName("contract_file_path")
-                .HasMaxLength(1000);
-            entity.Property(e => e.contract_uploaded_at)
-                .HasColumnName("contract_uploaded_at")
-                .HasColumnType("timestamp without time zone");
             entity.HasOne(d => d.order_request)
                 .WithMany()
                 .HasForeignKey(d => d.order_request_id)

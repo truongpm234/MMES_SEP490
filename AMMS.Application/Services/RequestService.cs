@@ -20,6 +20,7 @@ namespace AMMS.Application.Services
         private readonly IBomRepository _bomRepo;
         private readonly IRealtimePublisher _rt;
         private readonly IAccessService _currentUser;
+        private readonly IUserRepository _userRepo;
         public RequestService(
             IRequestRepository requestRepo,
             IOrderRepository orderRepo,
@@ -28,7 +29,8 @@ namespace AMMS.Application.Services
             IBomRepository bomRepo,
             IRealtimePublisher rt,
             AppDbContext db,
-            IAccessService currentUser)
+            IAccessService currentUser,
+            IUserRepository userRepo)
         {
             _requestRepo = requestRepo;
             _orderRepo = orderRepo;
@@ -38,6 +40,7 @@ namespace AMMS.Application.Services
             _db = db;
             _rt = rt;
             _currentUser = currentUser;
+            _userRepo = userRepo;
         }
 
         private DateTime? ToDeliveryDate(DateTime? dateTime)
@@ -56,9 +59,7 @@ namespace AMMS.Application.Services
         {
             var now = AppTime.NowVnUnspecified();
 
-            var assignedConsultantId = _currentUser.IsConsultant && _currentUser.UserId.HasValue
-                ? _currentUser.UserId.Value
-                : await _requestRepo.GetLeastLoadedConsultantUserIdAsync();
+            var assignedConsultant = await ResolveAssignedConsultantAsync();
 
             var entity = new order_request
             {
@@ -77,10 +78,10 @@ namespace AMMS.Application.Services
                 product_height_mm = req.product_height_mm,
                 product_length_mm = req.product_length_mm,
                 product_width_mm = req.product_width_mm,
-                preliminary_estimated_price = req.preliminary_estimated_price ?? null,
+                preliminary_estimated_price = req.preliminary_estimated_price,
 
-                assigned_consultant = assignedConsultantId,
-                assigned_at = assignedConsultantId.HasValue ? now : null
+                assigned_consultant = assignedConsultant.user_id,
+                assigned_at = now
             };
 
             await _requestRepo.AddAsync(entity);
@@ -96,7 +97,10 @@ namespace AMMS.Application.Services
 
             return new CreateRequestResponse
             {
-                order_request_id = entity.order_request_id
+                order_request_id = entity.order_request_id,
+                assigned_consultant = entity.assigned_consultant,
+                assigned_at = entity.assigned_at,
+                assigned_consultant_user = assignedConsultant
             };
         }
 
@@ -104,9 +108,7 @@ namespace AMMS.Application.Services
         {
             var now = AppTime.NowVnUnspecified();
 
-            var assignedConsultantId = _currentUser.IsConsultant && _currentUser.UserId.HasValue
-                ? _currentUser.UserId.Value
-                : await _requestRepo.GetLeastLoadedConsultantUserIdAsync();
+            var assignedConsultant = await ResolveAssignedConsultantAsync();
 
             var entity = new order_request
             {
@@ -117,8 +119,8 @@ namespace AMMS.Application.Services
                 order_request_date = now,
                 process_status = "Pending",
 
-                assigned_consultant = assignedConsultantId,
-                assigned_at = assignedConsultantId.HasValue ? now : null
+                assigned_consultant = assignedConsultant.user_id,
+                assigned_at = now
             };
 
             await _requestRepo.AddAsync(entity);
@@ -134,7 +136,10 @@ namespace AMMS.Application.Services
 
             return new CreateRequestResponse
             {
-                order_request_id = entity.order_request_id
+                order_request_id = entity.order_request_id,
+                assigned_consultant = entity.assigned_consultant,
+                assigned_at = entity.assigned_at,
+                assigned_consultant_user = assignedConsultant
             };
         }
 
@@ -343,10 +348,7 @@ namespace AMMS.Application.Services
                 throw new ArgumentException("product_name is required");
 
             var now = AppTime.NowVnUnspecified();
-
-            var assignedConsultantId = _currentUser.IsConsultant && _currentUser.UserId.HasValue
-                ? _currentUser.UserId.Value
-                : await _requestRepo.GetLeastLoadedConsultantUserIdAsync(ct);
+            var assignedConsultant = await ResolveAssignedConsultantAsync(ct);
 
             var entity = new order_request
             {
@@ -373,8 +375,8 @@ namespace AMMS.Application.Services
                 order_request_date = now,
                 process_status = "Pending",
 
-                assigned_consultant = assignedConsultantId,
-                assigned_at = assignedConsultantId.HasValue ? now : null
+                assigned_consultant = assignedConsultant.user_id,
+                assigned_at = now
             };
 
             await _requestRepo.AddAsync(entity);
@@ -567,6 +569,8 @@ namespace AMMS.Application.Services
 
             var now = AppTime.NowVnUnspecified();
 
+            var clonedAssignedConsultantId = source.assigned_consultant ?? await _requestRepo.GetLeastLoadedConsultantUserIdAsync(ct);
+
             var clonedRequest = new order_request
             {
                 customer_name = source.customer_name,
@@ -603,7 +607,10 @@ namespace AMMS.Application.Services
                 reason = null,
                 verified_at = null,
                 quote_expires_at = null,
-                consultant_note = source.consultant_note
+                consultant_note = source.consultant_note,
+
+                assigned_consultant = clonedAssignedConsultantId,
+                assigned_at = clonedAssignedConsultantId.HasValue ? now : null
             };
 
             await _requestRepo.AddAsync(clonedRequest);
@@ -1043,12 +1050,43 @@ namespace AMMS.Application.Services
         public Task EnsureCanAccessAssignedRequestAsync(int requestId, CancellationToken ct = default)
             => _currentUser.EnsureCanAccessAssignedRequestAsync(requestId, ct);
 
+<<<<<<< HEAD
         public async Task<bool> UpdateDeliveryNoteAsync(int orderRequestId, string note, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(note))
                 note = "";
 
             return await _requestRepo.UpdateDeliveryNoteAsync(orderRequestId, note.Trim(), ct);
+=======
+        private async Task<AMMS.Shared.DTOs.User.AssignedConsultantSummaryDto> ResolveAssignedConsultantAsync(CancellationToken ct = default)
+        {
+            int? assignedConsultantId;
+
+            if (_currentUser.IsConsultant && _currentUser.UserId.HasValue)
+            {
+                assignedConsultantId = _currentUser.UserId.Value;
+            }
+            else
+            {
+                assignedConsultantId = await _requestRepo.GetLeastLoadedConsultantUserIdAsync(ct);
+            }
+
+            if (!assignedConsultantId.HasValue)
+                throw new InvalidOperationException("Hiện không có consultant nào đang hoạt động để nhận request.");
+
+            var consultant = await _userRepo.GetAssignedConsultantSummaryAsync(assignedConsultantId.Value, ct);
+
+            if (consultant == null)
+                throw new InvalidOperationException("Consultant được gán không tồn tại.");
+
+            if (consultant.role_id != 2)
+                throw new InvalidOperationException("User được gán không phải consultant.");
+
+            if (consultant.is_active != true)
+                throw new InvalidOperationException("Consultant được gán hiện không hoạt động.");
+
+            return consultant;
+>>>>>>> main
         }
     }
 }
