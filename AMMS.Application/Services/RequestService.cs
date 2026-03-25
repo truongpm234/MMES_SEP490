@@ -1050,14 +1050,13 @@ namespace AMMS.Application.Services
         public Task EnsureCanAccessAssignedRequestAsync(int requestId, CancellationToken ct = default)
             => _currentUser.EnsureCanAccessAssignedRequestAsync(requestId, ct);
 
-<<<<<<< HEAD
         public async Task<bool> UpdateDeliveryNoteAsync(int orderRequestId, string note, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(note))
                 note = "";
 
             return await _requestRepo.UpdateDeliveryNoteAsync(orderRequestId, note.Trim(), ct);
-=======
+        }
         private async Task<AMMS.Shared.DTOs.User.AssignedConsultantSummaryDto> ResolveAssignedConsultantAsync(CancellationToken ct = default)
         {
             int? assignedConsultantId;
@@ -1086,7 +1085,6 @@ namespace AMMS.Application.Services
                 throw new InvalidOperationException("Consultant được gán hiện không hoạt động.");
 
             return consultant;
->>>>>>> main
         }
     }
 }
