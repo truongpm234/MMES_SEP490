@@ -24,5 +24,6 @@ namespace AMMS.Application.Interfaces
         Task<UploadCustomerSignedContractResponse> UploadCustomerSignedContractAsync(int requestId, int estimateId, Stream fileStream, string fileName, string contentType, CancellationToken ct = default);
         Task<CompareContractResponse> CompareContractsAsync(int requestId, int estimateId, CancellationToken ct = default);
         Task<cost_estimate?> GetTrackingByIdAsync(int estimateId, CancellationToken ct = default);
+        Task<RemainingByRequestResponse?> GetRemainingByRequestIdAsync(int requestId, CancellationToken ct = default);
     }
 }
