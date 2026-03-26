@@ -3,7 +3,7 @@
     public class RequestDetailDto
     {
         public int request_id { get; set; }
-
+        public int? order_id { get; set; }
         public string customer_name { get; set; } = "";
         public string customer_phone { get; set; } = "";
         public string email { get; set; } = "";

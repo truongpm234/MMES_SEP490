@@ -661,6 +661,7 @@ namespace AMMS.Infrastructure.Repositories
             return new RequestDetailDto
             {
                 request_id = request.order_request_id,
+                order_id = request.order_request_id,
                 customer_name = SafeText(request.customer_name),
                 customer_phone = SafeText(request.customer_phone),
                 email = SafeText(request.customer_email),
