@@ -356,17 +356,24 @@ namespace AMMS.API.Controllers
 
         [HttpGet("payos/return")]
         public async Task<IActionResult> PayOsReturn(
-    [FromQuery] long order_code,
-    [FromQuery] long? orderCode,
+    [FromQuery(Name = "order_code")] long? orderCode,
     [FromQuery] string? status,
     [FromServices] IPaymentRepository paymentRepo,
     CancellationToken ct)
         {
-            var fe = _config["Deal:BaseUrlFe"] ?? "https://sep490-fe.vercel.app";
+            var fe = _config["Deal:BaseUrlFe"];
 
             try
             {
-                var oc = order_code > 0 ? order_code : (orderCode ?? 0);
+                long oc = orderCode ?? 0;
+
+                // hỗ trợ backward compatibility nếu chỗ nào cũ vẫn gọi ?orderCode=
+                if (oc <= 0 &&
+                    long.TryParse(Request.Query["orderCode"], out var legacyOrderCode))
+                {
+                    oc = legacyOrderCode;
+                }
+
                 if (oc <= 0)
                     return Redirect($"{fe}/payment-result?payos=invalid_order_code");
 
@@ -385,7 +392,8 @@ namespace AMMS.API.Controllers
                 PayOsResultDto? info = null;
                 try
                 {
-                    info = await HttpContext.RequestServices.GetRequiredService<IPayOsService>()
+                    info = await HttpContext.RequestServices
+                        .GetRequiredService<IPayOsService>()
                         .GetPaymentLinkInformationAsync(oc, ct);
                 }
                 catch
@@ -427,7 +435,6 @@ namespace AMMS.API.Controllers
                 return Redirect($"{fe}/payment-result?payos=error&message={msg}");
             }
         }
-
 
         [HttpGet("payos/cancel")]
         public IActionResult PayOsCancel([FromQuery] int orderRequestId, [FromQuery] long orderCode)

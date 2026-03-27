@@ -873,7 +873,7 @@ namespace AMMS.Application.Services
             return est;
         }
 
-        private static bool IsPaidStatus(string? status)
+        public bool IsPaidStatus(string? status)
         {
             var st = (status ?? "").Trim().ToUpperInvariant();
             return st is "PAID" or "SUCCESS";
