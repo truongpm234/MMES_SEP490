@@ -411,6 +411,22 @@ namespace AMMS.Application.Services
                 ct);
         }
 
+        public async Task<RemainingByRequestResponse?> GetRemainingByRequestIdAsync(int requestId, CancellationToken ct = default)
+        {
+            var data = await _estimateRepo.GetCostSummaryByRequestIdAsync(requestId, ct);
+            if (data == null) return null;
+
+            var remaining = data.final_total_cost - data.deposit_amount;
+            if (remaining < 0m) remaining = 0m;
+
+            return new RemainingByRequestResponse
+            {
+                order_request_id = data.order_request_id,
+                final_total_cost = data.final_total_cost,
+                deposit_amount = data.deposit_amount,
+                remaining_amount = remaining
+            };
+        }
 
     }
 }

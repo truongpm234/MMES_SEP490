@@ -132,7 +132,8 @@ namespace AMMS.Infrastructure.Repositories
                     delivery_text = req.delivery_date?.ToString("dd/MM/yyyy") ?? "N/A",
                     request_date_text = req.order_request_date?.ToString("dd/MM/yyyy HH:mm") ?? "N/A",
                     quote_expired_at_text = expiredAt.ToString("dd/MM/yyyy HH:mm"),
-
+                    consultant_contract_path = est.consultant_contract_path,
+                    customer_signed_contract_path = est.customer_signed_contract_path,
                     order_detail_url = null,
                     is_customer_copy = true,
                     email_html = null

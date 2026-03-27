@@ -8,14 +8,14 @@ namespace AMMS.Shared.DTOs.PayOS
 {
     public class PayOsResultDto
     {
-        public DateTime? expired_at { get; set; }   // ✅ property
+        public DateTime? expired_at { get; set; }  
 
         public string? check_out_url { get; set; }
         public string? qr_code { get; set; }
         public string? account_number { get; set; }
         public string? account_name { get; set; }
 
-        public int? amount { get; set; }            // ok nullable
+        public int? amount { get; set; }           
         public string? status { get; set; }
         public string? description { get; set; }
         public string? bin { get; set; }

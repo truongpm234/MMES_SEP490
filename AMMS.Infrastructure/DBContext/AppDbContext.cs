@@ -144,11 +144,9 @@ public partial class AppDbContext : DbContext
                 .HasMaxLength(20)
                 .HasDefaultValueSql("'Unpaid'::character varying");
             entity.Property(e => e.status)
-                .HasMaxLength(20)
+                .HasMaxLength(30)
                 .HasDefaultValueSql("'New'::character varying");
             entity.Property(e => e.total_amount).HasPrecision(15, 2);
-            entity.Property(e => e.status)
-        .HasMaxLength(30);
             entity.HasOne(d => d.quote).WithMany(p => p.orders)
                 .HasForeignKey(d => d.quote_id)
                 .HasConstraintName("orders_quote_id_fkey");

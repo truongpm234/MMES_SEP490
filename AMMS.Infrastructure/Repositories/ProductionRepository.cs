@@ -40,8 +40,12 @@ namespace AMMS.Infrastructure.Repositories
 
         public Task SaveChangesAsync() => _db.SaveChangesAsync();
 
-        public Task<production?> GetByIdAsync(int prodId)
-            => _db.productions.FirstOrDefaultAsync(x => x.prod_id == prodId);
+        public Task<production?> GetByIdForUpdateAsync(int prodId, CancellationToken ct = default)
+        {
+            return _db.productions
+                .AsTracking()
+                .FirstOrDefaultAsync(x => x.prod_id == prodId, ct);
+        }
 
         public async Task<PagedResultLite<ProducingOrderCardDto>> GetProducingOrdersAsync(int page, int pageSize, int? roleId, CancellationToken ct = default)
         {
@@ -1406,6 +1410,13 @@ namespace AMMS.Infrastructure.Repositories
             var value = maxQty - reduction;
 
             return value < finalSuggestedQty ? finalSuggestedQty : value;
+        }
+        public async Task<production?> GetLatestByOrderIdAsync(int orderId, CancellationToken ct = default)
+        {
+            return await _db.productions
+                .Where(x => x.order_id == orderId)
+                .OrderByDescending(x => x.prod_id)
+                .FirstOrDefaultAsync(ct);
         }
     }
 }

@@ -874,12 +874,13 @@ namespace AMMS.Application.Services
                 code = "TMP-ORD",
                 order_date = AppTime.NowVnUnspecified(),
                 delivery_date = req.delivery_date,
-                status = "Scheduled",
+                status = "LayoutPending",
                 payment_status = "Deposited",
                 quote_id = req.quote_id,
                 total_amount = est.final_total_cost,
                 is_enough = null,
-                is_buy = false
+                is_buy = false,
+                layout_confirmed = false
             };
 
             await _orderRepo.AddOrderAsync(newOrder);

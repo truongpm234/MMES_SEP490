@@ -56,5 +56,15 @@ namespace AMMS.Application.Services
         {
             return await _paymentRepository.GetLatestByRequestIdAndEstimateIdAsync(requestId, estimateId, ct);
         }
+
+        public async Task<payment?> GetLatestPendingByRequestIdAndTypeAsync(int requestId, string paymentType, CancellationToken ct = default)
+        {
+            return await _paymentRepository.GetLatestPendingByRequestIdAndTypeAsync(requestId, paymentType, ct);
+        }
+
+        public async Task<payment?> GetLatestByRequestIdAndTypeAsync(int requestId, string paymentType, CancellationToken ct = default)
+        {
+            return await _paymentRepository.GetLatestByRequestIdAndTypeAsync(requestId, paymentType, ct);
+        }
     }
 }
