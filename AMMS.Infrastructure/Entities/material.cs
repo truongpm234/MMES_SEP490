@@ -33,7 +33,7 @@ public partial class material
 
     [Column("material_class")]
     [MaxLength(10)]
-    public string material_class { get; set; }
+    public string? material_class { get; set; }
 
     public virtual ICollection<bom> boms { get; set; } = new List<bom>();
 

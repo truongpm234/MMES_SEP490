@@ -25,14 +25,6 @@ namespace AMMS.API.Controllers
             _cloudinaryStorage = cloudinaryFileStorageService;
         }
 
-        [HttpGet("estimate-finish/{orderRequestId:int}")]
-        public async Task<ActionResult<EstimateFinishDateResponse>> EstimateFinish(int orderRequestId, CancellationToken ct)
-        {
-            var res = await _planning.EstimateFinishByOrderRequestAsync(orderRequestId, ct);
-            if (res == null) return NotFound();
-            return Ok(res);
-        }
-
         [HttpPut("adjust-cost/{orderRequestId:int}")]
         public async Task<IActionResult> AdjustCost(int orderRequestId, [FromBody] AdjustCostRequest req)
         {

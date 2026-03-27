@@ -126,7 +126,9 @@ namespace AMMS.Infrastructure.Repositories
                 {
                     material_group = "Loại sóng",
                     material_code = ce1.wave_type,
-                    material_name = $"Sóng {ce1.wave_type}"
+                    material_name = $"Sóng {ce1.wave_type}",
+                    unit = "Tờ",
+                    quantity = ce1.sheets_total
                 });
             }
 

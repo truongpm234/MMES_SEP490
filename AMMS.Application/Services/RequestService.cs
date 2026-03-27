@@ -79,7 +79,7 @@ namespace AMMS.Application.Services
                 product_length_mm = req.product_length_mm,
                 product_width_mm = req.product_width_mm,
                 preliminary_estimated_price = req.preliminary_estimated_price,
-
+                estimate_finish_date = now.AddDays(7),
                 assigned_consultant = assignedConsultant.user_id,
                 assigned_at = now
             };
@@ -1086,6 +1086,15 @@ namespace AMMS.Application.Services
                 throw new InvalidOperationException("Consultant được gán hiện không hoạt động.");
 
             return consultant;
+        }
+
+        public async Task<DateTime?> CalculateAsync(int orderRequestId, CancellationToken ct = default)
+        {
+            return await _requestRepo.CalculateAsync(orderRequestId, ct);
+        }
+        public async Task<DateTime?> RecalculateAndPersistAsync(int orderRequestId, CancellationToken ct = default)
+        {
+            return await _requestRepo.RecalculateAndPersistAsync(orderRequestId, ct);
         }
     }
 }

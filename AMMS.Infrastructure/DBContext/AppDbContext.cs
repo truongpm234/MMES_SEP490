@@ -178,13 +178,13 @@ public partial class AppDbContext : DbContext
         modelBuilder.Entity<order_request>(entity =>
         {
             entity.HasKey(e => e.order_request_id).HasName("order_request_pkey");
-
             entity.Property(e => e.customer_email).HasMaxLength(100);
             entity.Property(e => e.customer_name).HasMaxLength(100);
             entity.Property(e => e.customer_phone).HasMaxLength(20);
             entity.Property(e => e.delivery_date).HasColumnType("timestamp without time zone");
             entity.Property(e => e.assigned_at).HasColumnType("timestamp without time zone");
             entity.Property(e => e.order_request_date).HasColumnType("timestamp without time zone");
+            entity.Property(e => e.estimate_finish_date).HasColumnType("timestamp without time zone");
             entity.Property(e => e.verified_at).HasColumnName("verified_at").HasColumnType("timestamp without time zone");
             entity.Property(e => e.quote_expires_at).HasColumnName("quote_expire_at").HasColumnType("timestamp without time zone");
             entity.Property(e => e.product_name).HasMaxLength(200);

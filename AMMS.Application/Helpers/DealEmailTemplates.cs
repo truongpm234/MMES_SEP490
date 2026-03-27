@@ -70,7 +70,7 @@ namespace AMMS.Application.Helpers
 <div style='{copyBox}'>
   <p style='{copyTitle}'>📌 Đường dẫn xác nhận báo giá</p>
   <p style='{copyDesc}'>
-    Xin cảm ơn quý khách hàng đã tin tưởng và sử dụng dịch vụ của chúng tôi. Vui lòng <b>copy đường dẫn bên dưới</b> và dán vào tab mới của trình duyệt để tiếp tục xác nhận.
+    Xin cảm ơn quý khách hàng đã tin tưởng và sử dụng dịch vụ của chúng tôi. Vui lòng <b>copy đường dẫn bên dưới</b> và dán vào tab mới của trình duyệt để tiếp tục xác nhận.<br> <b>Lưu ý bảo mật</b>: Quý khách vui lòng chỉ thực hiện thanh toán thông qua website theo đường link chính thức bên dưới. Chúng tôi không yêu cầu thanh toán hay giao dịch qua bất kỳ kênh trung gian hoặc tài khoản cá nhân nào khác. Công ty sẽ không chịu trách nhiệm giải quyết đối với bất kỳ rủi ro hay tổn thất nào phát sinh nếu quý khách thực hiện giao dịch ngoài hệ thống này.
   </p>
   <div style='{copyUrl}'><a></a>{safeUrl}</div>
 </div>";
@@ -230,16 +230,27 @@ namespace AMMS.Application.Helpers
             var sharedAction = "";
             if (isCustomerCopy)
             {
-                var firstUrl = pairs.Select(x => x.checkoutUrl).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+                var firstUrl = pairs
+                    .Select(x => x.checkoutUrl)
+                    .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+
                 if (!string.IsNullOrWhiteSpace(firstUrl))
                     sharedAction = SecurePlainUrlBlock(firstUrl);
             }
 
             var contractBlock = ContractLinksBlock(pairs.Select(x => x.est).ToList());
             var expiryBox = QuoteExpiryNotice(ResolveQuoteExpiredAt(req, first.q), includeAutoReject: true);
-            var requestBlock = BuildRequestSummaryBlock(req);
-            var estimateBlocks = string.Join("", pairs.OrderBy(x => x.est.estimate_id).Select(x => BuildEstimateBlock(x.est, x.q)));
+
+            // Chỉ consultant mới thấy 2 block này
+            var requestBlock = isCustomerCopy ? "" : BuildRequestSummaryBlock(req);
+            var estimateBlocks = isCustomerCopy
+                ? ""
+                : string.Join("", pairs
+                    .OrderBy(x => x.est.estimate_id)
+                    .Select(x => BuildEstimateBlock(x.est, x.q)));
+
             var closingNoteHtml = isCustomerCopy ? QuoteIntro(req) : "";
+            var contentWidth = isCustomerCopy ? "700px" : "1100px";
 
             return $@"
 <!DOCTYPE html>
@@ -249,7 +260,7 @@ namespace AMMS.Application.Helpers
   <meta name='viewport' content='width=device-width, initial-scale=1'>
 </head>
 <body style='margin:0;background-color:#f7fafc;padding:30px 0;'>
-  <div style='max-width:1100px;margin:0 auto;padding:0 12px;font-family:{EmailFontFamily};'>
+  <div style='max-width:{contentWidth};margin:0 auto;padding:0 12px;font-family:{EmailFontFamily};'>
     <div style='margin-bottom:18px;text-align:center;color:#0f172a;font-weight:900;font-size:20px;letter-spacing:0.2px;'>
       BÁO GIÁ ĐƠN HÀNG AM{req.order_request_id:D6}
     </div>

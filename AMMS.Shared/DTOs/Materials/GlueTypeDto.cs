@@ -12,5 +12,8 @@ namespace AMMS.Shared.DTOs.Materials
         public string Name { get; set; } = null!;
         public decimal? StockQty { get; set; }
         public decimal? Price { get; set; } = null!;
+        public string? description { get; set; }
+        public string? material_class { get; set; }
+
     }
 }
