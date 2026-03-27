@@ -11,6 +11,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task UpdateAsync(order_request entity);
         Task<order_request?> GetByIdAsync(int id);
         Task CancelAsync(int id, CancellationToken ct = default);
+        Task MarkProcessStatusFinishedByOrderAsync(int orderId, int? quoteId, CancellationToken ct = default);
         Task<int> SaveChangesAsync();
         Task<int> CountAsync();
         Task<List<RequestPagedDto>> GetPagedAsync(int skip, int takePlusOne, int? consultantUserId = null);
@@ -49,5 +50,6 @@ namespace AMMS.Infrastructure.Interfaces
         Task<int?> GetLeastLoadedConsultantUserIdAsync(CancellationToken ct = default);
         Task<bool> CanConsultantAccessRequestAsync(int requestId, int consultantUserId, CancellationToken ct = default);
         Task<bool> UpdateDeliveryNoteAsync(int orderRequestId, string note, CancellationToken ct = default);
+        Task<order_request?> GetByOrderIdAsync(int orderId, CancellationToken ct = default);
     }
 }

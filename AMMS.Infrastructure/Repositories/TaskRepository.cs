@@ -497,6 +497,27 @@ namespace AMMS.Infrastructure.Repositories
             };
         }
 
+        public async Task<T> ExecuteInTransactionAsync<T>(Func<CancellationToken, Task<T>> action, CancellationToken ct = default)
+        {
+            var strategy = _db.Database.CreateExecutionStrategy();
+
+            return await strategy.ExecuteAsync(async () =>
+            {
+                await using var tx = await _db.Database.BeginTransactionAsync(ct);
+                try
+                {
+                    var result = await action(ct);
+                    await tx.CommitAsync(ct);
+                    return result;
+                }
+                catch
+                {
+                    await tx.RollbackAsync(ct);
+                    throw;
+                }
+            });
+        }
+
         public async Task<int> SuggestQtyGoodAsync(int taskId, CancellationToken ct = default)
         {
             var policy = await GetQtyPolicyAsync(taskId, ct);

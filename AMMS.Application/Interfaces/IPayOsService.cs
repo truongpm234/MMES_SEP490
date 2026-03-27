@@ -9,8 +9,7 @@ namespace AMMS.Application.Interfaces
 {
     public interface IPayOsService
     {
-        Task<PayOsResultDto> CreatePaymentLinkAsync(int orderCode, int amount, string description, string buyerName, string buyerEmail, string buyerPhone, string returnUrl, string cancelUrl, CancellationToken ct = default);
-        Task<PayOsResultDto?> GetPaymentLinkInformationAsync(long orderCode, CancellationToken ct = default);
+        Task<PayOsResultDto> CreatePaymentLinkAsync(long orderCode, int amount, string description, string buyerName, string buyerEmail, string buyerPhone, string returnUrl, string cancelUrl, CancellationToken ct = default); Task<PayOsResultDto?> GetPaymentLinkInformationAsync(long orderCode, CancellationToken ct = default);
         Task ConfirmWebhookAsync(CancellationToken ct = default);
 
     }

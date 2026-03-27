@@ -10,6 +10,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task AddOrderAsync(order entity);
         Task AddOrderItemAsync(order_item entity);
         void Update(order entity);
+        Task<order?> GetByIdForUpdateAsync(int orderId, CancellationToken ct = default);
         Task<order?> GetByIdAsync(int id);
         Task<order?> GetByCodeAsync(string code);
         Task<List<OrderListDto>> GetPagedAsync(int skip, int take);

@@ -20,16 +20,7 @@ namespace AMMS.Application.Services
             _opt = opt.Value;
         }
 
-        public async Task<PayOsResultDto> CreatePaymentLinkAsync(
-    int orderCode,
-    int amount,
-    string description,
-    string buyerName,
-    string buyerEmail,
-    string buyerPhone,
-    string returnUrl,
-    string cancelUrl,
-    CancellationToken ct = default)
+        public async Task<PayOsResultDto> CreatePaymentLinkAsync(long orderCode, int amount, string description, string buyerName, string buyerEmail, string buyerPhone, string returnUrl, string cancelUrl, CancellationToken ct = default)
         {
             var dataToSign = $"amount={amount}&cancelUrl={cancelUrl}&description={description}&orderCode={orderCode}&returnUrl={returnUrl}";
             var signature = HmacSha256Hex(_opt.ChecksumKey, dataToSign);
@@ -72,7 +63,35 @@ namespace AMMS.Application.Services
             throw new PayOsException($"PayOS Error: {rawResponse}");
         }
 
-        private static PayOsResultDto MapPayOsDataToDto(JsonElement data, int orderCode, string description, int amount, string raw)
+        private static DateTime? GetDateTime(JsonElement data, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                if (!data.TryGetProperty(name, out var p))
+                    continue;
+
+                if (p.ValueKind == JsonValueKind.String &&
+                    DateTime.TryParse(p.GetString(), out var dt))
+                {
+                    return dt;
+                }
+
+                if (p.ValueKind == JsonValueKind.Number && p.TryGetInt64(out var unix))
+                {
+                    try
+                    {
+                        return DateTimeOffset.FromUnixTimeSeconds(unix).DateTime;
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static PayOsResultDto MapPayOsDataToDto(JsonElement data, long orderCode, string description, int amount, string raw)
         {
             string? GetString(string name) =>
                 data.TryGetProperty(name, out var p) ? p.GetString() : null;
@@ -95,6 +114,8 @@ namespace AMMS.Application.Services
 
             var dto = new PayOsResultDto
             {
+                expired_at = GetDateTime(data, "expiredAt", "expiresAt", "expired_at"),
+
                 order_code = GetLong("orderCode") ?? orderCode,
                 check_out_url = GetString("checkoutUrl"),
                 qr_code = GetString("qrCode"),
@@ -144,6 +165,7 @@ namespace AMMS.Application.Services
 
             return new PayOsResultDto
             {
+                expired_at = GetDateTime(data, "expiredAt", "expiresAt", "expired_at"),
                 order_code = orderCode,
                 raw_json = raw,
 

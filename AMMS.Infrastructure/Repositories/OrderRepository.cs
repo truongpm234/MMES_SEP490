@@ -1,5 +1,4 @@
-﻿// AMMS.Infrastructure/Repositories/OrderRepository.cs
-using AMMS.Infrastructure.DBContext;
+﻿using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Common;
@@ -37,18 +36,12 @@ namespace AMMS.Infrastructure.Repositories
                     || s.Equals("0", StringComparison.OrdinalIgnoreCase);
             }
 
-            // 1) Lấy page orders (kèm fallback customer name)
             var orders = await (
                 from o in _db.orders.AsNoTracking()
-
-                    // quote -> customer
                 join q in _db.quotes.AsNoTracking() on o.quote_id equals q.quote_id into qj
                 from q in qj.DefaultIfEmpty()
-
-                    // order_request fallback
                 join r in _db.order_requests.AsNoTracking() on o.order_id equals r.order_id into rj
                 from r in rj.DefaultIfEmpty()
-
                 orderby o.order_date descending, o.order_id descending
                 select new
                 {
@@ -77,7 +70,6 @@ namespace AMMS.Infrastructure.Repositories
 
             if (orders.Count == 0) return new List<OrderResponseDto>();
 
-            // 2) Chỉ order có status Not Enough mới tính thiếu NVL
             var orderIdsNeedCalc = orders
                 .Where(o => IsNotEnoughStatus(o.Status))
                 .Select(o => o.order_id)
@@ -88,7 +80,6 @@ namespace AMMS.Infrastructure.Repositories
 
             if (orderIdsNeedCalc.Count > 0)
             {
-                // 2.1) BOM lines cho các order cần tính
                 var bomLines = await (
                     from oi in _db.order_items.AsNoTracking()
                     join b in _db.boms.AsNoTracking() on oi.item_id equals b.order_item_id
@@ -111,7 +102,6 @@ namespace AMMS.Infrastructure.Repositories
                 {
                     ordersWithBom = bomLines.Select(x => x.OrderId).ToHashSet();
 
-                    // 2.2) Usage 30 ngày gần nhất từ stock_moves (OUT)
                     var today = DateTime.SpecifyKind(DateTime.UtcNow.Date, DateTimeKind.Unspecified);
                     var historyStart = DateTime.SpecifyKind(today.AddDays(-30), DateTimeKind.Unspecified);
                     var historyEndExclusive = DateTime.SpecifyKind(today.AddDays(1), DateTimeKind.Unspecified);
@@ -194,7 +184,6 @@ namespace AMMS.Infrastructure.Repositories
                 }
             }
 
-            // 3) Build response
             return orders.Select(o =>
             {
                 missingByOrder.TryGetValue(o.order_id, out var missingMaterials);
@@ -245,6 +234,13 @@ namespace AMMS.Infrastructure.Repositories
         public void Update(order entity)
         {
             _db.orders.Update(entity);
+        }
+
+        public Task<order?> GetByIdForUpdateAsync(int orderId, CancellationToken ct = default)
+        {
+            return _db.orders
+                .AsTracking()
+                .FirstOrDefaultAsync(x => x.order_id == orderId, ct);
         }
 
         public async Task<order?> GetByIdAsync(int id)

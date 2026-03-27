@@ -24,6 +24,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task<bool> PromoteInitialTasksAsync(int prodId, DateTime now, CancellationToken ct = default);
         Task<bool> PromoteAllTasksAfterRaloAsync(int prodId, DateTime now, CancellationToken ct = default);
         Task<TaskQtyPolicyDto?> GetQtyPolicyAsync(int taskId, CancellationToken ct = default);
+        Task<T> ExecuteInTransactionAsync<T>(Func<CancellationToken, Task<T>> action, CancellationToken ct = default);
         Task<int> SuggestQtyGoodAsync(int taskId, CancellationToken ct = default);
     }
 }

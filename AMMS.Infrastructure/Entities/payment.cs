@@ -22,6 +22,9 @@ namespace AMMS.Infrastructure.Entities
 
         public string status { get; set; } = "PENDING";
 
+        [Column(TypeName = "varchar(20)")]
+        public string? payment_type { get; set; }
+
         public DateTime? paid_at { get; set; }
 
         public string? payos_payment_link_id { get; set; }

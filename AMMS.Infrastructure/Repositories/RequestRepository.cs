@@ -115,6 +115,21 @@ namespace AMMS.Infrastructure.Repositories
             _db.order_requests.Update(entity);
         }
 
+        public async Task MarkProcessStatusFinishedByOrderAsync(int orderId, int? quoteId, CancellationToken ct = default)
+        {
+            var requests = await _db.order_requests
+                .AsTracking()
+                .Where(x =>
+                    (x.order_id == orderId || (quoteId.HasValue && x.quote_id == quoteId.Value)) &&
+                    !string.Equals(x.process_status, "Finished"))
+                .ToListAsync(ct);
+
+            foreach (var req in requests)
+            {
+                req.process_status = "Finished";
+            }
+        }
+
         public Task<int> CountAsync()
         {
             return _db.order_requests.AsNoTracking().CountAsync();
@@ -661,7 +676,7 @@ namespace AMMS.Infrastructure.Repositories
             return new RequestDetailDto
             {
                 request_id = request.order_request_id,
-                order_id = request.order_request_id,
+                order_id = request.order_id,
                 customer_name = SafeText(request.customer_name),
                 customer_phone = SafeText(request.customer_phone),
                 email = SafeText(request.customer_email),
@@ -982,6 +997,14 @@ namespace AMMS.Infrastructure.Repositories
 
             await _db.SaveChangesAsync(ct);
             return true;
+        }
+
+        public async Task<order_request?> GetByOrderIdAsync(int orderId, CancellationToken ct = default)
+        {
+            return await _db.order_requests
+                .Where(x => x.order_id == orderId)
+                .OrderByDescending(x => x.order_request_id)
+                .FirstOrDefaultAsync(ct);
         }
     }
 }

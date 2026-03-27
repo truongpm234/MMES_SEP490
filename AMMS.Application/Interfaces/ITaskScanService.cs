@@ -9,7 +9,7 @@ namespace AMMS.Application.Interfaces
 {
     public interface ITaskScanService
     {
-        Task<ScanTaskResult> ScanFinishAsync(ScanTaskRequest req);
+        Task<ScanTaskResult> ScanFinishAsync(ScanTaskRequest req, CancellationToken ct = default);
         Task<int> SuggestQtyGoodAsync(int taskId, CancellationToken ct = default);
     }
 }

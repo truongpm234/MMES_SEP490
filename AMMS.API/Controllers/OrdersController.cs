@@ -14,12 +14,13 @@ namespace AMMS.API.Controllers
     {
         private readonly IOrderService _service;
         private readonly IMaterialPurchaseRequestService _materialPurchaseService;
+        private readonly IDealService _dealService;
 
-
-        public OrdersController(IOrderService service, IMaterialPurchaseRequestService materialPurchaseService)
+        public OrdersController(IOrderService service, IMaterialPurchaseRequestService materialPurchaseService, IDealService dealService)
         {
             _service = service;
             _materialPurchaseService = materialPurchaseService;
+            _dealService = dealService;
         }
 
         [HttpGet("get-by-{code}")]
@@ -96,6 +97,55 @@ namespace AMMS.API.Controllers
         public async Task<List<order>> GetAllOrderWithInProcess()
         {
             return await _service.GetAllOrderWithStatusInProcess();
+        }
+
+        [HttpPost("send-remaining-payment-email/{orderId:int}")]
+        public async Task<IActionResult> SendRemainingPaymentEmail(int orderId, CancellationToken ct)
+        {
+            try
+            {
+                await _dealService.SendRemainingPaymentEmailAsync(orderId, ct);
+                return Ok(new
+                {
+                    ok = true,
+                    order_id = orderId,
+                    message = "Đã gửi email yêu cầu thanh toán phần còn lại cho khách hàng."
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { ok = false, message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    ok = false,
+                    message = ex.Message
+                });
+            }
+        }
+
+        [HttpGet("create-payos-remaining-link/{orderId:int}")]
+        public async Task<IActionResult> GetRemainingPaymentLink(int orderId, CancellationToken ct)
+        {
+            try
+            {
+                var dto = await _dealService.CreateOrReuseRemainingPaymentLinkAsync(orderId, ct);
+                return Ok(dto);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { ok = false, message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    ok = false,
+                    message = ex.Message
+                });
+            }
         }
     }
 }

@@ -14,7 +14,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task<DateTime?> GetNearestDeliveryDateAsync();
         Task AddAsync(production p);
         Task SaveChangesAsync();
-        Task<production?> GetByIdAsync(int prodId);
+        Task<production?> GetByIdForUpdateAsync(int prodId, CancellationToken ct = default);
         Task<PagedResultLite<ProducingOrderCardDto>> GetProducingOrdersAsync( int page, int pageSize, int? roleId, CancellationToken ct = default);
         Task<ProductionProgressResponse> GetProgressAsync(int prodId);
         Task<ProductionDetailDto?> GetProductionDetailByOrderIdAsync(int orderId, CancellationToken ct = default);
@@ -26,5 +26,6 @@ namespace AMMS.Infrastructure.Interfaces
         Task<int?> StartProductionByOrderIdAndPromoteFirstTaskAsync(int orderId, DateTime now, CancellationToken ct = default);
         Task<List<MachineScheduleBoardDto>> GetMachineScheduleBoardAsync(DateTime from, DateTime to, CancellationToken ct = default);
         Task<bool> SetCompletedByOrderIdAsync(int orderId, CancellationToken ct = default);
+        Task<production?> GetLatestByOrderIdAsync(int orderId, CancellationToken ct = default);
     }
 }

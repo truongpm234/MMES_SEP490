@@ -17,5 +17,7 @@ namespace AMMS.Application.Interfaces
         Task NotifyConsultantPaidAsync(int orderRequestId, decimal paidAmount, DateTime paidAt);
         Task NotifyCustomerPaidAsync(int orderRequestId, decimal paidAmount, DateTime paidAt);
         Task<PayOsResultDto> CreateOrReuseDepositLinkAsync(int requestId, int estimateId, int? quoteId, CancellationToken ct = default);
+        Task SendRemainingPaymentEmailAsync(int orderId, CancellationToken ct = default);
+        Task<PayOsResultDto> CreateOrReuseRemainingPaymentLinkAsync(int orderId, CancellationToken ct = default);
     }
 }

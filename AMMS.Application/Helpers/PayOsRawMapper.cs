@@ -1,15 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Text.Json;
+using AMMS.Infrastructure.Entities;
+using AMMS.Shared.DTOs.PayOS;
 
 namespace AMMS.Application.Helpers
 {
-    using System.Text.Json;
-    using AMMS.Infrastructure.Entities;
-    using AMMS.Shared.DTOs.PayOS;
-
     public static class PayOsRawMapper
     {
         public static PayOsResultDto FromPayment(payment p)
@@ -38,7 +32,6 @@ namespace AMMS.Application.Helpers
                 dto.account_name = GetString(data, "accountName");
                 dto.bin = GetString(data, "bin");
                 dto.description = GetString(data, "description");
-
                 dto.payment_link_id = GetString(data, "paymentLinkId") ?? dto.payment_link_id;
                 dto.transaction_id = GetString(data, "transactionId") ?? GetString(data, "reference") ?? dto.transaction_id;
 
@@ -50,8 +43,23 @@ namespace AMMS.Application.Helpers
 
                 if (data.TryGetProperty("orderCode", out var oc) && oc.ValueKind == JsonValueKind.Number)
                     dto.order_code = oc.GetInt64();
+
+                if (data.TryGetProperty("expiredAt", out var exp1) &&
+                    exp1.ValueKind == JsonValueKind.String &&
+                    DateTime.TryParse(exp1.GetString(), out var dt1))
+                {
+                    dto.expired_at = dt1;
+                }
+                else if (data.TryGetProperty("expiresAt", out var exp2) &&
+                         exp2.ValueKind == JsonValueKind.String &&
+                         DateTime.TryParse(exp2.GetString(), out var dt2))
+                {
+                    dto.expired_at = dt2;
+                }
             }
-            catch { }
+            catch
+            {
+            }
 
             return dto;
         }
@@ -59,5 +67,4 @@ namespace AMMS.Application.Helpers
         private static string? GetString(JsonElement e, string name)
             => e.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
     }
-
 }

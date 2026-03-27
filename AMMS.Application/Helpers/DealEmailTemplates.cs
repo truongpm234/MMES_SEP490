@@ -76,6 +76,67 @@ namespace AMMS.Application.Helpers
 </div>";
         }
 
+        private static string Safe(string? s)
+    => System.Net.WebUtility.HtmlEncode((s ?? "").Trim());
+
+        private static string BuildRequestSummaryBlock(order_request req)
+        {
+            return $@"
+<div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;padding:16px 18px;margin:16px 0;box-shadow:0 8px 18px rgba(15,23,42,0.05);'>
+  <div style='font-size:13px;font-weight:900;color:#1e3a8a;text-transform:uppercase;margin-bottom:10px;'>Thông tin request</div>
+  <table width='100%' cellpadding='0' cellspacing='0' style='border-collapse:collapse;'>
+    <tr><td style='padding:6px 0;width:35%;font-size:12px;color:#64748b;'>Request ID</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>AM{req.order_request_id:D6}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Khách hàng</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{Safe(req.customer_name)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>SĐT</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{Safe(req.customer_phone)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Email</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{Safe(req.customer_email)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Địa chỉ</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{Safe(req.detail_address)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Sản phẩm</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{Safe(req.product_name)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Số lượng</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{req.quantity:N0}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Loại sản phẩm</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{Safe(req.product_type)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Số bản kẽm</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{req.number_of_plates}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Ngày yêu cầu</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{req.order_request_date:dd/MM/yyyy HH:mm}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Ngày giao</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{req.delivery_date:dd/MM/yyyy}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Ghi chú KH</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{Safe(req.description)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Message cho KH</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{Safe(req.message_to_customer)}</td></tr>
+  </table>
+</div>";
+        }
+
+        private static string BuildEstimateBlock(cost_estimate est, quote q)
+        {
+            string contractLink = string.IsNullOrWhiteSpace(est.consultant_contract_path)
+                ? ""
+                : $@"
+<tr>
+  <td style='padding:6px 0;font-size:12px;color:#64748b;'>Hợp đồng consultant</td>
+  <td style='padding:6px 0;font-size:12px;color:#2563eb;font-weight:700;word-break:break-all;'>{Safe(est.consultant_contract_path)}</td>
+</tr>";
+
+            return $@"
+<div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;padding:16px 18px;margin:16px 0;box-shadow:0 8px 18px rgba(15,23,42,0.05);'>
+  <div style='font-size:13px;font-weight:900;color:#b45309;text-transform:uppercase;margin-bottom:10px;'>Chi tiết báo giá E{est.estimate_id}</div>
+  <table width='100%' cellpadding='0' cellspacing='0' style='border-collapse:collapse;'>
+    <tr><td style='padding:6px 0;width:35%;font-size:12px;color:#64748b;'>Quote ID</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{q.quote_id}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Tổng tiền</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{VND(est.final_total_cost)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Tiền cọc</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{VND(est.deposit_amount)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Subtotal</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{VND(est.subtotal)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Discount %</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{est.discount_percent}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Discount amount</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{VND(est.discount_amount)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Paper code</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{Safe(est.paper_code)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Paper name</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{Safe(est.paper_name)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Coating</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{Safe(est.coating_type)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Wave</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{Safe(est.wave_type)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Production processes</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{Safe(est.production_processes)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Material cost</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{VND(est.material_cost)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Base cost</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{VND(est.base_cost)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Design cost</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{VND(est.design_cost)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Rush amount</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{VND(est.rush_amount)}</td></tr>
+    <tr><td style='padding:6px 0;font-size:12px;color:#64748b;'>Cost note</td><td style='padding:6px 0;font-size:12px;color:#0f172a;font-weight:700;'>{Safe(est.cost_note)}</td></tr>
+    {contractLink}
+  </table>
+</div>";
+        }
+
         private static string ContractLinksBlock(IEnumerable<cost_estimate> estimates)
         {
             var items = estimates
@@ -163,20 +224,21 @@ namespace AMMS.Application.Helpers
             if (pairs == null || pairs.Count == 0)
                 return QuoteEmail(req, new cost_estimate(), new quote { created_at = AppTime.NowVnUnspecified() }, "");
 
-            var left = pairs[0];
-            var right = pairs.Count > 1 ? pairs[1] : ((cost_estimate est, quote q, string? checkoutUrl)?)null;
-
-            var expiryBox = QuoteExpiryNotice(ResolveQuoteExpiredAt(req, left.q), includeAutoReject: true);
-            var contractBlock = ContractLinksBlock(pairs.Select(x => x.est).ToList());
-
+            var first = pairs[0];
             var isCustomerCopy = pairs.Any(x => !string.IsNullOrWhiteSpace(x.checkoutUrl));
 
-            string sharedAction = "";
-            if (!string.IsNullOrWhiteSpace(left.checkoutUrl))
+            var sharedAction = "";
+            if (isCustomerCopy)
             {
-                sharedAction = SecurePlainUrlBlock(left.checkoutUrl);
+                var firstUrl = pairs.Select(x => x.checkoutUrl).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+                if (!string.IsNullOrWhiteSpace(firstUrl))
+                    sharedAction = SecurePlainUrlBlock(firstUrl);
             }
 
+            var contractBlock = ContractLinksBlock(pairs.Select(x => x.est).ToList());
+            var expiryBox = QuoteExpiryNotice(ResolveQuoteExpiredAt(req, first.q), includeAutoReject: true);
+            var requestBlock = BuildRequestSummaryBlock(req);
+            var estimateBlocks = string.Join("", pairs.OrderBy(x => x.est.estimate_id).Select(x => BuildEstimateBlock(x.est, x.q)));
             var closingNoteHtml = isCustomerCopy ? QuoteIntro(req) : "";
 
             return $@"
@@ -188,12 +250,13 @@ namespace AMMS.Application.Helpers
 </head>
 <body style='margin:0;background-color:#f7fafc;padding:30px 0;'>
   <div style='max-width:1100px;margin:0 auto;padding:0 12px;font-family:{EmailFontFamily};'>
-
     <div style='margin-bottom:18px;text-align:center;color:#0f172a;font-weight:900;font-size:20px;letter-spacing:0.2px;'>
       BÁO GIÁ ĐƠN HÀNG AM{req.order_request_id:D6}
     </div>
 
     {sharedAction}
+    {requestBlock}
+    {estimateBlocks}
     {contractBlock}
     {expiryBox}
     {closingNoteHtml}
@@ -201,7 +264,6 @@ namespace AMMS.Application.Helpers
     <div style='background:linear-gradient(180deg,#edf2f7 0%,#e2e8f0 100%);padding:15px;text-align:center;font-size:12px;color:#64748b;margin-top:16px;border-radius:12px;'>
       Email này được gửi tự động từ hệ thống MES.
     </div>
-
   </div>
 </body>
 </html>";

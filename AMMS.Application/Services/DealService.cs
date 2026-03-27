@@ -2,6 +2,7 @@
 using AMMS.Application.Interfaces;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
+using AMMS.Shared.Constants;
 using AMMS.Shared.DTOs.Background;
 using AMMS.Shared.DTOs.Exceptions.AMMS.Application.Exceptions;
 using AMMS.Shared.DTOs.PayOS;
@@ -24,7 +25,8 @@ namespace AMMS.Application.Services
         private readonly ILogger<DealService> _logger;
         private readonly IEmailBackgroundQueue _emailQueue;
         private readonly IUserRepository _userRepo;
-
+        private readonly IOrderRepository _orderRepo;
+        private readonly IProductionRepository _prodRepo;
         public DealService(
     IRequestRepository requestRepo,
     ICostEstimateRepository estimateRepo,
@@ -36,7 +38,7 @@ namespace AMMS.Application.Services
     IRealtimePublisher rt,
     ILogger<DealService> logger,
     IEmailBackgroundQueue emailQueue,
-    IUserRepository userRepo)
+    IUserRepository userRepo, IOrderRepository orderRepository, IProductionRepository productionRepository)
         {
             _requestRepo = requestRepo;
             _estimateRepo = estimateRepo;
@@ -49,6 +51,8 @@ namespace AMMS.Application.Services
             _logger = logger;
             _emailQueue = emailQueue;
             _userRepo = userRepo;
+            _orderRepo = orderRepository;
+            _prodRepo = productionRepository;
         }
 
         public async Task SendDealAndEmailAsync(int orderRequestId, int? estimateId = null)
@@ -193,40 +197,17 @@ namespace AMMS.Application.Services
         public async Task<string> AcceptAndCreatePayOsLinkAsync(int orderRequestId)
         {
             var req = await _requestRepo.GetByIdAsync(orderRequestId) ?? throw new Exception("Order request not found");
-            var est = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId) ?? throw new Exception("Estimate not found");
+            var est = await ResolveAcceptedEstimateAsync(req);
 
             await SendConsultantStatusEmailAsync(req, est, statusText: "KHÁCH ĐỒNG Ý BÁO GIÁ");
 
-            var deposit = est.deposit_amount;
-            var amount = (int)Math.Round(deposit, 0) / 100;
-            var description = $"AM{orderRequestId:D6}";
+            var dto = await CreateOrReuseDepositLinkAsync(
+                requestId: orderRequestId,
+                estimateId: est.estimate_id,
+                quoteId: req.quote_id,
+                ct: CancellationToken.None);
 
-            var orderCode = await GetOrCreatePayOsOrderCodeAsync(orderRequestId);
-            var baseUrl = _config["Deal:BaseUrl"]!;
-
-            var returnUrl = $"{baseUrl}/api/requests/payos/return?request_id={orderRequestId}&order_code={orderCode}";
-            var cancelUrl = $"{baseUrl}/api/requests/payos/cancel?orderRequestId={orderRequestId}&orderCode={orderCode}";
-
-            var existing = await _payOs.GetPaymentLinkInformationAsync(orderCode);
-            if (existing != null)
-            {
-                var st = (existing.status ?? "").ToUpperInvariant();
-                if (st == "PENDING" || st == "PAID" || st == "SUCCESS" || st == "CANCELLED")
-                    return existing.check_out_url ?? "";
-            }
-
-            var result = await _payOs.CreatePaymentLinkAsync(
-                orderCode: orderCode,
-                amount: amount,
-                description: description,
-                buyerName: req.customer_name ?? "N/A",
-                buyerEmail: req.customer_email ?? "",
-                buyerPhone: req.customer_phone ?? "",
-                returnUrl: returnUrl,
-                cancelUrl: cancelUrl
-            );
-
-            return result.check_out_url ?? "";
+            return dto.check_out_url ?? "";
         }
 
         public async Task RejectDealAsync(int orderRequestId, string reason)
@@ -581,18 +562,14 @@ namespace AMMS.Application.Services
                 var merged = MergePayOsResult(liveInfo, savedInfo, pending);
 
                 if (IsReusablePayOsStatus(merged.status))
-                {
-                    if (!string.IsNullOrWhiteSpace(merged.check_out_url))
-                        return merged;
-
                     return merged;
-                }
             }
 
             var backendUrl = _config["Deal:BaseUrl"]!;
             var feBase = _config["Deal:BaseUrlFe"] ?? "https://sep490-fe.vercel.app";
 
-            var amount = (int)Math.Round(est.deposit_amount, 0) / 100;
+            var actualAmount = PaymentAmountHelper.GetDepositAmount(est);
+            var gatewayAmount = PaymentAmountHelper.ToGatewayAmount(actualAmount, _config);
 
             const int maxAttempt = 9;
             Exception? last = null;
@@ -610,23 +587,24 @@ namespace AMMS.Application.Services
                 try
                 {
                     var payos = await _payOs.CreatePaymentLinkAsync(
-                        orderCode: orderCode,
-                        amount: amount,
-                        description: description,
-                        buyerName: req.customer_name ?? "Khach hang",
-                        buyerEmail: req.customer_email ?? "",
-                        buyerPhone: req.customer_phone ?? "",
-                        returnUrl: returnUrl,
-                        cancelUrl: cancelUrl,
-                        ct: ct);
+    orderCode: orderCode,
+    amount: gatewayAmount,
+    description: description,
+    buyerName: req.customer_name ?? "Khach hang",
+    buyerEmail: req.customer_email ?? "",
+    buyerPhone: req.customer_phone ?? "",
+    returnUrl: returnUrl,
+    cancelUrl: cancelUrl,
+    ct: ct);
 
                     var now = AppTime.NowVnUnspecified();
                     await _payment.UpsertPendingAsync(new payment
                     {
                         order_request_id = requestId,
                         provider = "PAYOS",
+                        payment_type = PaymentTypes.Deposit,
                         order_code = orderCode,
-                        amount = payos.amount ?? amount,
+                        amount = actualAmount,
                         currency = "VND",
                         status = "PENDING",
                         payos_payment_link_id = payos.payment_link_id,
@@ -651,34 +629,156 @@ namespace AMMS.Application.Services
             throw new InvalidOperationException($"Cannot create PayOS link after retries. Last error: {last?.Message}");
         }
 
+        public async Task SendRemainingPaymentEmailAsync(int id, CancellationToken ct = default)
+        {
+            var req = await _requestRepo.GetByOrderIdAsync(id, ct)
+                ?? throw new InvalidOperationException("Order request not found for order");
+
+            var ord = await _orderRepo.GetByIdAsync(id)
+                ?? throw new InvalidOperationException("Order not found");
+
+            var prod = await _prodRepo.GetLatestByOrderIdAsync(id, ct)
+                ?? throw new InvalidOperationException("Production not found");
+
+            if (!string.Equals(prod.status, "Finished", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(prod.status, "Paid", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Production must be Finished before sending remaining-payment email.");
+            }
+
+            if (string.IsNullOrWhiteSpace(req.customer_email))
+                throw new InvalidOperationException("Customer email missing");
+
+            var est = await ResolveAcceptedEstimateAsync(req, ct);
+            var remainingAmount = PaymentAmountHelper.GetRemainingAmount(est);
+
+            if (remainingAmount <= 0)
+                throw new InvalidOperationException("Remaining amount is already 0. No need to send remaining-payment email.");
+
+            var feBase = (_config["Deal:BaseUrlFe"] ?? "https://sep490-fe.vercel.app").TrimEnd('/');
+            var paymentPageUrl = $"{feBase}/payment/{id}";
+
+            var html = RemainingPaymentEmailTemplates.BuildOrderFinishedRemainingPaymentEmail(
+                req, ord, prod, est, remainingAmount, paymentPageUrl);
+
+            await _emailQueue.QueueAsync(new EmailQueueItem(
+                req.customer_email!,
+                $"[MES] Đơn hàng {ord.code} đã hoàn thành - Vui lòng thanh toán phần còn lại",
+                html));
+        }
+
+        public async Task<PayOsResultDto> CreateOrReuseRemainingPaymentLinkAsync(int id, CancellationToken ct = default)
+        {
+            var req = await _requestRepo.GetByOrderIdAsync(id, ct)
+                ?? throw new InvalidOperationException("Order request not found for order");
+
+            var ord = await _orderRepo.GetByIdAsync(id)
+                ?? throw new InvalidOperationException("Order not found");
+
+            var prod = await _prodRepo.GetLatestByOrderIdAsync(id, ct)
+                ?? throw new InvalidOperationException("Production not found");
+
+            if (!string.Equals(prod.status, "Finished", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(prod.status, "Paid", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Production must be Finished before creating remaining-payment link.");
+            }
+
+            var est = await ResolveAcceptedEstimateAsync(req, ct);
+            var actualRemainingAmount = PaymentAmountHelper.GetRemainingAmount(est);
+            var gatewayRemainingAmount = PaymentAmountHelper.ToGatewayAmount(actualRemainingAmount, _config);
+
+            if (actualRemainingAmount <= 0) throw new InvalidOperationException("Remaining amount is already 0.");
+
+            var paid = await _payment.GetLatestByRequestIdAndTypeAsync(req.order_request_id, PaymentTypes.Remaining, ct);
+            if (paid != null && IsPaidStatus(paid.status))
+            {
+                return MergePayOsResult(null, PayOsRawMapper.FromPayment(paid), paid);
+            }
+
+            var pending = await _payment.GetLatestPendingByRequestIdAndTypeAsync(req.order_request_id, PaymentTypes.Remaining, ct);
+            if (pending != null)
+            {
+                PayOsResultDto? liveInfo = null;
+                PayOsResultDto? savedInfo = null;
+
+                try
+                {
+                    liveInfo = await _payOs.GetPaymentLinkInformationAsync(pending.order_code, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Cannot fetch remaining-payment PayOS info. OrderId={OrderId}, OrderCode={OrderCode}",
+                        id, pending.order_code);
+                }
+
+                if (!string.IsNullOrWhiteSpace(pending.payos_raw))
+                {
+                    try
+                    {
+                        savedInfo = PayOsRawMapper.FromPayment(pending);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex,
+                            "Cannot parse remaining-payment payos_raw. OrderId={OrderId}, OrderCode={OrderCode}",
+                            id, pending.order_code);
+                    }
+                }
+
+                var merged = MergePayOsResult(liveInfo, savedInfo, pending);
+                if (IsReusablePayOsStatus(merged.status))
+                    return merged;
+            }
+
+            var backendUrl = _config["Deal:BaseUrl"]!;
+            var feBase = (_config["Deal:BaseUrlFe"] ?? "https://sep490-fe.vercel.app").TrimEnd('/');
+
+            var orderCode = await GetOrCreateRemainingPayOsOrderCodeAsync(id, ct);
+            var description = $"REM{id:D6}";
+            var returnUrl = $"{backendUrl}/api/requests/payos/return?order_code={orderCode}";
+            var cancelUrl = $"{feBase}/payment/{id}?status=cancel";
+
+            var payos = await _payOs.CreatePaymentLinkAsync(
+    orderCode: orderCode,
+    amount: gatewayRemainingAmount,
+    description: description,
+    buyerName: req.customer_name ?? "Khach hang",
+    buyerEmail: req.customer_email ?? "",
+    buyerPhone: req.customer_phone ?? "",
+    returnUrl: returnUrl,
+    cancelUrl: cancelUrl,
+    ct: ct);
+
+            var now = AppTime.NowVnUnspecified();
+
+            await _payment.UpsertPendingAsync(new payment
+            {
+                order_request_id = req.order_request_id,
+                provider = "PAYOS",
+                payment_type = PaymentTypes.Remaining,
+                order_code = orderCode,
+                amount = actualRemainingAmount,
+                currency = "VND",
+                status = "PENDING",
+                payos_payment_link_id = payos.payment_link_id,
+                payos_transaction_id = payos.transaction_id,
+                payos_raw = payos.raw_json,
+                created_at = now,
+                updated_at = now,
+                estimate_id = est.estimate_id,
+                quote_id = req.quote_id
+            }, ct);
+
+            await _payment.SaveChangesAsync(ct);
+            return payos;
+        }
+
         private static bool IsDuplicateOrderCode(string msg)
         {
             msg = (msg ?? "").ToLowerInvariant();
             return msg.Contains("ordercode") && (msg.Contains("exists") || msg.Contains("tồn tại") || msg.Contains("231"));
-        }
-
-        private async Task<int> GetOrCreatePayOsOrderCodeAsync(
-    int orderRequestId,
-    CancellationToken ct = default,
-    int maxAttempt = 9)
-        {
-            for (int attempt = 1; attempt <= maxAttempt; attempt++)
-            {
-                int orderCode = checked(orderRequestId * 10 + attempt);
-
-                var info = await _payOs.GetPaymentLinkInformationAsync(orderCode, ct);
-
-                if (info == null) return orderCode;
-
-                var st = (info.status ?? "").ToUpperInvariant();
-                if (st == "PENDING" || st == "PAID" || st == "SUCCESS")
-                    return orderCode;
-
-                if (st == "CANCELLED" || st == "EXPIRED")
-                    continue;
-            }
-
-            throw new InvalidOperationException("Cannot allocate orderCode: attempts exhausted.");
         }
 
         private static bool IsReusablePayOsStatus(string? status)
@@ -756,6 +856,46 @@ namespace AMMS.Application.Services
             }
 
             return _config["Deal:ConsultantEmail"]?.Trim();
+        }
+
+        private async Task<cost_estimate> ResolveAcceptedEstimateAsync(order_request req, CancellationToken ct = default)
+        {
+            cost_estimate? est = null;
+
+            if (req.accepted_estimate_id.HasValue && req.accepted_estimate_id.Value > 0)
+                est = await _estimateRepo.GetByIdAsync(req.accepted_estimate_id.Value);
+
+            est ??= await _estimateRepo.GetByOrderRequestIdAsync(req.order_request_id);
+
+            if (est == null)
+                throw new InvalidOperationException("Accepted estimate not found");
+
+            return est;
+        }
+
+        private static bool IsPaidStatus(string? status)
+        {
+            var st = (status ?? "").Trim().ToUpperInvariant();
+            return st is "PAID" or "SUCCESS";
+        }
+
+        private async Task<long> GetOrCreateRemainingPayOsOrderCodeAsync(int orderId, CancellationToken ct = default, int maxAttempt = 9)
+        {
+            for (int attempt = 1; attempt <= maxAttempt; attempt++)
+            {
+                long orderCode = 9_000_000_000L + ((long)orderId * 100L) + attempt;
+
+                var info = await _payOs.GetPaymentLinkInformationAsync(orderCode, ct);
+
+                if (info == null)
+                    return orderCode;
+
+                var st = (info.status ?? "").Trim().ToUpperInvariant();
+                if (st is "PENDING" or "PROCESSING" or "PAID" or "SUCCESS")
+                    return orderCode;
+            }
+
+            throw new InvalidOperationException("Cannot allocate remaining-payment orderCode.");
         }
     }
 }
