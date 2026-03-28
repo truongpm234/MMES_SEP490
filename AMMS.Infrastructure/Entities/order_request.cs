@@ -84,6 +84,8 @@ public partial class order_request
 
     public virtual user? assigned_consultants { get; set; }
 
+    public DateTime? estimate_finish_date { get; set; }
+
     public virtual quote? quote { get; set; }
 
     public virtual order? order { get; set; }

@@ -113,13 +113,16 @@ namespace AMMS.API.Controllers
 
         [HttpGet("{id:int}")]
         [ProducesResponseType(typeof(RequestWithCostDto), StatusCodes.Status200OK)]
-        public async Task<IActionResult> GetRequestById(int id)
+        public async Task<IActionResult> GetRequestById(int id, CancellationToken ct)
         {
             var requestDto = await _service.GetByIdWithCostAsync(id);
 
             if (requestDto == null)
                 return NotFound(new { message = "Order request not found" });
-
+            if(!requestDto.estimate_finish_date.HasValue)
+            {
+                requestDto.estimate_finish_date = await _service.RecalculateAndPersistAsync(id, ct);
+            }
             return Ok(requestDto);
         }
         [HttpGet("get-cost-estimate/{order_id}")]

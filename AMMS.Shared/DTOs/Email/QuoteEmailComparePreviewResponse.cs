@@ -18,7 +18,7 @@ namespace AMMS.Shared.DTOs.Email
         public string? product_name { get; set; }
         public int quantity { get; set; }
         public bool is_send_design { get; set; }
-
+        public DateTime? estimate_finish_date { get; set; }
         public List<QuoteEmailPreviewResponse> quotes { get; set; } = new();
     }
 }

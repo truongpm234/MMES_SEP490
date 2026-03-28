@@ -51,5 +51,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task<bool> CanConsultantAccessRequestAsync(int requestId, int consultantUserId, CancellationToken ct = default);
         Task<bool> UpdateDeliveryNoteAsync(int orderRequestId, string note, CancellationToken ct = default);
         Task<order_request?> GetByOrderIdAsync(int orderId, CancellationToken ct = default);
+        Task<DateTime?> CalculateAsync(int orderRequestId, CancellationToken ct = default);
+        Task<DateTime?> RecalculateAndPersistAsync(int orderRequestId, CancellationToken ct = default);
     }
 }

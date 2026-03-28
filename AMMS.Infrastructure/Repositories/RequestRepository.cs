@@ -4,6 +4,7 @@ using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Orders;
 using AMMS.Shared.DTOs.Requests;
+using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -12,10 +13,11 @@ namespace AMMS.Infrastructure.Repositories
     public class RequestRepository : IRequestRepository
     {
         private readonly AppDbContext _db;
-
-        public RequestRepository(AppDbContext db)
+        private readonly IMachineRepository _machineRepository;
+        public RequestRepository(AppDbContext db, IMachineRepository machineRepository)
         {
             _db = db;
+            _machineRepository = machineRepository;
         }
 
         public async Task<order_request?> GetByIdAsync(int id)
@@ -1005,6 +1007,177 @@ namespace AMMS.Infrastructure.Repositories
                 .Where(x => x.order_id == orderId)
                 .OrderByDescending(x => x.order_request_id)
                 .FirstOrDefaultAsync(ct);
+        }
+
+        public async Task<DateTime?> CalculateAsync(int orderRequestId, CancellationToken ct = default)
+        {
+            var req = await _db.order_requests
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.order_request_id == orderRequestId, ct);
+
+            if (req == null)
+                return null;
+
+            var baseDate = ResolveBaseDate(req);
+
+            var minFinish = baseDate.AddDays(7);
+
+            var productTypeId = await _db.product_types
+                .AsNoTracking()
+                .Where(x => x.code == req.product_type)
+                .Select(x => (int?)x.product_type_id)
+                .FirstOrDefaultAsync(ct);
+
+            if (!productTypeId.HasValue || productTypeId.Value <= 0)
+                return minFinish;
+
+            var latestEstimate = await _db.cost_estimates
+                .AsNoTracking()
+                .Where(x => x.order_request_id == orderRequestId)
+                .OrderByDescending(x => x.is_active)
+                .ThenByDescending(x => x.estimate_id)
+                .FirstOrDefaultAsync(ct);
+
+            var selectedCodes = ParseCsv(latestEstimate?.production_processes);
+
+            var allSteps = await _db.product_type_processes
+                .AsNoTracking()
+                .Where(x => x.product_type_id == productTypeId.Value && (x.is_active ?? true))
+                .OrderBy(x => x.seq_num)
+                .Select(x => new ProcessStepVm
+                {
+                    ProcessCode = x.process_code,
+                    ProcessName = x.process_name,
+                    SeqNum = x.seq_num
+                })
+                .ToListAsync(ct);
+
+            if (allSteps.Count == 0)
+                return minFinish;
+
+            var routeSteps = selectedCodes.Count == 0
+                ? allSteps
+                : allSteps
+                    .Where(x => selectedCodes.Contains(Normalize(x.ProcessCode)))
+                    .OrderBy(x => x.SeqNum)
+                    .ToList();
+
+            if (routeSteps.Count == 0)
+                routeSteps = allSteps;
+
+            var freeMachines = await _machineRepository.GetFreeMachinesAsync();
+
+            var machineMap = freeMachines
+                .GroupBy(x => NormalizeText(x.ProcessName))
+                .ToDictionary(
+                    g => g.Key,
+                    g => new MachineStatVm
+                    {
+                        Total = g.Sum(x => x.TotalMachines),
+                        Busy = g.Sum(x => x.BusyMachines),
+                        Free = g.Sum(x => x.FreeMachines)
+                    });
+
+            decimal totalProcessDays = 0m;
+
+            foreach (var step in routeSteps)
+            {
+                var key = NormalizeText(step.ProcessName);
+
+                if (!machineMap.TryGetValue(key, out var stat))
+                {
+                    totalProcessDays += 1m;
+                    continue;
+                }
+
+                if (stat.Free >= 2)
+                {
+                    totalProcessDays += 0.5m;
+                }
+                else if (stat.Free == 1)
+                {
+                    totalProcessDays += 1m;
+                }
+                else if (stat.Total > 0)
+                {
+                    totalProcessDays += 2m;
+                }
+                else
+                {
+                    totalProcessDays += 1m;
+                }
+            }
+
+            const decimal deliveryBufferDays = 1m;
+
+            var estimatedByCapacity = baseDate.AddDays((double)Math.Ceiling(totalProcessDays + deliveryBufferDays));
+
+            return estimatedByCapacity > minFinish ? estimatedByCapacity : minFinish;
+        }
+
+        public async Task<DateTime?> RecalculateAndPersistAsync(int orderRequestId, CancellationToken ct = default)
+        {
+            var req = await _db.order_requests
+                .FirstOrDefaultAsync(x => x.order_request_id == orderRequestId, ct);
+
+            if (req == null)
+                return null;
+
+            var calculated = await CalculateAsync(orderRequestId, ct);
+            if (!calculated.HasValue)
+                return null;
+
+            req.estimate_finish_date = ToUnspecified(calculated.Value);
+            await _db.SaveChangesAsync(ct);
+
+            return req.estimate_finish_date;
+        }
+
+        private static DateTime ResolveBaseDate(order_request req)
+        {
+            if (req.order_request_date != default)
+                return ToUnspecified((DateTime)req.order_request_date);
+
+            return AppTime.NowVnUnspecified();
+        }
+
+        private static HashSet<string> ParseCsv(string? csv)
+        {
+            if (string.IsNullOrWhiteSpace(csv))
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            return csv.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => Normalize(x))
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static string Normalize(string? value)
+            => (value ?? "").Trim().ToUpperInvariant();
+
+        private static string NormalizeText(string? value)
+            => (value ?? "").Trim().ToUpperInvariant();
+
+        private static DateTime ToUnspecified(DateTime dt)
+        {
+            if (dt.Kind == DateTimeKind.Unspecified)
+                return dt;
+
+            return DateTime.SpecifyKind(dt, DateTimeKind.Unspecified);
+        }
+
+        private sealed class ProcessStepVm
+        {
+            public string? ProcessCode { get; set; }
+            public string? ProcessName { get; set; }
+            public int SeqNum { get; set; }
+        }
+
+        private sealed class MachineStatVm
+        {
+            public int Total { get; set; }
+            public int Busy { get; set; }
+            public int Free { get; set; }
         }
     }
 }

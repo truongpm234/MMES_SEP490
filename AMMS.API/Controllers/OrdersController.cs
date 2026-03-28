@@ -278,7 +278,6 @@ CancellationToken ct)
                 });
             }
 
-            // FE sẽ dùng window.location.href = return_api_url;
             return Ok(new
             {
                 found = true,

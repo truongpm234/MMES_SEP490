@@ -215,6 +215,8 @@ namespace AMMS.Infrastructure.Repositories
                 paperTypedto.Name = material.name;
                 paperTypedto.StockQty = material.stock_qty;
                 paperTypedto.Price = material.cost_price;
+                paperTypedto.description = material.description;
+                paperTypedto.material_class = material.material_class;
                 response.PaperTypes.Add(paperTypedto);
             }
             response.MostStockPaperNames = paperMaxStockProduct;
@@ -233,6 +235,8 @@ namespace AMMS.Infrastructure.Repositories
                 waveTypedto.Name = material.name;
                 waveTypedto.StockQty = material.stock_qty;
                 waveTypedto.Price = material.cost_price;
+                waveTypedto.description = material.description;
+                waveTypedto.material_class = material.material_class;
                 response.GlueTypes.Add(waveTypedto);
             }
             response.MostStockGlueNames = paperMaxStockProduct;
