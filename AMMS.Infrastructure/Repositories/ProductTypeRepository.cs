@@ -67,5 +67,19 @@ namespace AMMS.Infrastructure.Repositories
                 templates = templates
             };
         }
+
+        public async Task<int?> GetIdByCodeAsync(string code, CancellationToken ct = default)
+        {
+            code = (code ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(code))
+                return null;
+
+            return await _db.product_types
+                .AsNoTracking()
+                .Where(x => x.code == code)
+                .Select(x => (int?)x.product_type_id)
+                .FirstOrDefaultAsync(ct);
+        }
     }
 }

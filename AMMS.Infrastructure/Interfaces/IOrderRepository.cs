@@ -26,6 +26,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task MarkOrdersBuyByMaterialsAsync(List<int> materialIds, CancellationToken ct = default);
         Task MarkOrdersBuyByMaterialAsync(int materialId, CancellationToken ct = default);
         Task RecalculateIsEnoughForOrdersAsync(CancellationToken ct = default);
-
+        Task<List<order_item>> GetOrderItemsByOrderIdAsync(int orderId, CancellationToken ct = default);
+        Task<bool> IsOrderEnoughByOrderIdAsync(int orderId, CancellationToken ct = default);
     }
 }

@@ -178,5 +178,21 @@ namespace AMMS.API.Controllers
                 return NotFound(new { message = ex.Message });
             }
         }
+
+        [HttpPut("alternative-materials")]
+        public async Task<IActionResult> UpdateAlternativeMaterials([FromBody] UpdateAlternativeMaterialRequest req, CancellationToken ct)
+        {
+            if (req == null || req.request_id <= 0)
+                return BadRequest(new { message = "request_id must be > 0" });
+
+            await _service.UpdateAlternativeMaterialsAsync(
+                req.request_id,
+                req.estimate_id,
+                req.paper_alternative,
+                req.wave_alternative,
+                ct);
+
+            return NoContent();
+        }
     }
 }

@@ -46,6 +46,10 @@ namespace AMMS.Shared.DTOs.Requests
 
         public string? wave_type { get; set; }
 
+        public string? paper_alternative { get; set; }
+
+        public string? wave_alternative { get; set; }
+
         public int? product_length_mm { get; set; } 
 
         public int? product_width_mm { get; set; } 

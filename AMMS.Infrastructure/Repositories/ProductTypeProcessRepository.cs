@@ -37,6 +37,15 @@ namespace AMMS.Infrastructure.Repositories
         }
 
         public Task SaveChangesAsync() => _db.SaveChangesAsync();
+
+        public async Task<List<product_type_process>> GetActiveByProductTypeIdAsync(int productTypeId, CancellationToken ct = default)
+        {
+            return await _db.product_type_processes
+                .AsNoTracking()
+                .Where(x => x.product_type_id == productTypeId && (x.is_active ?? true))
+                .OrderBy(x => x.seq_num)
+                .ToListAsync(ct);
+        }
     }
 
 }

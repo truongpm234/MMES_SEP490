@@ -3,6 +3,7 @@ using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Orders;
+using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
 
 namespace AMMS.Infrastructure.Repositories
@@ -403,6 +404,33 @@ namespace AMMS.Infrastructure.Repositories
                     .FirstOrDefaultAsync(ct);
             }
 
+            string? displayPaperCode = null;
+            string? displayPaperName = null;
+            string? displayWaveType = null;
+
+            if (est != null)
+            {
+                displayPaperCode = EstimateMaterialAlternativeHelper.ResolvePaperCode(
+                    est.paper_alternative,
+                    est.paper_code);
+
+                displayWaveType = EstimateMaterialAlternativeHelper.ResolveWaveType(
+                    est.wave_alternative,
+                    est.wave_type);
+
+                if (!string.IsNullOrWhiteSpace(displayPaperCode))
+                {
+                    displayPaperName = await _db.materials
+                        .AsNoTracking()
+                        .Where(x => x.code == displayPaperCode)
+                        .Select(x => x.name)
+                        .FirstOrDefaultAsync(ct) ?? est.paper_name ?? displayPaperCode;
+                }
+                else
+                {
+                    displayPaperName = est.paper_name;
+                }
+            }
             var item = order.order_items.OrderBy(i => i.item_id).FirstOrDefault();
 
             var productName = item?.product_name ?? req?.product_name ?? string.Empty;
@@ -448,9 +476,9 @@ namespace AMMS.Infrastructure.Repositories
                 var product_name = req.product_name ?? "";
                 quantity = req.quantity ?? 0;
 
-                var paper_name = string.IsNullOrWhiteSpace(est.paper_name) ? "N/A" : est.paper_name;
                 var coating_type = MapCoatingType(est.coating_type);
-                var wave_type = string.IsNullOrWhiteSpace(est.wave_type) ? "N/A" : est.wave_type;
+                var paper_name = displayPaperName ?? "N/A";
+                var wave_type = string.IsNullOrWhiteSpace(displayWaveType) ? "N/A" : displayWaveType;
 
                 var design_type = req.is_send_design == true
                     ? "Tự gửi file thiết kế"
@@ -480,12 +508,25 @@ namespace AMMS.Infrastructure.Repositories
                 var expired_at = q.created_at.AddHours(24);
                 var expired = expired_at.ToString("dd/MM/yyyy HH:mm");
 
+
+                var contract_paper_code = est.paper_code;
+                var contract_paper_name = est.paper_name;
+                var contract_wave_type = est.wave_type;
+                var paper_alternative = est.paper_alternative;
+                var wave_alternative = est.wave_alternative;
+
                 quoteFields = new
                 {
                     request_date,
+                    paper_code = displayPaperCode,
                     paper_name,
                     coating_type,
                     wave_type,
+                    contract_paper_code,
+                    contract_paper_name,
+                    contract_wave_type,
+                    paper_alternative,
+                    wave_alternative,
                     design_type,
                     production_process,
                     material_cost,
@@ -960,7 +1001,6 @@ namespace AMMS.Infrastructure.Repositories
                 })
                 .ToList();
 
-            // 3) isEnough per order (tất cả materials đều đủ)
             var isEnoughMap = reqByOrderMaterial
                 .GroupBy(x => x.OrderId)
                 .ToDictionary(
@@ -1005,6 +1045,43 @@ namespace AMMS.Infrastructure.Repositories
 
             foreach (var o in orders)
                 o.is_buy = true;
+        }
+
+        public async Task<List<order_item>> GetOrderItemsByOrderIdAsync(int orderId, CancellationToken ct = default)
+        {
+            return await _db.order_items
+                .Where(x => x.order_id == orderId)
+                .ToListAsync(ct);
+        }
+
+        public async Task<bool> IsOrderEnoughByOrderIdAsync(int orderId, CancellationToken ct = default)
+        {
+            var bomHasNullMaterial = await (
+                from oi in _db.order_items.AsNoTracking()
+                join b in _db.boms.AsNoTracking() on oi.item_id equals b.order_item_id
+                where oi.order_id == orderId
+                select b.material_id
+            ).AnyAsync(x => x == null, ct);
+
+            if (bomHasNullMaterial)
+                return false;
+
+            return await (
+                from oi in _db.order_items.AsNoTracking()
+                join b in _db.boms.AsNoTracking() on oi.item_id equals b.order_item_id
+                join m in _db.materials.AsNoTracking() on b.material_id equals m.material_id
+                where oi.order_id == orderId
+                group new { oi, b, m } by b.material_id into g
+                select new
+                {
+                    Required = g.Sum(x =>
+                        ((decimal)x.oi.quantity)
+                        * (x.b.qty_per_product ?? 0m)
+                        * (1m + ((x.b.wastage_percent ?? 0m) / 100m))
+                    ),
+                    StockQty = g.Max(x => x.m.stock_qty ?? 0m)
+                }
+            ).AllAsync(x => x.StockQty >= x.Required, ct);
         }
 
         private static DateTime? AsUnspecified(DateTime? dt)

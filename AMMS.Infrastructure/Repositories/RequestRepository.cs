@@ -28,63 +28,92 @@ namespace AMMS.Infrastructure.Repositories
 
         public async Task<RequestWithCostDto?> GetByIdWithCostAsync(int id, int? consultantUserId = null)
         {
-            var requestQuery = ApplyConsultantScope(
-                _db.order_requests.AsNoTracking(),
-                consultantUserId);
+            var request = await ApplyConsultantScope(
+                    _db.order_requests.AsNoTracking(),
+                    consultantUserId)
+                .FirstOrDefaultAsync(x => x.order_request_id == id);
 
-            var query = from r in requestQuery
-                        where r.order_request_id == id
-                        join ce in _db.cost_estimates.AsNoTracking()
-                        on r.order_request_id equals ce.order_request_id into ceJoin
-                        from ce in ceJoin
-                            .OrderByDescending(x => x.is_active)
-                            .ThenByDescending(x => x.estimate_id)
-                            .Take(1)
-                            .DefaultIfEmpty()
-                        select new RequestWithCostDto
-                        {
-                            order_request_id = r.order_request_id,
-                            customer_name = r.customer_name,
-                            customer_phone = r.customer_phone,
-                            customer_email = r.customer_email,
-                            delivery_date = r.delivery_date,
-                            product_name = r.product_name,
-                            quantity = r.quantity,
-                            description = r.description,
-                            design_file_path = r.design_file_path,
-                            order_request_date = r.order_request_date,
-                            detail_address = r.detail_address,
-                            process_status = r.process_status,
-                            product_type = r.product_type,
-                            number_of_plates = r.number_of_plates,
-                            paper_code = ce != null ? ce.paper_code : null,
-                            paper_name = ce != null ? ce.paper_name : null,
-                            coating_type = ce != null ? ce.coating_type : null,
-                            wave_type = ce != null ? ce.wave_type : null,
-                            order_id = r.order_id,
-                            quote_id = r.quote_id,
-                            product_length_mm = r.product_length_mm,
-                            product_width_mm = r.product_width_mm,
-                            product_height_mm = r.product_height_mm,
-                            glue_tab_mm = r.glue_tab_mm,
-                            bleed_mm = r.bleed_mm,
-                            is_one_side_box = r.is_one_side_box,
-                            print_width_mm = r.print_width_mm,
-                            print_height_mm = r.print_height_mm,
-                            is_send_design = r.is_send_design,
-                            reason = r.reason,
-                            final_total_cost = ce != null ? ce.final_total_cost : null,
-                            deposit_amount = ce != null ? ce.deposit_amount : null,
-                            verified_at = r.verified_at,
-                            quote_expires_at = r.quote_expires_at,
-                            message_to_customer = r.message_to_customer,
-                            production_processes = ce != null ? ce.production_processes : null,
-                            preliminary_estimated_price = r.preliminary_estimated_price,
-                            consultant_contract_path = ce != null ? ce.consultant_contract_path : null,
-                            customer_signed_contract_path = ce != null ? ce.customer_signed_contract_path : null
-                        };
+            if (request == null)
+                return null;
 
-            return await query.FirstOrDefaultAsync();
+            var estimate = await _db.cost_estimates
+                .AsNoTracking()
+                .Where(x => x.order_request_id == id)
+                .OrderByDescending(x => x.is_active)
+                .ThenByDescending(x => x.estimate_id)
+                .FirstOrDefaultAsync();
+
+            var displayPaperCode = estimate == null
+                ? null
+                : EstimateMaterialAlternativeHelper.ResolvePaperCode(
+                    estimate.paper_alternative,
+                    estimate.paper_code);
+
+            var displayWaveType = estimate == null
+                ? null
+                : EstimateMaterialAlternativeHelper.ResolveWaveType(
+                    estimate.wave_alternative,
+                    estimate.wave_type);
+
+            string? displayPaperName = estimate?.paper_name;
+
+            if (!string.IsNullOrWhiteSpace(displayPaperCode))
+            {
+                displayPaperName = await _db.materials
+                    .AsNoTracking()
+                    .Where(x => x.code == displayPaperCode)
+                    .Select(x => x.name)
+                    .FirstOrDefaultAsync() ?? estimate?.paper_name ?? displayPaperCode;
+            }
+
+            return new RequestWithCostDto
+            {
+                order_request_id = request.order_request_id,
+                customer_name = request.customer_name,
+                customer_phone = request.customer_phone,
+                customer_email = request.customer_email,
+                delivery_date = request.delivery_date,
+                product_name = request.product_name,
+                quantity = request.quantity,
+                description = request.description,
+                design_file_path = request.design_file_path,
+                order_request_date = request.order_request_date,
+                detail_address = request.detail_address,
+                process_status = request.process_status,
+                product_type = request.product_type,
+                number_of_plates = request.number_of_plates,
+
+                paper_code = displayPaperCode,
+                paper_name = displayPaperName,
+                wave_type = displayWaveType,
+
+                paper_alternative = estimate?.paper_alternative,
+                wave_alternative = estimate?.wave_alternative,
+
+                coating_type = estimate?.coating_type,
+
+                order_id = request.order_id,
+                quote_id = request.quote_id,
+                product_length_mm = request.product_length_mm,
+                product_width_mm = request.product_width_mm,
+                product_height_mm = request.product_height_mm,
+                glue_tab_mm = request.glue_tab_mm,
+                bleed_mm = request.bleed_mm,
+                is_one_side_box = request.is_one_side_box,
+                print_width_mm = request.print_width_mm,
+                print_height_mm = request.print_height_mm,
+                is_send_design = request.is_send_design,
+                reason = request.reason,
+                final_total_cost = estimate?.final_total_cost,
+                deposit_amount = estimate?.deposit_amount,
+                verified_at = request.verified_at,
+                quote_expires_at = request.quote_expires_at,
+                message_to_customer = request.message_to_customer,
+                production_processes = estimate?.production_processes,
+                preliminary_estimated_price = request.preliminary_estimated_price,
+                consultant_contract_path = estimate?.consultant_contract_path,
+                customer_signed_contract_path = estimate?.customer_signed_contract_path
+            };
         }
 
         public Task UpdateAsync(order_request entity)
@@ -670,10 +699,41 @@ namespace AMMS.Infrastructure.Repositories
                 .OrderByDescending(x => x.is_active)
                 .ThenByDescending(x => x.estimate_id)
                 .ToListAsync(ct);
+            var altPaperCodes = estimates
+    .Where(x => !string.IsNullOrWhiteSpace(x.paper_alternative))
+    .Select(x => x.paper_alternative!.Trim())
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToList();
 
+            var materialNameByCode = altPaperCodes.Count == 0
+                ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                : await _db.materials
+                    .AsNoTracking()
+                    .Where(x => altPaperCodes.Contains(x.code))
+                    .Select(x => new { x.code, x.name })
+                    .ToDictionaryAsync(x => x.code, x => x.name, StringComparer.OrdinalIgnoreCase, ct);
             var vatPercent = await GetVatPercentAsync(ct);
 
             var selectedEstimate = estimates.FirstOrDefault();
+
+            var selectedPaperCode = selectedEstimate == null
+    ? ""
+    : EstimateMaterialAlternativeHelper.ResolvePaperCode(
+        selectedEstimate.paper_alternative,
+        selectedEstimate.paper_code) ?? "";
+
+            var selectedPaperName = selectedEstimate == null
+                ? ""
+                : EstimateMaterialAlternativeHelper.ResolvePaperName(
+                    selectedPaperCode,
+                    selectedEstimate.paper_name,
+                    materialNameByCode);
+
+            var selectedWaveType = selectedEstimate == null
+                ? ""
+                : EstimateMaterialAlternativeHelper.ResolveWaveType(
+                    selectedEstimate.wave_alternative,
+                    selectedEstimate.wave_type) ?? "";
 
             return new RequestDetailDto
             {
@@ -695,9 +755,9 @@ namespace AMMS.Infrastructure.Repositories
                 number_of_plates = request.number_of_plates,
                 production_processes = SafeText(selectedEstimate?.production_processes),
                 coating_type = SafeText(selectedEstimate?.coating_type),
-                paper_code = SafeText(selectedEstimate?.paper_code),
-                paper_name = FirstText(selectedEstimate?.paper_name, selectedEstimate?.paper_code),
-                wave_type = SafeText(selectedEstimate?.wave_type),
+                paper_code = selectedPaperCode,
+                paper_name = selectedPaperName,
+                wave_type = selectedWaveType,
 
                 product_length_mm = request.product_length_mm,
                 product_width_mm = request.product_width_mm,
@@ -717,6 +777,18 @@ namespace AMMS.Infrastructure.Repositories
                     var discountAmount = ce.discount_amount < 0m ? 0m : ce.discount_amount;
                     var vatBase = Math.Max(ce.subtotal - discountAmount, 0m);
                     var vatAmount = vatPercent <= 0m ? 0m : vatBase * vatPercent / 100m;
+                    var displayPaperCode = EstimateMaterialAlternativeHelper.ResolvePaperCode(
+    ce.paper_alternative,
+    ce.paper_code);
+
+                    var displayPaperName = EstimateMaterialAlternativeHelper.ResolvePaperName(
+                        displayPaperCode,
+                        ce.paper_name,
+                        materialNameByCode);
+
+                    var displayWaveType = EstimateMaterialAlternativeHelper.ResolveWaveType(
+                        ce.wave_alternative,
+                        ce.wave_type);
 
                     return new CostEstimateDetailDto
                     {
@@ -726,10 +798,12 @@ namespace AMMS.Infrastructure.Repositories
                         deposit_amount = ce.deposit_amount,
                         is_active = ce.is_active,
 
-                        paper_code = SafeText(ce.paper_code),
-                        paper_name = FirstText(ce.paper_name, ce.paper_code),
+                        paper_code = displayPaperCode,
+                        paper_name = displayPaperName,
                         coating_type = SafeText(ce.coating_type),
-                        wave_type = SafeText(ce.wave_type),
+                        wave_type = displayWaveType,
+                        paper_alternative = ce.paper_alternative,
+                        wave_alternative = ce.wave_alternative,
                         wave_sheet_used = ce.wave_sheets_used,
                         production_processes = SafeText(ce.production_processes),
                         cost_note = SafeText(ce.cost_note),
@@ -779,13 +853,11 @@ namespace AMMS.Infrastructure.Repositories
             };
         }
 
-        public async Task<RequestWithTwoEstimatesDto?> GetActiveEstimatesInProcessAsync(
-    int requestId, int? consultantUserId = null, CancellationToken ct = default)
+        public async Task<RequestWithTwoEstimatesDto?> GetActiveEstimatesInProcessAsync(int requestId, int? consultantUserId = null, CancellationToken ct = default)
         {
             var req = await ApplyConsultantScope(
                     _db.order_requests.AsNoTracking(),
-                    consultantUserId)
-                .Where(r => r.order_request_id == requestId)
+                    consultantUserId).Where(r => r.order_request_id == requestId)
                 .Select(r => new RequestWithTwoEstimatesDto
                 {
                     order_request_id = r.order_request_id,
@@ -855,11 +927,45 @@ namespace AMMS.Infrastructure.Repositories
                     paper_name = e.paper_name,
                     coating_type = e.coating_type,
                     wave_type = e.wave_type,
+                    paper_alternative = e.paper_alternative,
+                    wave_alternative = e.wave_alternative,
                     wave_sheet_used = e.wave_sheets_used,
                     cost_note = e.cost_note
                 })
                 .ToListAsync(ct);
+            var altPaperCodes = ests
+    .Where(x => !string.IsNullOrWhiteSpace(x.paper_alternative))
+    .Select(x => x.paper_alternative!.Trim())
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToList();
 
+            var materialNameByCode = altPaperCodes.Count == 0
+                ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                : await _db.materials
+                    .AsNoTracking()
+                    .Where(x => altPaperCodes.Contains(x.code))
+                    .Select(x => new { x.code, x.name })
+                    .ToDictionaryAsync(x => x.code, x => x.name, StringComparer.OrdinalIgnoreCase, ct);
+
+            foreach (var e in ests)
+            {
+                var displayPaperCode = EstimateMaterialAlternativeHelper.ResolvePaperCode(
+                    e.paper_alternative,
+                    e.paper_code);
+
+                var displayPaperName = EstimateMaterialAlternativeHelper.ResolvePaperName(
+                    displayPaperCode,
+                    e.paper_name,
+                    materialNameByCode);
+
+                var displayWaveType = EstimateMaterialAlternativeHelper.ResolveWaveType(
+                    e.wave_alternative,
+                    e.wave_type);
+
+                e.paper_code = displayPaperCode;
+                e.paper_name = displayPaperName;
+                e.wave_type = displayWaveType;
+            }
             req.estimates = ests;
             return req;
         }

@@ -13,5 +13,6 @@ namespace AMMS.Infrastructure.Interfaces
         Task DeleteAllByProductTypeIdAsync(int productTypeId);
         Task AddRangeAsync(IEnumerable<product_type_process> items);
         Task SaveChangesAsync();
+        Task<List<product_type_process>> GetActiveByProductTypeIdAsync(int productTypeId, CancellationToken ct = default);
     }
 }

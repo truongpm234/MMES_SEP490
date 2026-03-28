@@ -1,6 +1,7 @@
 ﻿using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Orders;
+using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
@@ -22,24 +23,55 @@ namespace AMMS.Infrastructure.Repositories
         {
             var header = await (
                 from o in _db.orders.AsNoTracking()
-                join q in _db.quotes.AsNoTracking() on o.quote_id equals q.quote_id into qj
+                join q in _db.quotes.AsNoTracking()
+                    on o.quote_id equals q.quote_id into qj
                 from q in qj.DefaultIfEmpty()
-                join r in _db.order_requests.AsNoTracking() on q.order_request_id equals r.order_request_id into rj
+
+                join r in _db.order_requests.AsNoTracking()
+                    on q.order_request_id equals r.order_request_id into rj
                 from r in rj.DefaultIfEmpty()
-                join ce in _db.cost_estimates.AsNoTracking() on r.order_request_id equals ce.order_request_id into cej
-                from ce in cej.DefaultIfEmpty()
+
+                join ce in _db.cost_estimates.AsNoTracking().Where(x => x.is_active)
+                    on r.order_request_id equals ce.order_request_id into cej
+                from ce in cej
+                    .OrderByDescending(x => x.estimate_id)
+                    .Take(1)
+                    .DefaultIfEmpty()
+
                 where o.order_id == orderId
                 select new { o, r, ce }
             ).FirstOrDefaultAsync(ct);
 
-            if (header == null) return null;
+            if (header == null || header.r == null || header.ce == null)
+                return null;
 
             var o1 = header.o;
             var r1 = header.r;
             var ce1 = header.ce;
+
             var paperCode = ce1.paper_code;
+            var displayPaperCode = EstimateMaterialAlternativeHelper.ResolvePaperCode(
+                ce1.paper_alternative,
+                ce1.paper_code);
+
+            var displayWaveType = EstimateMaterialAlternativeHelper.ResolveWaveType(
+                ce1.wave_alternative,
+                ce1.wave_type);
+
             var paperName = ce1.paper_name;
 
+            if (!string.IsNullOrWhiteSpace(displayPaperCode))
+            {
+                var pm = await _db.materials.AsNoTracking()
+                    .Where(m => m.code == displayPaperCode)
+                    .Select(m => new { m.code, m.name, m.unit })
+                    .FirstOrDefaultAsync(ct);
+
+                if (pm != null)
+                    paperName = pm.name;
+                else
+                    paperName = displayPaperCode;
+            }
             if (!string.IsNullOrWhiteSpace(paperCode))
             {
                 var pm = await _db.materials.AsNoTracking()
@@ -61,7 +93,7 @@ namespace AMMS.Infrastructure.Repositories
                 items.Add(new OrderMaterialLineDto
                 {
                     material_group = "Giấy",
-                    material_code = paperCode,
+                    material_code = displayPaperCode,
                     material_name = paperName ?? "Giấy",
                     unit = "tờ",
                     quantity = ce1.sheets_total
@@ -120,13 +152,14 @@ namespace AMMS.Infrastructure.Repositories
                 });
             }
 
-            if (!string.IsNullOrWhiteSpace(ce1.wave_type))
+            // WAVE
+            if (!string.IsNullOrWhiteSpace(displayWaveType))
             {
                 items.Add(new OrderMaterialLineDto
                 {
                     material_group = "Loại sóng",
-                    material_code = ce1.wave_type,
-                    material_name = $"Sóng {ce1.wave_type}",
+                    material_code = displayWaveType,
+                    material_name = $"Sóng {displayWaveType}",
                     unit = "Tờ",
                     quantity = (int)ce1.wave_sheets_used
                 });
