@@ -25,7 +25,7 @@ public partial class material
 
     public int? sheet_width_mm { get; set; }
 
-    public int? sheet_height_mm { get; set; }
+    public int? sheet_thick_mm { get; set; }
 
     public int? sheet_length_mm { get; set; }
 
