@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-
-namespace AMMS.Application.Helpers
+﻿namespace AMMS.Application.Helpers
 {
     public static class ProductionRoleMap
     {

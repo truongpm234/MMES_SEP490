@@ -1,6 +1,5 @@
 ﻿using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
-using AMMS.Application.Services;
 using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
@@ -11,7 +10,6 @@ using AMMS.Shared.DTOs.Requests.AMMS.Shared.DTOs.Requests;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -127,7 +125,17 @@ namespace AMMS.API.Controllers
             }
             return Ok(requestDto);
         }
-
+        [HttpGet("get-cost-estimate/{order_id}")]
+        public async Task<ActionResult<cost_estimate>> GetCostEstimateByOrderId(int order_id)
+        {
+            var order_req_id = await _db.order_requests.FirstOrDefaultAsync(o => o.order_id == order_id);
+            if (order_req_id == null)
+            {
+                return NotFound("Không tìm thấy đơn hàng");
+            }
+            var res = await _db.cost_estimates.FirstOrDefaultAsync(c => c.order_request_id == order_req_id.order_request_id && c.is_active == true);
+            return Ok(res);
+        }
         [HttpGet("paged")]
         public async Task<IActionResult> GetPaged([FromQuery] int page, [FromQuery] int pageSize)
         {
@@ -949,7 +957,7 @@ namespace AMMS.API.Controllers
 
             await paymentRepo.SaveChangesAsync(ct);
         }
-        
+
         [HttpGet("payos-deposit/{request_id:int}")]
         public async Task<IActionResult> GetPayOsDeposit(
     [FromRoute] int request_id,
