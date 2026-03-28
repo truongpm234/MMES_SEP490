@@ -1,14 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-
-namespace AMMS.Application.Helpers
+﻿namespace AMMS.Application.Helpers
 {
     public static class ProductionRoleMap
     {
         private static readonly HashSet<int> FullAccessRoleIds = new()
         {
-            6, 3
+            6, 3, 4
         };
 
         // map role_id -> process_code
