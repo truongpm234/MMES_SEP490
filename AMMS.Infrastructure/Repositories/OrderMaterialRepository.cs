@@ -128,7 +128,7 @@ namespace AMMS.Infrastructure.Repositories
                     material_code = ce1.wave_type,
                     material_name = $"Sóng {ce1.wave_type}",
                     unit = "Tờ",
-                    quantity = ce1.sheets_total
+                    quantity = (int)ce1.wave_sheets_used
                 });
             }
 

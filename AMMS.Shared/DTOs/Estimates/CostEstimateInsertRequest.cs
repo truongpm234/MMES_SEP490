@@ -29,6 +29,7 @@ namespace AMMS.Shared.DTOs.Estimates
         public string? paper_code { get; set; }
         public string? paper_name { get; set; }
         public string? wave_type { get; set; }
+        public int? wave_sheets_used { get; set; }
 
         // ----- Keo bồi -----
         public decimal? mounting_glue_cost { get; set; }

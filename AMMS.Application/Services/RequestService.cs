@@ -3,9 +3,11 @@ using AMMS.Application.Interfaces;
 using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
+using AMMS.Infrastructure.Repositories;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Requests;
 using AMMS.Shared.DTOs.Socket;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 
 namespace AMMS.Application.Services
@@ -21,6 +23,8 @@ namespace AMMS.Application.Services
         private readonly IRealtimePublisher _rt;
         private readonly IAccessService _currentUser;
         private readonly IUserRepository _userRepo;
+        private readonly ICloudinaryFileStorageService _cloudinaryStorage;
+        private readonly IAccessService _accessService;
         public RequestService(
             IRequestRepository requestRepo,
             IOrderRepository orderRepo,
@@ -30,7 +34,9 @@ namespace AMMS.Application.Services
             IRealtimePublisher rt,
             AppDbContext db,
             IAccessService currentUser,
-            IUserRepository userRepo)
+            IUserRepository userRepo,
+            ICloudinaryFileStorageService cloudinaryStorage,
+            IAccessService accessService)
         {
             _requestRepo = requestRepo;
             _orderRepo = orderRepo;
@@ -41,6 +47,8 @@ namespace AMMS.Application.Services
             _rt = rt;
             _currentUser = currentUser;
             _userRepo = userRepo;
+            _cloudinaryStorage = cloudinaryStorage;
+            _accessService = accessService;
         }
 
         private DateTime? ToDeliveryDate(DateTime? dateTime)
@@ -583,7 +591,7 @@ namespace AMMS.Application.Services
                 design_file_path = source.design_file_path,
                 order_request_date = now,
                 detail_address = source.detail_address,
-
+                
                 process_status = "Pending",
 
                 product_type = source.product_type,
@@ -679,6 +687,7 @@ namespace AMMS.Application.Services
                     paper_code = est.paper_code,
                     paper_name = est.paper_name,
                     wave_type = est.wave_type,
+                    wave_sheets_used = est.wave_sheets_used,
                     production_processes = est.production_processes
                 };
 
@@ -1095,6 +1104,93 @@ namespace AMMS.Application.Services
         public async Task<DateTime?> RecalculateAndPersistAsync(int orderRequestId, CancellationToken ct = default)
         {
             return await _requestRepo.RecalculateAndPersistAsync(orderRequestId, ct);
+        }
+
+        public async Task<string> UploadPrintReadyFileAsync(
+            int requestId,
+            int? estimateId,
+            Stream fileStream,
+            string fileName,
+            string? contentType,
+            CancellationToken ct = default)
+        {
+            if (requestId <= 0)
+                throw new ArgumentException("requestId must be > 0");
+
+            if (fileStream == null)
+                throw new ArgumentException("file is required");
+
+            if (string.IsNullOrWhiteSpace(fileName))
+                throw new ArgumentException("fileName is required");
+
+            await _accessService.EnsureCanAccessAssignedRequestAsync(requestId, ct);
+
+            var request = await _requestRepo.GetByIdAsync(requestId);
+            if (request == null)
+                throw new InvalidOperationException("Order request not found");
+
+            if (estimateId.HasValue && estimateId.Value > 0)
+            {
+                var estimate = await _estimateRepo.GetTrackingByIdAsync(estimateId.Value, ct);
+                if (estimate == null || estimate.order_request_id != requestId)
+                    throw new InvalidOperationException("Estimate not found");
+            }
+
+            var ext = Path.GetExtension(fileName)?.Trim().ToLowerInvariant();
+
+            var allowedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ".pdf",
+        ".doc", ".docx",
+        ".xls", ".xlsx",
+        ".ppt", ".pptx",
+        ".txt", ".rtf",
+        ".ai", ".psd", ".psb", ".eps", ".svg", ".cdr", ".indd",
+        ".jpg", ".jpeg", ".png", ".tif", ".tiff",
+        ".zip", ".rar", ".7z"
+    };
+
+            if (string.IsNullOrWhiteSpace(ext) || !allowedExtensions.Contains(ext))
+                throw new ArgumentException(
+                    "Unsupported file format. Allowed: pdf, doc, docx, xls, xlsx, ppt, pptx, txt, rtf, ai, psd, psb, eps, svg, cdr, indd, jpg, jpeg, png, tif, tiff, zip, rar, 7z");
+
+            var safeFileName = Path.GetFileName(fileName);
+
+            // folder cloudinary
+            var publicId = estimateId.HasValue && estimateId.Value > 0
+                ? $"print_ready/request_{requestId}/estimate_{estimateId.Value}/file"
+                : $"print_ready/request_{requestId}/file";
+
+            var finalContentType = ResolveContentType(safeFileName, contentType);
+
+            // chú ý: method này phải là RAW upload, không phải image upload
+            var url = await _cloudinaryStorage.UploadRawWithPublicIdAsync(
+                fileStream,
+                safeFileName,
+                finalContentType,
+                publicId);
+
+            // lưu vào order_request.print_ready_file
+            request.print_ready_file = url;
+
+            await _requestRepo.SaveChangesAsync();
+
+            return url;
+        }
+
+        private static string ResolveContentType(string fileName, string? contentType)
+        {
+            if (!string.IsNullOrWhiteSpace(contentType) &&
+                !contentType.Equals("application/octet-stream", StringComparison.OrdinalIgnoreCase))
+            {
+                return contentType;
+            }
+
+            var provider = new FileExtensionContentTypeProvider();
+            if (provider.TryGetContentType(fileName, out var mapped))
+                return mapped;
+
+            return "application/octet-stream";
         }
     }
 }

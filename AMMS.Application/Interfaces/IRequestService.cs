@@ -45,5 +45,6 @@ namespace AMMS.Application.Interfaces
         Task<bool> UpdateDeliveryNoteAsync(int orderRequestId, string note, CancellationToken ct = default);
         Task<DateTime?> CalculateAsync(int orderRequestId, CancellationToken ct = default);
         Task<DateTime?> RecalculateAndPersistAsync(int orderRequestId, CancellationToken ct = default);
+        Task<string> UploadPrintReadyFileAsync(int requestId, int? estimateId, Stream fileStream, string fileName, string? contentType, CancellationToken ct = default);
     }
 }

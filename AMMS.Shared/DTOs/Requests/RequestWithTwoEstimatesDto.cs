@@ -22,7 +22,7 @@ namespace AMMS.Shared.DTOs.Requests
         public string? detail_address { get; set; }
         public string? product_type { get; set; }
         public int? number_of_plates { get; set; }
-
+        public string? print_ready_file { get; set; }
         public int? product_length_mm { get; set; }
         public int? product_width_mm { get; set; }
         public int? product_height_mm { get; set; }
@@ -70,6 +70,7 @@ namespace AMMS.Shared.DTOs.Requests
         public string? paper_name { get; set; }
         public string? coating_type { get; set; }
         public string? wave_type { get; set; }
+        public int? wave_sheet_used { get; set; }
         public string? cost_note { get; set; }
         public string? contract_file_path { get; set; }
         public DateTime? contract_uploaded_at { get; set; }

@@ -693,7 +693,6 @@ namespace AMMS.Infrastructure.Repositories
                 detail_address = SafeText(request.detail_address),
                 product_type = SafeText(request.product_type),
                 number_of_plates = request.number_of_plates,
-
                 production_processes = SafeText(selectedEstimate?.production_processes),
                 coating_type = SafeText(selectedEstimate?.coating_type),
                 paper_code = SafeText(selectedEstimate?.paper_code),
@@ -731,6 +730,7 @@ namespace AMMS.Infrastructure.Repositories
                         paper_name = FirstText(ce.paper_name, ce.paper_code),
                         coating_type = SafeText(ce.coating_type),
                         wave_type = SafeText(ce.wave_type),
+                        wave_sheet_used = ce.wave_sheets_used,
                         production_processes = SafeText(ce.production_processes),
                         cost_note = SafeText(ce.cost_note),
 
@@ -789,6 +789,7 @@ namespace AMMS.Infrastructure.Repositories
                 .Select(r => new RequestWithTwoEstimatesDto
                 {
                     order_request_id = r.order_request_id,
+                    print_ready_file = r.print_ready_file,
                     customer_name = r.customer_name ?? "",
                     customer_phone = r.customer_phone ?? "",
                     customer_email = r.customer_email,
@@ -854,6 +855,7 @@ namespace AMMS.Infrastructure.Repositories
                     paper_name = e.paper_name,
                     coating_type = e.coating_type,
                     wave_type = e.wave_type,
+                    wave_sheet_used = e.wave_sheets_used,
                     cost_note = e.cost_note
                 })
                 .ToListAsync(ct);

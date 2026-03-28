@@ -27,6 +27,7 @@ namespace AMMS.Shared.DTOs.Estimates
         public string? estimate_paper_code { get; set; }
         public string? estimate_paper_name { get; set; }
         public string? estimate_wave_type { get; set; }
+        public int? estimate_waved_sheet_used { get; set; }
         public int? order_id { get; set; }
         public int? quote_id { get; set; }
         public int? product_length_mm { get; set; }

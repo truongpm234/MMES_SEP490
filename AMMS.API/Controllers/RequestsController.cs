@@ -1264,5 +1264,56 @@ namespace AMMS.API.Controllers
                 await _db.SaveChangesAsync(ct);
             }
         }
+
+        [HttpPost("upload-print-ready-file/{requestId:int}")]
+        [Consumes("multipart/form-data")]
+        [RequestSizeLimit(200_000_000)]
+        public async Task<IActionResult> UploadPrintReadyFile(
+    [FromRoute] int requestId,
+    [FromForm] UploadPrintReadyFileRequest request,
+    CancellationToken ct)
+        {
+            try
+            {
+                if (request.File == null || request.File.Length <= 0)
+                    return BadRequest(new { message = "File is required" });
+
+                await using var stream = request.File.OpenReadStream();
+
+                var url = await _service.UploadPrintReadyFileAsync(
+                    requestId: requestId,
+                    estimateId: request.estimate_id,
+                    fileStream: stream,
+                    fileName: request.File.FileName,
+                    contentType: request.File.ContentType,
+                    ct: ct);
+
+                return Ok(new
+                {
+                    message = "Upload print_ready_file successfully",
+                    request_id = requestId,
+                    estimate_id = request.estimate_id,
+                    file_name = request.File.FileName,
+                    file_size = request.File.Length,
+                    print_ready_file = url
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Upload print_ready_file failed",
+                    detail = ex.Message
+                });
+            }
+        }
     }
 }

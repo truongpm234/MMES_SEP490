@@ -133,6 +133,7 @@ namespace AMMS.Application.Services
             SetIfNotNull(req.paper_name, v => entity.paper_name = v);
             SetIfNotNull(req.coating_type, v => entity.coating_type = v);
             SetIfNotNull(req.wave_type, v => entity.wave_type = v);
+            SetIfHasValue(req.wave_sheets_used, v => entity.wave_sheets_used = v);
 
             SetIfHasValue(req.mounting_glue_cost, v => entity.mounting_glue_cost = v);
             SetIfHasValue(req.mounting_glue_weight_kg, v => entity.mounting_glue_weight_kg = v);
@@ -313,12 +314,12 @@ namespace AMMS.Application.Services
         }
 
         public async Task<UploadCustomerSignedContractResponse> UploadCustomerSignedContractAsync(
-    int requestId,
-    int estimateId,
-    Stream fileStream,
-    string fileName,
-    string contentType,
-    CancellationToken ct = default)
+        int requestId,
+        int estimateId,
+        Stream fileStream,
+        string fileName,
+        string contentType,
+        CancellationToken ct = default)
         {
             if (requestId <= 0) throw new ArgumentException("request_id must be > 0");
             if (estimateId <= 0) throw new ArgumentException("estimate_id must be > 0");

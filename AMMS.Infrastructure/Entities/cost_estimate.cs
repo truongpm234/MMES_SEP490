@@ -89,6 +89,8 @@ public partial class cost_estimate
 
     public string? wave_type { get; set; }
 
+    public int? wave_sheets_used { get; set; }
+
     public string? production_processes { get; set; }
 
     [Column(TypeName = "numeric(18,2)")]

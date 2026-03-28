@@ -58,6 +58,7 @@
         public string paper_name { get; set; } = "";
         public string coating_type { get; set; } = "";
         public string wave_type { get; set; } = "";
+        public int? wave_sheet_used { get; set; }
         public string production_processes { get; set; } = "";
         public string cost_note { get; set; } = "";
 
