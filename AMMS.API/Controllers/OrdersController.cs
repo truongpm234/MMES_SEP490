@@ -1,15 +1,13 @@
 ﻿using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
-using AMMS.Application.Services;
 using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Entities;
 using AMMS.Shared.Constants;
-using AMMS.Shared.DTOs.Materials;
-using AMMS.Shared.DTOs.Orders;
 using AMMS.Shared.DTOs.PayOS;
 using AMMS.Shared.DTOs.Purchases;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace AMMS.API.Controllers
@@ -26,9 +24,11 @@ namespace AMMS.API.Controllers
         private readonly AppDbContext _db;
         private readonly IPayOsService _payos;
         private readonly IConfiguration _config;
-        public OrdersController(IOrderService service, IMaterialPurchaseRequestService materialPurchaseService, IDealService dealService, ILogger<OrdersController> logger, 
+        private readonly IHubContext<RealtimeHub> _hub;
+        public OrdersController(IHubContext<RealtimeHub> hub, IOrderService service, IMaterialPurchaseRequestService materialPurchaseService, IDealService dealService, ILogger<OrdersController> logger,
             IPaymentsService paymentsService, AppDbContext appDbContext, IPayOsService payos, IConfiguration config)
         {
+            _hub = hub;
             _service = service;
             _materialPurchaseService = materialPurchaseService;
             _dealService = dealService;
@@ -214,6 +214,7 @@ CancellationToken ct)
             // Nếu DB đã ghi nhận paid rồi thì FE chỉ cần redirect thẳng
             if (_dealService.IsPaidStatus(latest.status))
             {
+                await _hub.Clients.All.SendAsync("Paid", new { message = "Paid" });
                 return Ok(new
                 {
                     found = true,
