@@ -286,6 +286,13 @@ namespace AMMS.Application.Services
             };
         }
 
+        public async Task<RequestPagedDto?> GetByOrderIdAsync(int orderId)
+        {
+            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync();
+
+            return await _requestRepo.GetByOrderIdAsync(orderId, consultantUserId);
+        }
+
         public async Task<ConvertRequestToOrderResponse> ConvertToOrderAsync(int requestId)
         {
             var strategy = _db.Database.CreateExecutionStrategy();
