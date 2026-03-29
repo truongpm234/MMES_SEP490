@@ -696,7 +696,21 @@ namespace AMMS.Application.Services
                     wave_sheets_used = est.wave_sheets_used,
                     paper_alternative = est.paper_alternative,
                     wave_alternative = est.wave_alternative,
-                    production_processes = est.production_processes
+                    production_processes = est.production_processes,
+                    waste_gluing_boxes = est.waste_gluing_boxes,
+                    sheet_area_m2 = est.sheet_area_m2,
+                    print_sheets_used = est.print_sheets_used,
+                    total_coating_area_m2 = est.total_coating_area_m2,
+                    total_lamination_area_m2 = est.total_lamination_area_m2,
+                    coating_sheets_used = est.coating_sheets_used,
+                    lamination_sheets_used = est.lamination_sheets_used,
+                    wave_sheet_area_m2 = est.wave_sheet_area_m2,
+                    wave_n_up = est.wave_n_up,
+                    wave_sheets_required = est.wave_sheets_required,
+                    total_mounting_area_m2 = est.total_mounting_area_m2,
+                    wave_unit_price = est.wave_unit_price,
+                    wave_cost = est.wave_cost,
+                    total_process_cost = est.total_process_cost,
                 };
 
                 if (est.process_costs != null && est.process_costs.Count > 0)

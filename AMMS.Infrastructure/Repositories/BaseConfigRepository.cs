@@ -132,11 +132,10 @@ namespace AMMS.Infrastructure.Repositories
                     keo_dau_lt_10000 = GetInt("wasteRules.coating", "keo_dau_lt_10000"),
                     keo_dau_ge_10000 = GetInt("wasteRules.coating", "keo_dau_ge_10000")
                 },
-                Lamination = new StepWasteSimpleConfig
+                Lamination = new LaminationWasteConfig
                 {
-                    lt_5000 = GetInt("wasteRules.lamination", "lt_5000"),
-                    lt_20000 = GetInt("wasteRules.lamination", "lt_20000"),
-                    ge_20000 = GetInt("wasteRules.lamination", "ge_20000")
+                    lt_10000 = GetInt("wasteRules.lamination", "lt_10000"),
+                    ge_10000 = GetInt("wasteRules.lamination", "ge_10000")
                 },
                 Gluing = new GluingWasteConfig
                 {
@@ -147,6 +146,7 @@ namespace AMMS.Infrastructure.Repositories
                 }
             };
         }
+
 
         private static SystemConfig MapSystemParameters(List<estimate_config> rows)
         {

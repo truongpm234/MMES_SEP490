@@ -10,9 +10,9 @@ namespace AMMS.Shared.Helpers
     public class ProductionSHelper
     {
         private static readonly HashSet<int> FullAccessRoleIds = new()
-{
-    4,6 // production_manager and warehouse_manager
-};
+        {
+            4,6, 3
+        };
 
         public static readonly Dictionary<int, string> RoleIdToProcess = new()
         {

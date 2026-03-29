@@ -2,6 +2,7 @@
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Common;
+using AMMS.Shared.DTOs.Estimates;
 using AMMS.Shared.DTOs.Orders;
 using AMMS.Shared.DTOs.Requests;
 using AMMS.Shared.Helpers;
@@ -1113,7 +1114,33 @@ namespace AMMS.Infrastructure.Repositories
                     paper_alternative = e.paper_alternative,
                     wave_alternative = e.wave_alternative,
                     wave_sheet_used = e.wave_sheets_used,
-                    cost_note = e.cost_note
+                    cost_note = e.cost_note,
+                    waste_gluing_boxes = e.waste_gluing_boxes,
+                    sheet_area_m2 = e.sheet_area_m2,
+                    print_sheets_used = e.print_sheets_used,
+                    total_coating_area_m2 = e.total_coating_area_m2,
+                    total_lamination_area_m2 = e.total_lamination_area_m2,
+                    coating_sheets_used = e.coating_sheets_used,
+                    lamination_sheets_used = e.lamination_sheets_used,
+                    wave_sheet_area_m2 = e.wave_sheet_area_m2,
+                    wave_n_up = e.wave_n_up,
+                    wave_sheets_required = e.wave_sheets_required,
+                    total_mounting_area_m2 = e.total_mounting_area_m2,
+                    wave_unit_price = e.wave_unit_price,
+                    wave_cost = e.wave_cost,
+                    total_process_cost = e.total_process_cost,
+                    process_costs = e.process_costs
+    .OrderBy(pc => pc.process_code)
+    .Select(pc => new EstimateProcessCostDto
+    {
+        process_code = pc.process_code,
+        process_name = pc.process_name,
+        quantity = pc.quantity,
+        unit = pc.unit,
+        unit_price = pc.unit_price,
+        total_cost = pc.total_cost,
+        note = pc.note
+    }).ToList(),
                 })
                 .ToListAsync(ct);
             var altPaperCodes = ests

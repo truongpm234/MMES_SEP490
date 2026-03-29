@@ -81,6 +81,22 @@ namespace AMMS.Shared.DTOs.Estimates
         public int? print_length_mm { get; set; }
         public int? print_width_mm { get; set; }
 
+        //màng+sóng
+        public int? waste_gluing_boxes { get; set; }
+        public decimal? sheet_area_m2 { get; set; }
+        public int? print_sheets_used { get; set; }
+        public decimal? total_coating_area_m2 { get; set; }
+        public decimal? total_lamination_area_m2 { get; set; }
+        public int? coating_sheets_used { get; set; }
+        public int? lamination_sheets_used { get; set; }
+        public decimal? wave_sheet_area_m2 { get; set; }
+        public int? wave_n_up { get; set; }
+        public int? wave_sheets_required { get; set; }
+        public decimal? total_mounting_area_m2 { get; set; }
+        public decimal? wave_unit_price { get; set; }
+        public decimal? wave_cost { get; set; }
+        public decimal? total_process_cost { get; set; }
+
         //Hop dong
         public string? contract_file_path { get; set; }
         public DateTime? contract_uploaded_at { get; set; }

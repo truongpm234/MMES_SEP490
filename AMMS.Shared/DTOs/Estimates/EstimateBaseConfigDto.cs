@@ -58,8 +58,14 @@
         public StepWasteSimpleConfig DieCutting { get; set; } = null!;
         public StepWasteSimpleConfig Mounting { get; set; } = null!;
         public CoatingWasteConfig Coating { get; set; } = null!;
-        public StepWasteSimpleConfig Lamination { get; set; } = null!;
+        public LaminationWasteConfig Lamination { get; set; } = null!;
         public GluingWasteConfig Gluing { get; set; } = null!;
+    }
+
+    public class LaminationWasteConfig
+    {
+        public int lt_10000 { get; set; }
+        public int ge_10000 { get; set; }
     }
 
     public class PrintingWasteConfig

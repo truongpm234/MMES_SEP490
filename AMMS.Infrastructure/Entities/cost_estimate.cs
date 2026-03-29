@@ -109,6 +109,48 @@ public partial class cost_estimate
 
     public string? customer_signed_contract_path { get; set; }
 
+    [Column("waste_gluing_boxes")]
+    public int? waste_gluing_boxes { get; set; }
+
+    [Column("sheet_area_m2", TypeName = "numeric(18,6)")]
+    public decimal? sheet_area_m2 { get; set; }
+
+    [Column("print_sheets_used")]
+    public int? print_sheets_used { get; set; }
+
+    [Column("total_coating_area_m2", TypeName = "numeric(18,6)")]
+    public decimal? total_coating_area_m2 { get; set; }
+
+    [Column("total_lamination_area_m2", TypeName = "numeric(18,6)")]
+    public decimal? total_lamination_area_m2 { get; set; }
+
+    [Column("coating_sheets_used")]
+    public int? coating_sheets_used { get; set; }
+
+    [Column("lamination_sheets_used")]
+    public int? lamination_sheets_used { get; set; }
+
+    [Column("wave_sheet_area_m2", TypeName = "numeric(18,6)")]
+    public decimal? wave_sheet_area_m2 { get; set; }
+
+    [Column("wave_n_up")]
+    public int? wave_n_up { get; set; }
+
+    [Column("wave_sheets_required")]
+    public int? wave_sheets_required { get; set; }
+
+    [Column("total_mounting_area_m2", TypeName = "numeric(18,6)")]
+    public decimal? total_mounting_area_m2 { get; set; }
+
+    [Column("wave_unit_price", TypeName = "numeric(18,2)")]
+    public decimal? wave_unit_price { get; set; }
+
+    [Column("wave_cost", TypeName = "numeric(18,2)")]
+    public decimal? wave_cost { get; set; }
+
+    [Column("total_process_cost", TypeName = "numeric(18,2)")]
+    public decimal? total_process_cost { get; set; }
+
     public virtual cost_estimate? previous_estimate { get; set; }
 
     public virtual ICollection<cost_estimate> revised_estimates { get; set; } = new List<cost_estimate>();

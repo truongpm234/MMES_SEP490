@@ -174,7 +174,20 @@ namespace AMMS.Application.Services
             SetIfHasValue(req.sheets_total, v => entity.sheets_total = v);
             SetIfHasValue(req.n_up, v => entity.n_up = v);
             SetIfHasValue(req.total_area_m2, v => entity.total_area_m2 = v);
-
+            SetIfHasValue(req.waste_gluing_boxes, v => entity.waste_gluing_boxes = v);
+            SetIfHasValue(req.sheet_area_m2, v => entity.sheet_area_m2 = v);
+            SetIfHasValue(req.print_sheets_used, v => entity.print_sheets_used = v);
+            SetIfHasValue(req.total_coating_area_m2, v => entity.total_coating_area_m2 = v);
+            SetIfHasValue(req.total_lamination_area_m2, v => entity.total_lamination_area_m2 = v);
+            SetIfHasValue(req.coating_sheets_used, v => entity.coating_sheets_used = v);
+            SetIfHasValue(req.lamination_sheets_used, v => entity.lamination_sheets_used = v);
+            SetIfHasValue(req.wave_sheet_area_m2, v => entity.wave_sheet_area_m2 = v);
+            SetIfHasValue(req.wave_n_up, v => entity.wave_n_up = v);
+            SetIfHasValue(req.wave_sheets_required, v => entity.wave_sheets_required = v);
+            SetIfHasValue(req.total_mounting_area_m2, v => entity.total_mounting_area_m2 = v);
+            SetIfHasValue(req.wave_unit_price, v => entity.wave_unit_price = v);
+            SetIfHasValue(req.wave_cost, v => entity.wave_cost = v);
+            SetIfHasValue(req.total_process_cost, v => entity.total_process_cost = v);
             SetIfHasValue(req.design_cost, v => entity.design_cost = v);
             SetIfNotNull(req.cost_note, v => entity.cost_note = v);
 
@@ -186,61 +199,34 @@ namespace AMMS.Application.Services
 
             if (req.process_costs != null)
             {
-                int sheetsBase = entity.sheets_required > 0
-                    ? entity.sheets_required
-                    : (entity.sheets_total > 0 ? entity.sheets_total : 1);
-
-                decimal totalArea = entity.total_area_m2 > 0 ? entity.total_area_m2 : 0m;
-
                 foreach (var p in req.process_costs)
                 {
                     var pcode = (p.process_code ?? "").Trim().ToUpperInvariant();
+                    var pname = string.IsNullOrWhiteSpace(p.process_name) ? pcode : p.process_name.Trim();
+
                     decimal qty = p.quantity ?? 0m;
                     decimal unitPrice = p.unit_price ?? 0m;
+                    decimal totalCost = p.total_cost ?? 0m;
 
-                    decimal totalCost = (p.total_cost.HasValue && p.total_cost.Value > 0)
-                        ? p.total_cost.Value
-                        : (qty * unitPrice);
-
-                    var unit = (p.unit ?? "").Trim();
-
-                    if (pcode is "IN" or "PHU" or "CAN")
-                    {
-                        var qtySheets = (decimal)sheetsBase;
-                        var unitPriceSheet = sheetsBase > 0 ? (totalCost / qtySheets) : 0m;
-
-                        if (totalCost <= 0 && unitPrice > 0 && totalArea > 0)
-                        {
-                            totalCost = unitPrice * totalArea;
-                            unitPriceSheet = sheetsBase > 0 ? (totalCost / qtySheets) : 0m;
-                        }
-
-                        entity.process_costs.Add(new cost_estimate_process
-                        {
-                            process_code = p.process_code,
-                            process_name = p.process_name ?? p.process_code,
-                            quantity = qtySheets,
-                            unit = "tờ",
-                            unit_price = unitPriceSheet,
-                            total_cost = totalCost,
-                            note = p.note,
-                            created_at = AppTime.NowVnUnspecified()
-                        });
-
-                        continue;
-                    }
+                    if (totalCost <= 0m)
+                        totalCost = qty * unitPrice;
 
                     entity.process_costs.Add(new cost_estimate_process
                     {
-                        process_code = p.process_code,
-                        process_name = p.process_name ?? p.process_code,
+                        process_code = pcode,
+                        process_name = pname,
                         quantity = qty,
-                        unit = string.IsNullOrWhiteSpace(unit) ? "" : unit,
+                        unit = string.IsNullOrWhiteSpace(p.unit) ? "" : p.unit.Trim(),
                         unit_price = unitPrice,
                         total_cost = totalCost,
                         note = p.note,
                         created_at = AppTime.NowVnUnspecified()
                     });
+                }
+
+                if (!req.total_process_cost.HasValue || req.total_process_cost.Value <= 0)
+                {
+                    entity.total_process_cost = entity.process_costs.Sum(x => x.total_cost);
                 }
             }
 
