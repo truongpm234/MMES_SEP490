@@ -46,9 +46,20 @@ namespace AMMS.Application.Services
         {
             return await _materialRepository.GetMaterialByTypeSongAsync();
         }
-        public async Task<MaterialTypeGlueDto> GetAllGlueTypeAsync()
+
+        public async Task<MaterialTypeGlueDto> GetAllPhuGlueTypeAsync()
         {
-            return await _materialRepository.GetAllGlueTypeAsync();
+            return await _materialRepository.GetAllPhuGlueTypeAsync();
+        }
+
+        public async Task<MaterialTypeGlueDto> GetAllBoiGlueTypeAsync()
+        {
+            return await _materialRepository.GetAllBoiGlueTypeAsync();
+        }
+
+        public async Task<MaterialTypeGlueDto> GetAllDanGlueTypeAsync()
+        {
+            return await _materialRepository.GetAllDanGlueTypeAsync();
         }
         public Task<PagedResultLite<MaterialShortageDto>> GetShortageForAllOrdersPagedAsync(
             int page, int pageSize, CancellationToken ct = default) =>

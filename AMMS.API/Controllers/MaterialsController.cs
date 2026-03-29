@@ -56,10 +56,24 @@ namespace AMMS.API.Controllers
             return Ok(materials);
         }
 
-        [HttpGet("get-all-glue-type")]
-        public async Task<IActionResult> GetAllGlueTypeAsync()
+        [HttpGet("get-all-glue-type-dan")]
+        public async Task<IActionResult> GetAllDanGlueTypeAsync()
         {
-            var glue = await _materialService.GetAllGlueTypeAsync();
+            var glue = await _materialService.GetAllDanGlueTypeAsync();
+            return Ok(glue);
+        }
+
+        [HttpGet("get-all-glue-type-boi")]
+        public async Task<IActionResult> GetAllBoiGlueTypeAsync()
+        {
+            var glue = await _materialService.GetAllBoiGlueTypeAsync();
+            return Ok(glue);
+        }
+
+        [HttpGet("get-all-glue-type-phu")]
+        public async Task<IActionResult> GetAllPhuGlueTypeAsync()
+        {
+            var glue = await _materialService.GetAllPhuGlueTypeAsync();
             return Ok(glue);
         }
     }

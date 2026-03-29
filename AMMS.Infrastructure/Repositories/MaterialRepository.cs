@@ -223,11 +223,51 @@ namespace AMMS.Infrastructure.Repositories
             return response;
         }
 
-        public async Task<MaterialTypeGlueDto> GetAllGlueTypeAsync()
+        public async Task<MaterialTypeGlueDto> GetAllBoiGlueTypeAsync()
+        {
+            var response = new MaterialTypeGlueDto();
+            var materialsPaperType = _db.materials.Where(n => n.type == "Keo bồi").ToList();
+            var paperMaxStockProduct = _db.materials.Where(m => m.code == "KEO_BOI").OrderByDescending(m => m.stock_qty).Select(m => m.name).FirstOrDefault();
+            foreach (var material in materialsPaperType)
+            {
+                var waveTypedto = new GlueTypeDto();
+                waveTypedto.Code = material.code;
+                waveTypedto.Name = material.name;
+                waveTypedto.StockQty = material.stock_qty;
+                waveTypedto.Price = material.cost_price;
+                waveTypedto.description = material.description;
+                waveTypedto.material_class = material.material_class;
+                response.GlueTypes.Add(waveTypedto);
+            }
+            response.MostStockGlueNames = paperMaxStockProduct;
+            return response;
+        }
+
+        public async Task<MaterialTypeGlueDto> GetAllDanGlueTypeAsync()
+        {
+            var response = new MaterialTypeGlueDto();
+            var materialsPaperType = _db.materials.Where(n => n.type == "Keo dán").ToList();
+            var paperMaxStockProduct = _db.materials.Where(m => m.code == "KEO_DAN").OrderByDescending(m => m.stock_qty).Select(m => m.name).FirstOrDefault();
+            foreach (var material in materialsPaperType)
+            {
+                var waveTypedto = new GlueTypeDto();
+                waveTypedto.Code = material.code;
+                waveTypedto.Name = material.name;
+                waveTypedto.StockQty = material.stock_qty;
+                waveTypedto.Price = material.cost_price;
+                waveTypedto.description = material.description;
+                waveTypedto.material_class = material.material_class;
+                response.GlueTypes.Add(waveTypedto);
+            }
+            response.MostStockGlueNames = paperMaxStockProduct;
+            return response;
+        }
+
+        public async Task<MaterialTypeGlueDto> GetAllPhuGlueTypeAsync()
         {
             var response = new MaterialTypeGlueDto();
             var materialsPaperType = _db.materials.Where(n => n.code == "KEO_PHU_NUOC" || n.code == "KEO_PHU_DAU").ToList();
-            var paperMaxStockProduct = _db.materials.Where(m => m.code == "KEO").OrderByDescending(m => m.stock_qty).Select(m => m.name).FirstOrDefault();
+            var paperMaxStockProduct = _db.materials.Where(m => m.code == "Keo phủ").OrderByDescending(m => m.stock_qty).Select(m => m.name).FirstOrDefault();
             foreach (var material in materialsPaperType)
             {
                 var waveTypedto = new GlueTypeDto();
