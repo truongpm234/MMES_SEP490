@@ -44,7 +44,7 @@ namespace AMMS.Infrastructure.Repositories
         public async Task<List<material>> GetMaterialByTypeSongAsync()
         {
             return await _db.materials
-                .Where(m => m.type != null && m.type == "SÓNG")
+                .Where(m => m.type != null && m.type == "Sóng")
                 .ToListAsync();
         }
         public async Task<PagedResultLite<MaterialShortageDto>> GetShortageForAllOrdersPagedAsync(
@@ -206,8 +206,8 @@ namespace AMMS.Infrastructure.Repositories
         public async Task<MaterialTypePaperDto> GetAllPaperTypeAsync()
         {
             var response = new MaterialTypePaperDto();
-            var materialsPaperType = _db.materials.Where(n => n.type == "GIẤY").ToList();
-            var paperMaxStockProduct = _db.materials.Where(m => m.type == "GIẤY").OrderByDescending(m => m.stock_qty).Select(m => m.name).FirstOrDefault();
+            var materialsPaperType = _db.materials.Where(n => n.type == "Giấy").ToList();
+            var paperMaxStockProduct = _db.materials.Where(m => m.type == "Giấy").OrderByDescending(m => m.stock_qty).Select(m => m.name).FirstOrDefault();
             foreach (var material in materialsPaperType)
             {
                 var paperTypedto = new PaperTypeDto();
