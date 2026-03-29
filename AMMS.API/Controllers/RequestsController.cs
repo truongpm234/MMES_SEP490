@@ -144,6 +144,15 @@ namespace AMMS.API.Controllers
             return Ok(result);
         }
 
+        [HttpGet("get-by-order-id/{orderId}")]
+        public async Task<IActionResult> GetByOrderId(int orderId)
+        {
+            var result = await _service.GetByOrderIdAsync(orderId);
+            if (result == null) return NotFound();
+
+            return Ok(result);
+        }
+
         [HttpPut("approval")]
         public async Task<IActionResult> Approval([FromBody] RequestApprovalUpdateDto dto, CancellationToken ct)
         {
