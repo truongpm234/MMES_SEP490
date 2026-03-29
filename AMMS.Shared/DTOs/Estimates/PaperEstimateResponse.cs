@@ -8,11 +8,11 @@
 
             public int sheet_width_mm { get; set; }
 
-            public int sheet_height_mm { get; set; }
+            public int sheet_length_mm { get; set; }
 
             public int print_width_mm { get; set; }
 
-            public int print_height_mm { get; set; }
+            public int print_length_mm { get; set; }
 
             public int n_up { get; set; }
 

@@ -19,7 +19,7 @@ namespace AMMS.Shared.DTOs.ProductTypes
         public int? bleed_mm { get; set; }
 
         public int? print_width_mm { get; set; }
-        public int? print_height_mm { get; set; }
+        public int? print_length_mm { get; set; }
 
         public string? coating_type { get; set; }
         public string? wave_type { get; set; }

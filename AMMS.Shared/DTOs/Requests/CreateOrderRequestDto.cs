@@ -43,6 +43,6 @@ namespace AMMS.Shared.DTOs.Requests
 
         // Kích thước bản in (nếu đã tính trước)
         public int? print_width_mm { get; set; }
-        public int? print_height_mm { get; set; }
+        public int? print_length_mm { get; set; }
     }
 }

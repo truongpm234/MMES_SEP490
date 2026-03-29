@@ -48,7 +48,7 @@ namespace AMMS.Infrastructure.Repositories
                     bleed_mm = t.bleed_mm,
 
                     print_width_mm = t.print_width_mm,
-                    print_height_mm = t.print_height_mm,
+                    print_length_mm = t.print_length_mm,
 
                     coating_type = t.coating_type,
                     wave_type = t.wave_type,

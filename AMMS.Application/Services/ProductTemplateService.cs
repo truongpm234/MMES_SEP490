@@ -48,7 +48,7 @@ namespace AMMS.Application.Services
                 wave_type = x.wave_type,
 
                 print_width_mm = x.print_width_mm,
-                print_height_mm = x.print_height_mm,
+                print_length_mm = x.print_length_mm,
 
                 production_processes = x.production_processes,
                 default_quantity = x.default_quantity,

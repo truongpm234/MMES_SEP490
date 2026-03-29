@@ -44,7 +44,7 @@ namespace AMMS.Infrastructure.Entities
 
         public int? print_width_mm { get; set; }
 
-        public int? print_height_mm { get; set; }
+        public int? print_length_mm { get; set; }
 
         public string? production_processes { get; set; }
 

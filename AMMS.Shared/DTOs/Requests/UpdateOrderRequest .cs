@@ -64,7 +64,7 @@ namespace AMMS.Shared.DTOs.Requests
 
         public int? print_width_mm { get; set; }
 
-        public int? print_height_mm { get; set; }
+        public int? print_length_mm { get; set; }
 
         public bool? is_send_design { get; set; }
 

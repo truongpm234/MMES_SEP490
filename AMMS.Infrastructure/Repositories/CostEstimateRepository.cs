@@ -117,7 +117,7 @@ namespace AMMS.Infrastructure.Repositories
                     bleed_mm = r.bleed_mm,
                     is_one_side_box = r.is_one_side_box,
                     print_width_mm = r.print_width_mm,
-                    print_height_mm = r.print_height_mm,
+                    print_length_mm = r.print_length_mm,
                     is_send_design = r.is_send_design,
                     note = r.note,
                     reason = r.reason,

@@ -193,7 +193,7 @@ namespace AMMS.Application.Services
             entity.bleed_mm = req.bleed_mm ?? entity.bleed_mm;
             entity.is_one_side_box = req.is_one_side_box ?? entity.is_one_side_box;
             entity.print_width_mm = req.print_width_mm ?? entity.print_width_mm;
-            entity.print_height_mm = req.print_height_mm ?? entity.print_height_mm;
+            entity.print_length_mm = req.print_length_mm ?? entity.print_length_mm;
             entity.is_send_design = req.is_send_design ?? entity.is_send_design;
 
             if (ce != null && !string.IsNullOrWhiteSpace(req.production_processes))
@@ -398,7 +398,7 @@ namespace AMMS.Application.Services
                 bleed_mm = dto.bleed_mm,
                 is_one_side_box = dto.is_one_side_box,
                 print_width_mm = dto.print_width_mm,
-                print_height_mm = dto.print_height_mm,
+                print_length_mm = dto.print_length_mm,
                 order_request_date = now,
                 process_status = "Pending",
 
@@ -623,7 +623,7 @@ namespace AMMS.Application.Services
                 bleed_mm = source.bleed_mm,
                 is_one_side_box = source.is_one_side_box,
                 print_width_mm = source.print_width_mm,
-                print_height_mm = source.print_height_mm,
+                print_length_mm = source.print_length_mm,
                 is_send_design = source.is_send_design,
                 note = null,
                 reason = null,

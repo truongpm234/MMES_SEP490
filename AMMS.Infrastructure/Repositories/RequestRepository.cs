@@ -101,7 +101,7 @@ namespace AMMS.Infrastructure.Repositories
                 bleed_mm = request.bleed_mm,
                 is_one_side_box = request.is_one_side_box,
                 print_width_mm = request.print_width_mm,
-                print_height_mm = request.print_height_mm,
+                print_length_mm = request.print_length_mm,
                 is_send_design = request.is_send_design,
                 reason = request.reason,
                 final_total_cost = estimate?.final_total_cost,
@@ -766,7 +766,7 @@ namespace AMMS.Infrastructure.Repositories
                 bleed_mm = request.bleed_mm,
                 is_one_side_box = request.is_one_side_box,
                 print_width_mm = request.print_width_mm,
-                print_height_mm = request.print_height_mm,
+                print_length_mm = request.print_length_mm,
                 reason = SafeText(request.reason),
                 note = SafeText(request.note),
                 verified_at = request.verified_at,
@@ -880,7 +880,7 @@ namespace AMMS.Infrastructure.Repositories
                     bleed_mm = r.bleed_mm,
                     is_one_side_box = r.is_one_side_box,
                     print_width_mm = r.print_width_mm,
-                    print_height_mm = r.print_height_mm,
+                    print_length_mm = r.print_length_mm,
                     is_send_design = r.is_send_design,
                     message_to_customer = r.message_to_customer
                 })

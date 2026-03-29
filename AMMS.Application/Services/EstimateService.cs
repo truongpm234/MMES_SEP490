@@ -181,7 +181,7 @@ namespace AMMS.Application.Services
             SetIfHasValue(req.bleed_mm, v => orderReq.bleed_mm = v);
             SetIfHasValue(req.glue_tab_mm, v => orderReq.glue_tab_mm = v);
             if (req.is_one_side_box.HasValue) orderReq.is_one_side_box = req.is_one_side_box.Value;
-            SetIfHasValue(req.print_height_mm, v => orderReq.print_height_mm = v);
+            SetIfHasValue(req.print_length_mm, v => orderReq.print_length_mm = v);
             SetIfHasValue(req.print_width_mm, v => orderReq.print_width_mm = v);
 
             if (req.process_costs != null)
@@ -435,12 +435,15 @@ namespace AMMS.Application.Services
             if (estimate == null)
                 throw new InvalidOperationException("Active/accepted estimate not found");
 
-            estimate.paper_alternative = EstimateMaterialAlternativeHelper.NormalizeNullable(paperAlternative);
-            estimate.wave_alternative = EstimateMaterialAlternativeHelper.NormalizeNullable(waveAlternative);
+            // CHỈ update khi client có truyền giá trị
+            if (!string.IsNullOrWhiteSpace(paperAlternative))
+                estimate.paper_alternative = paperAlternative.Trim();
+
+            if (!string.IsNullOrWhiteSpace(waveAlternative))
+                estimate.wave_alternative = waveAlternative.Trim();
 
             await SyncOperationalMaterialSnapshotAsync(request, estimate, ct);
 
-            // vì các repo cùng dùng scoped DbContext nên save 1 lần là đủ
             await _estimateRepo.SaveChangesAsync();
         }
 
