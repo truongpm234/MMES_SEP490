@@ -3,13 +3,10 @@ using AMMS.Application.Interfaces;
 using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
-using AMMS.Infrastructure.Repositories;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Requests;
-using AMMS.Shared.DTOs.Socket;
 using AMMS.Shared.DTOs.User;
 using AMMS.Shared.Helpers;
-using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 
 namespace AMMS.Application.Services
@@ -1079,12 +1076,12 @@ namespace AMMS.Application.Services
         public Task EnsureCanAccessAssignedRequestAsync(int requestId, CancellationToken ct = default)
             => _currentUser.EnsureCanAccessAssignedRequestAsync(requestId, ct);
 
-        public async Task<bool> UpdateDeliveryNoteAsync(int orderRequestId, string note, CancellationToken ct = default)
+        public async Task<bool> UpdateDeliveryNoteAsync(int orderId, string note, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(note))
                 note = "";
 
-            return await _requestRepo.UpdateDeliveryNoteAsync(orderRequestId, note.Trim(), ct);
+            return await _requestRepo.UpdateDeliveryNoteAsync(orderId, note.Trim(), ct);
         }
 
         private async Task<AssignedConsultantSummaryDto> ResolveAssignedConsultantAsync(CancellationToken ct = default)
