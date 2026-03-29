@@ -14,6 +14,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task<List<bom>> GetByIdAsync(int id);
         Task AddBomAsync(bom bom);
         Task SaveChangesAsync();
+        Task<List<bom>> GetByOrderItemIdsAndEstimateIdAsync(List<int> orderItemIds, int estimateId, CancellationToken ct = default);
     }
 
 }

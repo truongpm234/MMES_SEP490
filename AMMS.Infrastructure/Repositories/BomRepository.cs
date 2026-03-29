@@ -40,5 +40,18 @@ namespace AMMS.Infrastructure.Repositories
             await _context.SaveChangesAsync();
         }
 
+        public async Task<List<bom>> GetByOrderItemIdsAndEstimateIdAsync(
+            List<int> orderItemIds,
+            int estimateId,
+            CancellationToken ct = default)
+        {
+            if (orderItemIds == null || orderItemIds.Count == 0)
+                return new List<bom>();
+
+            return await _context.boms
+                .Where(x => orderItemIds.Contains((int)x.order_item_id)
+                         && x.source_estimate_id == estimateId)
+                .ToListAsync(ct);
+        }
     }
 }

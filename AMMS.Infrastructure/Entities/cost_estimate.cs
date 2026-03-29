@@ -89,6 +89,10 @@ public partial class cost_estimate
 
     public string? wave_type { get; set; }
 
+    public string? paper_alternative { get; set; }
+
+    public string? wave_alternative { get; set; }
+
     public int? wave_sheets_used { get; set; }
 
     public string? production_processes { get; set; }

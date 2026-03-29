@@ -13,5 +13,6 @@ namespace AMMS.Infrastructure.Interfaces
         Task<List<product_type>> GetAllAsync();
         Task<product_type?> GetByCodeAsync(string code);
         Task<ProductTypeDetailDto?> GetProductTypeDetailAsync(int productTypeId, CancellationToken ct = default);
+        Task<int?> GetIdByCodeAsync(string code, CancellationToken ct = default);
     }
 }

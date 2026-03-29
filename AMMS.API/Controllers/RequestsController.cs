@@ -7,6 +7,7 @@ using AMMS.Shared.DTOs.Email;
 using AMMS.Shared.DTOs.PayOS;
 using AMMS.Shared.DTOs.Requests;
 using AMMS.Shared.DTOs.Requests.AMMS.Shared.DTOs.Requests;
+using AMMS.Shared.Helpers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -140,6 +141,15 @@ namespace AMMS.API.Controllers
         public async Task<IActionResult> GetPaged([FromQuery] int page, [FromQuery] int pageSize)
         {
             var result = await _service.GetPagedAsync(page, pageSize);
+            return Ok(result);
+        }
+
+        [HttpGet("get-by-order-id/{orderId}")]
+        public async Task<IActionResult> GetByOrderId(int orderId)
+        {
+            var result = await _service.GetByOrderIdAsync(orderId);
+            if (result == null) return NotFound();
+
             return Ok(result);
         }
 

@@ -5,6 +5,7 @@ using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Email;
 using AMMS.Shared.DTOs.Estimates;
 using AMMS.Shared.DTOs.Requests;
+using AMMS.Shared.Helpers;
 
 namespace AMMS.Application.Services
 {
@@ -15,18 +16,28 @@ namespace AMMS.Application.Services
         private readonly IAccessService _accessService;
         private readonly ICloudinaryFileStorageService _cloudinaryStorage;
         private readonly IRequestRepository _requestRepository;
+        private readonly IOrderRepository _orderRepo;
+        private readonly IMaterialRepository _materialRepo;
+        private readonly IBomRepository _bomRepo;
+
         public EstimateService(
             ICostEstimateRepository costEstimateRepository,
             IQuoteRepository quoteRepo,
             IAccessService accessService,
             ICloudinaryFileStorageService cloudinaryStorage,
-            IRequestRepository requestRepository)
+            IRequestRepository requestRepository,
+            IOrderRepository orderRepo,
+            IMaterialRepository materialRepo,
+            IBomRepository bomRepo)
         {
             _estimateRepo = costEstimateRepository;
             _quoteRepo = quoteRepo;
             _accessService = accessService;
             _cloudinaryStorage = cloudinaryStorage;
             _requestRepository = requestRepository;
+            _orderRepo = orderRepo;
+            _materialRepo = materialRepo;
+            _bomRepo = bomRepo;
         }
 
         public async Task UpdateFinalCostAsync(int orderRequestId, decimal? finalCostInput)
@@ -134,6 +145,8 @@ namespace AMMS.Application.Services
             SetIfNotNull(req.coating_type, v => entity.coating_type = v);
             SetIfNotNull(req.wave_type, v => entity.wave_type = v);
             SetIfHasValue(req.wave_sheets_used, v => entity.wave_sheets_used = v);
+            SetIfNotNull(req.paper_alternative, v => entity.paper_alternative = v.Trim());
+            SetIfNotNull(req.wave_alternative, v => entity.wave_alternative = v.Trim());
 
             SetIfHasValue(req.mounting_glue_cost, v => entity.mounting_glue_cost = v);
             SetIfHasValue(req.mounting_glue_weight_kg, v => entity.mounting_glue_weight_kg = v);
@@ -383,5 +396,154 @@ namespace AMMS.Application.Services
             };
         }
 
+        public async Task UpdateAlternativeMaterialsAsync(
+    int requestId,
+    int? estimateId,
+    string? paperAlternative,
+    string? waveAlternative,
+    CancellationToken ct = default)
+        {
+            await _accessService.EnsureCanAccessAssignedRequestAsync(requestId, ct);
+
+            var request = await _estimateRepo.GetOrderRequestTrackingAsync(requestId, ct);
+            if (request == null)
+                throw new InvalidOperationException("Order request not found");
+
+            var allowedStatuses = new[] { "Accepted", "Paid", "Delivery", "Completed" };
+            if (!allowedStatuses.Contains(request.process_status ?? "", StringComparer.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Only Accepted/Paid/Delivery/Completed request can update alternative materials");
+            }
+
+            cost_estimate? estimate = null;
+
+            if (estimateId.HasValue && estimateId.Value > 0)
+            {
+                estimate = await _estimateRepo.GetTrackingByIdAsync(estimateId.Value, ct);
+                if (estimate == null || estimate.order_request_id != requestId)
+                    throw new InvalidOperationException("Estimate not found");
+            }
+
+            if (estimate == null && request.accepted_estimate_id.HasValue && request.accepted_estimate_id.Value > 0)
+            {
+                estimate = await _estimateRepo.GetTrackingByIdAsync(request.accepted_estimate_id.Value, ct);
+            }
+
+            estimate ??= await _estimateRepo.GetFirstActiveTrackingByRequestIdAsync(requestId, ct);
+
+            if (estimate == null)
+                throw new InvalidOperationException("Active/accepted estimate not found");
+
+            estimate.paper_alternative = EstimateMaterialAlternativeHelper.NormalizeNullable(paperAlternative);
+            estimate.wave_alternative = EstimateMaterialAlternativeHelper.NormalizeNullable(waveAlternative);
+
+            await SyncOperationalMaterialSnapshotAsync(request, estimate, ct);
+
+            // vì các repo cùng dùng scoped DbContext nên save 1 lần là đủ
+            await _estimateRepo.SaveChangesAsync();
+        }
+
+        private async Task SyncOperationalMaterialSnapshotAsync(
+            order_request request,
+            cost_estimate estimate,
+            CancellationToken ct)
+        {
+            if (!request.order_id.HasValue || request.order_id.Value <= 0)
+                return;
+
+            var resolvedPaperCode = EstimateMaterialAlternativeHelper.ResolvePaperCode(
+                estimate.paper_alternative,
+                estimate.paper_code);
+
+            var resolvedWaveType = EstimateMaterialAlternativeHelper.ResolveWaveType(
+                estimate.wave_alternative,
+                estimate.wave_type);
+
+            material? paperMaterial = null;
+            string? resolvedPaperName = estimate.paper_name;
+
+            if (!string.IsNullOrWhiteSpace(resolvedPaperCode))
+            {
+                paperMaterial = await _materialRepo.GetByCodeAsync(resolvedPaperCode);
+                resolvedPaperName = paperMaterial?.name ?? estimate.paper_name ?? resolvedPaperCode;
+            }
+
+            material? waveMaterial = null;
+            string? resolvedWaveName = null;
+
+            if (!string.IsNullOrWhiteSpace(resolvedWaveType))
+            {
+                waveMaterial = await _materialRepo.GetByCodeAsync(resolvedWaveType);
+                resolvedWaveName = waveMaterial?.name ?? $"Sóng {resolvedWaveType}";
+            }
+
+            var orderItems = await _orderRepo.GetOrderItemsByOrderIdAsync(request.order_id.Value, ct);
+
+            foreach (var item in orderItems)
+            {
+                item.paper_code = resolvedPaperCode;
+                item.paper_name = resolvedPaperName;
+                item.wave_type = resolvedWaveType;
+            }
+
+            var orderItemIds = orderItems.Select(x => x.item_id).ToList();
+            if (orderItemIds.Count == 0)
+                return;
+
+            var allBoms = await _bomRepo.GetByOrderItemIdsAndEstimateIdAsync(
+                orderItemIds,
+                estimate.estimate_id,
+                ct);
+
+            var paperCodesToMatch = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(estimate.paper_code))
+                paperCodesToMatch.Add(estimate.paper_code.Trim());
+            if (!string.IsNullOrWhiteSpace(estimate.paper_alternative))
+                paperCodesToMatch.Add(estimate.paper_alternative.Trim());
+            if (!string.IsNullOrWhiteSpace(resolvedPaperCode))
+                paperCodesToMatch.Add(resolvedPaperCode.Trim());
+
+            foreach (var bom in allBoms.Where(x =>
+                         string.Equals((x.material_name ?? "").Trim(), "Giấy", StringComparison.OrdinalIgnoreCase) ||
+                         paperCodesToMatch.Contains((x.material_code ?? "").Trim())))
+            {
+                bom.material_id = paperMaterial?.material_id;
+                bom.material_code = EstimateHelper.Trunc20(resolvedPaperCode ?? "PAPER");
+                bom.material_name = resolvedPaperName ?? "Giấy";
+            }
+
+            var waveCodesToMatch = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(estimate.wave_type))
+                waveCodesToMatch.Add(estimate.wave_type.Trim());
+            if (!string.IsNullOrWhiteSpace(estimate.wave_alternative))
+                waveCodesToMatch.Add(estimate.wave_alternative.Trim());
+            if (!string.IsNullOrWhiteSpace(resolvedWaveType))
+                waveCodesToMatch.Add(resolvedWaveType.Trim());
+
+            foreach (var bom in allBoms.Where(x =>
+                         waveCodesToMatch.Contains((x.material_code ?? "").Trim()) ||
+                         (x.material_name ?? "").Trim().StartsWith("Sóng ", StringComparison.OrdinalIgnoreCase)))
+            {
+                bom.material_id = waveMaterial?.material_id;
+                bom.material_code = EstimateHelper.Trunc20(resolvedWaveType ?? "");
+                bom.material_name = resolvedWaveName ?? (string.IsNullOrWhiteSpace(resolvedWaveType)
+                    ? "Sóng"
+                    : $"Sóng {resolvedWaveType}");
+            }
+
+            var mountingGlueCode = string.IsNullOrWhiteSpace(resolvedWaveType)
+                ? "MOUNTING_GLUE"
+                : $"BOI_{resolvedWaveType}";
+
+            foreach (var bom in allBoms.Where(x =>
+                         string.Equals((x.material_name ?? "").Trim(), "Keo bồi", StringComparison.OrdinalIgnoreCase) ||
+                         ((x.material_code ?? "").Trim().StartsWith("BOI_", StringComparison.OrdinalIgnoreCase)) ||
+                         string.Equals((x.material_code ?? "").Trim(), "MOUNTING_GLUE", StringComparison.OrdinalIgnoreCase)))
+            {
+                bom.material_code = EstimateHelper.Trunc20(mountingGlueCode);
+                bom.material_name = "Keo bồi";
+            }
+        }
     }
 }

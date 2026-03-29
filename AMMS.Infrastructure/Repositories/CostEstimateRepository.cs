@@ -133,10 +133,12 @@ namespace AMMS.Infrastructure.Repositories
                     coating_glue_cost = ce.coating_glue_cost,
                     coating_glue_weight_kg = ce.coating_glue_weight_kg,
                     coating_glue_rate_per_m2 = ce.coating_glue_rate_per_m2,
-                    estimate_paper_code = ce.paper_code,
-                    estimate_paper_name = ce.paper_name,
+                    estimate_paper_code = !string.IsNullOrWhiteSpace(ce.paper_alternative) ? ce.paper_alternative : ce.paper_code,
+                    estimate_paper_name = !string.IsNullOrWhiteSpace(ce.paper_alternative) ? ce.paper_alternative : ce.paper_name,
+                    estimate_wave_type = !string.IsNullOrWhiteSpace(ce.wave_alternative) ? ce.wave_alternative : ce.wave_type,
                     estimate_coating_type = ce.coating_type,
-                    estimate_wave_type = ce.wave_type,
+                    paper_alternative = ce.paper_alternative,
+                    wave_alternative = ce.wave_alternative,
                     mounting_glue_cost = ce.mounting_glue_cost,
                     mounting_glue_weight_kg = ce.mounting_glue_weight_kg,
                     mounting_glue_rate_per_m2 = ce.mounting_glue_rate_per_m2,
@@ -246,6 +248,12 @@ namespace AMMS.Infrastructure.Repositories
                     deposit_amount = x.deposit_amount
                 })
                 .FirstOrDefaultAsync(ct);
+        }
+
+        public async Task<cost_estimate?> GetFirstActiveTrackingByRequestIdAsync(int requestId, CancellationToken ct = default)
+        {
+            return await _db.cost_estimates
+                .FirstOrDefaultAsync(x => x.order_request_id == requestId && x.is_active, ct);
         }
     }
 }

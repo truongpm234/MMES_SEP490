@@ -7,6 +7,8 @@ using AMMS.Infrastructure.Repositories;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Requests;
 using AMMS.Shared.DTOs.Socket;
+using AMMS.Shared.DTOs.User;
+using AMMS.Shared.Helpers;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 
@@ -25,6 +27,9 @@ namespace AMMS.Application.Services
         private readonly IUserRepository _userRepo;
         private readonly ICloudinaryFileStorageService _cloudinaryStorage;
         private readonly IAccessService _accessService;
+        private readonly IProductTypeRepository _productTypeRepo;
+        private readonly IProductTypeProcessRepository _productTypeProcessRepo;
+
         public RequestService(
             IRequestRepository requestRepo,
             IOrderRepository orderRepo,
@@ -36,7 +41,9 @@ namespace AMMS.Application.Services
             IAccessService currentUser,
             IUserRepository userRepo,
             ICloudinaryFileStorageService cloudinaryStorage,
-            IAccessService accessService)
+            IAccessService accessService,
+            IProductTypeRepository productTypeRepo,
+            IProductTypeProcessRepository productTypeProcessRepo)
         {
             _requestRepo = requestRepo;
             _orderRepo = orderRepo;
@@ -49,6 +56,8 @@ namespace AMMS.Application.Services
             _userRepo = userRepo;
             _cloudinaryStorage = cloudinaryStorage;
             _accessService = accessService;
+            _productTypeRepo = productTypeRepo;
+            _productTypeProcessRepo = productTypeProcessRepo;
         }
 
         private DateTime? ToDeliveryDate(DateTime? dateTime)
@@ -205,6 +214,16 @@ namespace AMMS.Application.Services
 
                 if (!string.IsNullOrWhiteSpace(req.coating_type))
                     ce.coating_type = req.coating_type.Trim();
+
+                if (req.paper_alternative != null)
+                    ce.paper_alternative = string.IsNullOrWhiteSpace(req.paper_alternative)
+                        ? null
+                        : req.paper_alternative.Trim();
+
+                if (req.wave_alternative != null)
+                    ce.wave_alternative = string.IsNullOrWhiteSpace(req.wave_alternative)
+                        ? null
+                        : req.wave_alternative.Trim();
             }
 
             entity.process_status = "Pending";
@@ -265,6 +284,13 @@ namespace AMMS.Application.Services
                 HasNext = hasNext,
                 Data = data
             };
+        }
+
+        public async Task<RequestPagedDto?> GetByOrderIdAsync(int orderId)
+        {
+            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync();
+
+            return await _requestRepo.GetByOrderIdAsync(orderId, consultantUserId);
         }
 
         public async Task<ConvertRequestToOrderResponse> ConvertToOrderAsync(int requestId)
@@ -591,16 +617,12 @@ namespace AMMS.Application.Services
                 design_file_path = source.design_file_path,
                 order_request_date = now,
                 detail_address = source.detail_address,
-                
                 process_status = "Pending",
-
                 product_type = source.product_type,
                 number_of_plates = source.number_of_plates,
-
                 order_id = null,
                 quote_id = null,
                 accepted_estimate_id = null,
-
                 product_length_mm = source.product_length_mm,
                 product_width_mm = source.product_width_mm,
                 product_height_mm = source.product_height_mm,
@@ -610,13 +632,11 @@ namespace AMMS.Application.Services
                 print_width_mm = source.print_width_mm,
                 print_height_mm = source.print_height_mm,
                 is_send_design = source.is_send_design,
-
                 note = null,
                 reason = null,
                 verified_at = null,
                 quote_expires_at = null,
                 consultant_note = source.consultant_note,
-
                 assigned_consultant = clonedAssignedConsultantId,
                 assigned_at = clonedAssignedConsultantId.HasValue ? now : null
             };
@@ -632,62 +652,50 @@ namespace AMMS.Application.Services
                 var clonedEstimate = new cost_estimate
                 {
                     order_request_id = clonedRequest.order_request_id,
-
                     previous_estimate_id = null,
-
                     paper_cost = est.paper_cost,
                     paper_sheets_used = est.paper_sheets_used,
                     paper_unit_price = est.paper_unit_price,
-
                     ink_cost = est.ink_cost,
                     ink_weight_kg = est.ink_weight_kg,
                     ink_rate_per_m2 = est.ink_rate_per_m2,
-
                     coating_glue_cost = est.coating_glue_cost,
                     coating_glue_weight_kg = est.coating_glue_weight_kg,
                     coating_glue_rate_per_m2 = est.coating_glue_rate_per_m2,
                     coating_type = est.coating_type,
-
                     mounting_glue_cost = est.mounting_glue_cost,
                     mounting_glue_weight_kg = est.mounting_glue_weight_kg,
                     mounting_glue_rate_per_m2 = est.mounting_glue_rate_per_m2,
-
                     lamination_cost = est.lamination_cost,
                     lamination_weight_kg = est.lamination_weight_kg,
                     lamination_rate_per_m2 = est.lamination_rate_per_m2,
-
                     material_cost = est.material_cost,
                     base_cost = est.base_cost,
-
                     is_rush = est.is_rush,
                     rush_percent = est.rush_percent,
                     rush_amount = est.rush_amount,
                     days_early = est.days_early,
-
                     subtotal = est.subtotal,
                     discount_percent = est.discount_percent,
                     discount_amount = est.discount_amount,
                     final_total_cost = est.final_total_cost,
-
                     estimated_finish_date = est.estimated_finish_date,
                     desired_delivery_date = est.desired_delivery_date,
                     created_at = now,
-
                     sheets_required = est.sheets_required,
                     sheets_waste = est.sheets_waste,
                     sheets_total = est.sheets_total,
                     n_up = est.n_up,
                     total_area_m2 = est.total_area_m2,
-
                     design_cost = est.design_cost,
                     cost_note = est.cost_note,
-
                     is_active = true,
-
                     paper_code = est.paper_code,
                     paper_name = est.paper_name,
                     wave_type = est.wave_type,
                     wave_sheets_used = est.wave_sheets_used,
+                    paper_alternative = est.paper_alternative,
+                    wave_alternative = est.wave_alternative,
                     production_processes = est.production_processes
                 };
 
@@ -775,11 +783,7 @@ namespace AMMS.Application.Services
     string? rawCsv,
     CancellationToken ct = default)
         {
-            var allSteps = await _db.product_type_processes
-                .AsNoTracking()
-                .Where(x => x.product_type_id == productTypeId && (x.is_active ?? true))
-                .OrderBy(x => x.seq_num)
-                .ToListAsync(ct);
+            var allSteps = await _productTypeProcessRepo.GetActiveByProductTypeIdAsync(productTypeId, ct);
 
             var selected = ProductionProcessSelectionHelper.ResolveFixedRoute(
                 allSteps,
@@ -860,13 +864,8 @@ namespace AMMS.Application.Services
                 };
             }
 
-            var productTypeId = await _db.product_types
-                .AsNoTracking()
-                .Where(x => x.code == ptCode)
-                .Select(x => (int?)x.product_type_id)
-                .FirstOrDefaultAsync();
-
-            if (productTypeId == null)
+            var productTypeId = await _productTypeRepo.GetIdByCodeAsync(ptCode);
+            if (!productTypeId.HasValue)
             {
                 return new ConvertRequestToOrderResponse
                 {
@@ -876,7 +875,9 @@ namespace AMMS.Application.Services
                 };
             }
 
-            var normalizedProcessCsv = await NormalizeProductionProcessCsvAsync(productTypeId.Value, est.production_processes);
+            var normalizedProcessCsv = await NormalizeProductionProcessCsvAsync(
+                productTypeId.Value,
+                est.production_processes);
 
             var newOrder = new order
             {
@@ -899,6 +900,32 @@ namespace AMMS.Application.Services
             _orderRepo.Update(newOrder);
             await _orderRepo.SaveChangesAsync();
 
+            var resolvedPaperCode = EstimateMaterialAlternativeHelper.ResolvePaperCode(
+                est.paper_alternative,
+                est.paper_code);
+
+            var resolvedWaveType = EstimateMaterialAlternativeHelper.ResolveWaveType(
+                est.wave_alternative,
+                est.wave_type);
+
+            material? resolvedPaperMaterial = null;
+            string? resolvedPaperName = est.paper_name;
+
+            if (!string.IsNullOrWhiteSpace(resolvedPaperCode))
+            {
+                resolvedPaperMaterial = await _materialRepo.GetByCodeAsync(resolvedPaperCode);
+                resolvedPaperName = resolvedPaperMaterial?.name ?? est.paper_name ?? resolvedPaperCode;
+            }
+
+            material? resolvedWaveMaterial = null;
+            string? resolvedWaveName = null;
+
+            if (!string.IsNullOrWhiteSpace(resolvedWaveType))
+            {
+                resolvedWaveMaterial = await _materialRepo.GetByCodeAsync(resolvedWaveType);
+                resolvedWaveName = resolvedWaveMaterial?.name ?? $"Sóng {resolvedWaveType}";
+            }
+
             var newItem = new order_item
             {
                 order_id = newOrder.order_id,
@@ -906,11 +933,13 @@ namespace AMMS.Application.Services
                 quantity = req.quantity ?? 0,
                 design_url = req.design_file_path,
                 product_type_id = productTypeId,
-                paper_code = est.paper_code,
+
+                paper_code = resolvedPaperCode,
                 production_process = normalizedProcessCsv,
-                paper_name = est.paper_name,
+                paper_name = resolvedPaperName,
                 glue_type = est.coating_type,
-                wave_type = est.wave_type,
+                wave_type = resolvedWaveType,
+
                 est_paper_sheets_total = est.sheets_total,
                 est_ink_weight_kg = est.ink_weight_kg,
                 est_coating_glue_weight_kg = est.coating_glue_weight_kg,
@@ -924,27 +953,26 @@ namespace AMMS.Application.Services
             await _orderRepo.AddOrderItemAsync(newItem);
             await _orderRepo.SaveChangesAsync();
 
-            material? paperMaterial = null;
-            if (!string.IsNullOrWhiteSpace(est.paper_code))
-                paperMaterial = await _materialRepo.GetByCodeAsync(est.paper_code!);
-
             var qty = (decimal)(newItem.quantity <= 0 ? 1 : newItem.quantity);
             var bomTasks = new List<Task>();
 
             if (est.sheets_total > 0)
+            {
                 bomTasks.Add(_bomRepo.AddBomAsync(new bom
                 {
                     order_item_id = newItem.item_id,
-                    material_id = paperMaterial?.material_id,
-                    material_code = Trunc20(est.paper_code ?? "PAPER"),
-                    material_name = est.paper_name ?? "Giấy",
+                    material_id = resolvedPaperMaterial?.material_id,
+                    material_code = Trunc20(resolvedPaperCode ?? "PAPER"),
+                    material_name = resolvedPaperName ?? "Giấy",
                     unit = "tờ",
                     qty_total = est.sheets_total,
                     qty_per_product = est.sheets_total / qty,
                     source_estimate_id = est.estimate_id
                 }));
+            }
 
             if (est.ink_weight_kg > 0)
+            {
                 bomTasks.Add(_bomRepo.AddBomAsync(new bom
                 {
                     order_item_id = newItem.item_id,
@@ -955,8 +983,10 @@ namespace AMMS.Application.Services
                     qty_per_product = est.ink_weight_kg / qty,
                     source_estimate_id = est.estimate_id
                 }));
+            }
 
             if (est.coating_glue_weight_kg > 0)
+            {
                 bomTasks.Add(_bomRepo.AddBomAsync(new bom
                 {
                     order_item_id = newItem.item_id,
@@ -967,10 +997,14 @@ namespace AMMS.Application.Services
                     qty_per_product = est.coating_glue_weight_kg / qty,
                     source_estimate_id = est.estimate_id
                 }));
+            }
 
             if (est.mounting_glue_weight_kg > 0)
             {
-                var codeBoi = string.IsNullOrWhiteSpace(est.wave_type) ? "MOUNTING_GLUE" : $"BOI_{est.wave_type}";
+                var codeBoi = string.IsNullOrWhiteSpace(resolvedWaveType)
+                    ? "MOUNTING_GLUE"
+                    : $"BOI_{resolvedWaveType}";
+
                 bomTasks.Add(_bomRepo.AddBomAsync(new bom
                 {
                     order_item_id = newItem.item_id,
@@ -984,6 +1018,7 @@ namespace AMMS.Application.Services
             }
 
             if (est.lamination_weight_kg > 0)
+            {
                 bomTasks.Add(_bomRepo.AddBomAsync(new bom
                 {
                     order_item_id = newItem.item_id,
@@ -994,43 +1029,28 @@ namespace AMMS.Application.Services
                     qty_per_product = est.lamination_weight_kg / qty,
                     source_estimate_id = est.estimate_id
                 }));
+            }
+
+            // NEW: BOM wave
+            if (!string.IsNullOrWhiteSpace(resolvedWaveType) && (est.wave_sheets_used ?? 0) > 0)
+            {
+                bomTasks.Add(_bomRepo.AddBomAsync(new bom
+                {
+                    order_item_id = newItem.item_id,
+                    material_id = resolvedWaveMaterial?.material_id,
+                    material_code = Trunc20(resolvedWaveType),
+                    material_name = resolvedWaveName ?? $"Sóng {resolvedWaveType}",
+                    unit = "tờ",
+                    qty_total = est.wave_sheets_used ?? 0,
+                    qty_per_product = (est.wave_sheets_used ?? 0) / qty,
+                    source_estimate_id = est.estimate_id
+                }));
+            }
 
             await Task.WhenAll(bomTasks);
             await _bomRepo.SaveChangesAsync();
 
-            var bomHasNullMaterial = await (
-                from oi in _db.order_items.AsNoTracking()
-                join b in _db.boms.AsNoTracking() on oi.item_id equals b.order_item_id
-                where oi.order_id == newOrder.order_id
-                select b.material_id
-            ).AnyAsync(x => x == null);
-
-            bool isEnough;
-            if (bomHasNullMaterial)
-            {
-                isEnough = false;
-            }
-            else
-            {
-                isEnough = await (
-                    from oi in _db.order_items.AsNoTracking()
-                    join b in _db.boms.AsNoTracking() on oi.item_id equals b.order_item_id
-                    join m in _db.materials.AsNoTracking() on b.material_id equals m.material_id
-                    where oi.order_id == newOrder.order_id
-                    group new { oi, b, m } by b.material_id into g
-                    select new
-                    {
-                        Required = g.Sum(x =>
-                            ((decimal)x.oi.quantity)
-                            * (x.b.qty_per_product ?? 0m)
-                            * (1m + ((x.b.wastage_percent ?? 0m) / 100m))
-                        ),
-                        StockQty = g.Max(x => x.m.stock_qty ?? 0m)
-                    }
-                ).AllAsync(x => x.StockQty >= x.Required);
-            }
-
-            newOrder.is_enough = isEnough;
+            newOrder.is_enough = await _orderRepo.IsOrderEnoughByOrderIdAsync(newOrder.order_id);
             _orderRepo.Update(newOrder);
             await _orderRepo.SaveChangesAsync();
 
@@ -1054,8 +1074,7 @@ namespace AMMS.Application.Services
             return ConvertToOrderInternalAsync(requestId);
         }
 
-        public Task<int?> GetConsultantScopeUserIdAsync(CancellationToken ct = default)
-    => _currentUser.GetConsultantScopeUserIdAsync(ct);
+        public Task<int?> GetConsultantScopeUserIdAsync(CancellationToken ct = default) => _currentUser.GetConsultantScopeUserIdAsync(ct);
 
         public Task EnsureCanAccessAssignedRequestAsync(int requestId, CancellationToken ct = default)
             => _currentUser.EnsureCanAccessAssignedRequestAsync(requestId, ct);
@@ -1067,7 +1086,8 @@ namespace AMMS.Application.Services
 
             return await _requestRepo.UpdateDeliveryNoteAsync(orderRequestId, note.Trim(), ct);
         }
-        private async Task<AMMS.Shared.DTOs.User.AssignedConsultantSummaryDto> ResolveAssignedConsultantAsync(CancellationToken ct = default)
+
+        private async Task<AssignedConsultantSummaryDto> ResolveAssignedConsultantAsync(CancellationToken ct = default)
         {
             int? assignedConsultantId;
 
@@ -1161,36 +1181,19 @@ namespace AMMS.Application.Services
                 ? $"print_ready/request_{requestId}/estimate_{estimateId.Value}/file"
                 : $"print_ready/request_{requestId}/file";
 
-            var finalContentType = ResolveContentType(safeFileName, contentType);
+            var finalContentType = RequestServiceHelper.ResolveContentType(safeFileName, contentType);
 
-            // chú ý: method này phải là RAW upload, không phải image upload
             var url = await _cloudinaryStorage.UploadRawWithPublicIdAsync(
                 fileStream,
                 safeFileName,
                 finalContentType,
                 publicId);
 
-            // lưu vào order_request.print_ready_file
             request.print_ready_file = url;
 
             await _requestRepo.SaveChangesAsync();
 
             return url;
-        }
-
-        private static string ResolveContentType(string fileName, string? contentType)
-        {
-            if (!string.IsNullOrWhiteSpace(contentType) &&
-                !contentType.Equals("application/octet-stream", StringComparison.OrdinalIgnoreCase))
-            {
-                return contentType;
-            }
-
-            var provider = new FileExtensionContentTypeProvider();
-            if (provider.TryGetContentType(fileName, out var mapped))
-                return mapped;
-
-            return "application/octet-stream";
         }
     }
 }
