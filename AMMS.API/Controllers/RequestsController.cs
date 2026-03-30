@@ -120,7 +120,7 @@ namespace AMMS.API.Controllers
 
             if (requestDto == null)
                 return NotFound(new { message = "Order request not found" });
-            if(!requestDto.estimate_finish_date.HasValue)
+            if (!requestDto.estimate_finish_date.HasValue)
             {
                 requestDto.estimate_finish_date = await _service.RecalculateAndPersistAsync(id, ct);
             }

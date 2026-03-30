@@ -43,7 +43,7 @@ namespace AMMS.Application.Interfaces
         Task<ConvertRequestToOrderResponse> ConvertToOrderInCurrentTransactionAsync(int requestId);
         Task<int?> GetConsultantScopeUserIdAsync(CancellationToken ct = default);
         Task EnsureCanAccessAssignedRequestAsync(int requestId, CancellationToken ct = default);
-        Task<bool> UpdateDeliveryNoteAsync(int orderRequestId, string note, CancellationToken ct = default);
+        Task<bool> UpdateDeliveryNoteAsync(int orderId, string note, CancellationToken ct = default);
         Task<DateTime?> CalculateAsync(int orderRequestId, CancellationToken ct = default);
         Task<DateTime?> RecalculateAndPersistAsync(int orderRequestId, CancellationToken ct = default);
         Task<string> UploadPrintReadyFileAsync(int requestId, int? estimateId, Stream fileStream, string fileName, string? contentType, CancellationToken ct = default);

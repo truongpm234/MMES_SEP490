@@ -7,7 +7,6 @@ using AMMS.Shared.DTOs.Orders;
 using AMMS.Shared.DTOs.Requests;
 using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
 namespace AMMS.Infrastructure.Repositories
 {
@@ -469,7 +468,7 @@ namespace AMMS.Infrastructure.Repositories
             var skip = (page - 1) * pageSize;
 
             var query = ApplyConsultantScope(_db.order_requests.AsNoTracking(), consultantUserId);
-            
+
             query = ascending
                 ? query.OrderBy(x => x.order_request_date == null)
                        .ThenBy(x => x.order_request_date)
@@ -513,7 +512,7 @@ namespace AMMS.Infrastructure.Repositories
             var skip = (page - 1) * pageSize;
 
             var query = ApplyConsultantScope(_db.order_requests.AsNoTracking(), consultantUserId);
-            
+
             query = nearestFirst
                 ? query.OrderBy(x => x.delivery_date == null).ThenBy(x => x.delivery_date)
                 : query.OrderBy(x => x.delivery_date == null).ThenByDescending(x => x.delivery_date);
@@ -557,7 +556,7 @@ namespace AMMS.Infrastructure.Repositories
                 .AsNoTracking()
                 .Where(x => x.customer_email != null)
                 .Where(x => x.process_status != null && EF.Functions.ILike(x.process_status, "accepted%"))
-                .GroupBy(x => x.customer_email!)              
+                .GroupBy(x => x.customer_email!)
                 .Select(g => new
                 {
                     CustomerEmail = g.Key,
@@ -647,7 +646,7 @@ namespace AMMS.Infrastructure.Repositories
 
             var skip = (page - 1) * pageSize;
 
-            var start = date.ToDateTime(TimeOnly.MinValue);     
+            var start = date.ToDateTime(TimeOnly.MinValue);
             var end = start.AddDays(1);
 
             var query = ApplyConsultantScope(_db.order_requests.AsNoTracking(), consultantUserId)
@@ -1305,10 +1304,10 @@ namespace AMMS.Infrastructure.Repositories
                     ct);
         }
 
-        public async Task<bool> UpdateDeliveryNoteAsync(int orderRequestId, string note, CancellationToken ct = default)
+        public async Task<bool> UpdateDeliveryNoteAsync(int orderId, string note, CancellationToken ct = default)
         {
             var entity = await _db.order_requests
-                .FirstOrDefaultAsync(x => x.order_request_id == orderRequestId, ct);
+                .FirstOrDefaultAsync(x => x.order_id == orderId, ct);
 
             if (entity == null)
                 return false;
