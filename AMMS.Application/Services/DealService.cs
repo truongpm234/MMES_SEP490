@@ -1,5 +1,6 @@
 ﻿using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
+using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.Constants;
@@ -8,6 +9,7 @@ using AMMS.Shared.DTOs.Exceptions.AMMS.Application.Exceptions;
 using AMMS.Shared.DTOs.PayOS;
 using AMMS.Shared.DTOs.Socket;
 using AMMS.Shared.Helpers;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -15,6 +17,7 @@ namespace AMMS.Application.Services
 {
     public class DealService : IDealService
     {
+        private readonly AppDbContext _db;
         private readonly IRequestRepository _requestRepo;
         private readonly ICostEstimateRepository _estimateRepo;
         private readonly IConfiguration _config;
@@ -28,7 +31,10 @@ namespace AMMS.Application.Services
         private readonly IUserRepository _userRepo;
         private readonly IOrderRepository _orderRepo;
         private readonly IProductionRepository _prodRepo;
+        private readonly IHubContext<RealtimeHub> _hub;
         public DealService(
+    IHubContext<RealtimeHub> hub,
+    AppDbContext db,
     IRequestRepository requestRepo,
     ICostEstimateRepository estimateRepo,
     IConfiguration config,
@@ -41,6 +47,7 @@ namespace AMMS.Application.Services
     IEmailBackgroundQueue emailQueue,
     IUserRepository userRepo, IOrderRepository orderRepository, IProductionRepository productionRepository)
         {
+            _db = db;
             _requestRepo = requestRepo;
             _estimateRepo = estimateRepo;
             _config = config;
@@ -54,6 +61,7 @@ namespace AMMS.Application.Services
             _userRepo = userRepo;
             _orderRepo = orderRepository;
             _prodRepo = productionRepository;
+            _hub = hub;
         }
 
         public async Task SendDealAndEmailAsync(int orderRequestId, int? estimateId = null)
@@ -228,10 +236,10 @@ namespace AMMS.Application.Services
             await _requestRepo.SaveChangesAsync();
 
             cost_estimate? est = null;
-            try 
-            { 
-                est = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId); 
-            } 
+            try
+            {
+                est = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId);
+            }
             catch { }
 
             var safeReason = System.Net.WebUtility.HtmlEncode(reason ?? "");
@@ -673,6 +681,12 @@ namespace AMMS.Application.Services
                 req.customer_email!,
                 $"[MES] Đơn hàng {ord.code} đã hoàn thành - Vui lòng thanh toán phần còn lại",
                 html));
+
+            ord.status = "PendingPaid";
+            req.process_status = "PendingPaid";
+            prod.status = "PendingPaid";
+            await _db.SaveChangesAsync();
+            await _hub.Clients.All.SendAsync("PendingPaid", new { message = "PendingPaid" });
         }
 
         public async Task<PayOsResultDto> CreateOrReuseRemainingPaymentLinkAsync(int id, CancellationToken ct = default)
