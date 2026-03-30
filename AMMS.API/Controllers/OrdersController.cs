@@ -211,7 +211,6 @@ CancellationToken ct)
             var returnApiUrl =
                 $"{backend}/api/requests/payos/return?order_code={latest.order_code}&status=PAID";
 
-            // Nếu DB đã ghi nhận paid rồi thì FE chỉ cần redirect thẳng
             if (_dealService.IsPaidStatus(latest.status))
             {
                 return Ok(new
