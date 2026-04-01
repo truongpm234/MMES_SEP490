@@ -136,6 +136,7 @@ namespace AMMS.Application.Services
             SetIfHasValue(req.ink_cost, v => entity.ink_cost = v);
             SetIfHasValue(req.ink_weight_kg, v => entity.ink_weight_kg = v);
             SetIfHasValue(req.ink_rate_per_m2, v => entity.ink_rate_per_m2 = v);
+            SetIfNotNull(req.ink_type_names, v => entity.ink_type_names = v.Trim());
 
             SetIfHasValue(req.coating_glue_cost, v => entity.coating_glue_cost = v);
             SetIfHasValue(req.coating_glue_weight_kg, v => entity.coating_glue_weight_kg = v);
@@ -145,8 +146,6 @@ namespace AMMS.Application.Services
             SetIfNotNull(req.coating_type, v => entity.coating_type = v);
             SetIfNotNull(req.wave_type, v => entity.wave_type = v);
             SetIfHasValue(req.wave_sheets_used, v => entity.wave_sheets_used = v);
-            SetIfNotNull(req.paper_alternative, v => entity.paper_alternative = v.Trim());
-            SetIfNotNull(req.wave_alternative, v => entity.wave_alternative = v.Trim());
 
             SetIfHasValue(req.mounting_glue_cost, v => entity.mounting_glue_cost = v);
             SetIfHasValue(req.mounting_glue_weight_kg, v => entity.mounting_glue_weight_kg = v);
@@ -387,6 +386,7 @@ namespace AMMS.Application.Services
     int? estimateId,
     string? paperAlternative,
     string? waveAlternative,
+    string? alternativeMaterialReason,
     CancellationToken ct = default)
         {
             await _accessService.EnsureCanAccessAssignedRequestAsync(requestId, ct);
@@ -395,11 +395,11 @@ namespace AMMS.Application.Services
             if (request == null)
                 throw new InvalidOperationException("Order request not found");
 
-            var allowedStatuses = new[] { "Accepted", "Paid", "Delivery", "Completed" };
+            var allowedStatuses = new[] { "Accepted" };
             if (!allowedStatuses.Contains(request.process_status ?? "", StringComparer.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException(
-                    "Only Accepted/Paid/Delivery/Completed request can update alternative materials");
+                    "Only Accepted request can update alternative materials");
             }
 
             cost_estimate? estimate = null;
@@ -421,13 +421,15 @@ namespace AMMS.Application.Services
             if (estimate == null)
                 throw new InvalidOperationException("Active/accepted estimate not found");
 
-            // CHỈ update khi client có truyền giá trị
             if (!string.IsNullOrWhiteSpace(paperAlternative))
                 estimate.paper_alternative = paperAlternative.Trim();
 
             if (!string.IsNullOrWhiteSpace(waveAlternative))
                 estimate.wave_alternative = waveAlternative.Trim();
 
+            if (alternativeMaterialReason != null)
+                estimate.alternative_material_reason = string.IsNullOrWhiteSpace(alternativeMaterialReason) ? null : alternativeMaterialReason.Trim();
+           
             await SyncOperationalMaterialSnapshotAsync(request, estimate, ct);
 
             await _estimateRepo.SaveChangesAsync();

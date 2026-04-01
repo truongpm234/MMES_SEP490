@@ -82,8 +82,9 @@ public partial class order_request
 
     public string? delivery_note { get; set; }
 
-    [ForeignKey(nameof(assigned_consultant))]
+    public string? delivery_date_change_reason { get; set; }
 
+    [ForeignKey(nameof(assigned_consultant))]
     public virtual user? assigned_consultants { get; set; }
 
     public DateTime? estimate_finish_date { get; set; }

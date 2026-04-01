@@ -29,6 +29,8 @@ namespace AMMS.Shared.DTOs.Productions
         public int? length_mm { get; set; }
         public int? width_mm { get; set; }
         public int? height_mm { get; set; }
+        public string? ready_print_file { get; set; }
+        public string? ink_type_names { get; set; }
 
         // Timeline stages
         public DateTime? created_at { get; set; }

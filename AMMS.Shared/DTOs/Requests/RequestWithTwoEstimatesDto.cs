@@ -14,6 +14,7 @@ namespace AMMS.Shared.DTOs.Requests
         public string customer_phone { get; set; } = "";
         public string? customer_email { get; set; }
         public DateTime? delivery_date { get; set; }
+        public string? delivery_date_change_reason { get; set; }
         public string? consultant_note { get; set; }
         public string? message_to_customer { get; set; }
 
@@ -44,6 +45,8 @@ namespace AMMS.Shared.DTOs.Requests
         public bool is_active { get; set; }
         public decimal paper_cost { get; set; }
         public decimal ink_cost { get; set; }
+        public string? ink_type_names { get; set; }
+        public string? alternative_material_reason { get; set; }
         public decimal coating_glue_cost { get; set; }
         public decimal mounting_glue_cost { get; set; }
         public decimal lamination_cost { get; set; }

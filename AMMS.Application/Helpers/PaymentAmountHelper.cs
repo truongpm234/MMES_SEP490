@@ -26,7 +26,7 @@ namespace AMMS.Application.Helpers
 
             var deposit = GetDepositAmount(est);
 
-            var remaining = finalTotal - deposit;
+            var remaining = (finalTotal - deposit)/100;
             return remaining > 0 ? remaining : 0;
         }
 

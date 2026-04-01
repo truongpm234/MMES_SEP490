@@ -9,6 +9,7 @@
         public string email { get; set; } = "";
 
         public DateTime? delevery_date { get; set; }
+        public string? delivery_date_change_reason { get; set; }
 
         public string consultant_note { get; set; } = "";
         public string product_name { get; set; } = "";
@@ -69,6 +70,8 @@
 
         public decimal ink_weight_kg { get; set; }
         public decimal ink_rate_per_m2 { get; set; }
+        public string? ink_type_names { get; set; }
+        public string? alternative_material_reason { get; set; }
 
         public decimal coating_glue_weight_kg { get; set; }
         public decimal coating_glue_rate_per_m2 { get; set; }

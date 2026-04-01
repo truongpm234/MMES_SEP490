@@ -20,6 +20,7 @@ namespace AMMS.Shared.DTOs.Estimates
         public decimal? ink_cost { get; set; }
         public decimal? ink_weight_kg { get; set; }
         public decimal? ink_rate_per_m2 { get; set; }
+        public string? ink_type_names { get; set; }
 
         // ----- Keo phủ -----
         public decimal? coating_glue_cost { get; set; }
@@ -29,8 +30,6 @@ namespace AMMS.Shared.DTOs.Estimates
         public string? paper_code { get; set; }
         public string? paper_name { get; set; }
         public string? wave_type { get; set; }
-        public string? paper_alternative { get; set; }
-        public string? wave_alternative { get; set; }
         public int? wave_sheets_used { get; set; }
 
         // ----- Keo bồi -----

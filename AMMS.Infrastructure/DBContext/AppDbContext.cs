@@ -191,6 +191,7 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.product_type).HasMaxLength(50);
             entity.Property(e => e.message_to_customer).HasColumnName("message_to_customer");
             entity.Property(e => e.number_of_plates).HasDefaultValue(0);
+            entity.Property(e => e.delivery_date_change_reason).HasColumnType("text");
             entity.HasOne(d => d.order)
                 .WithMany()
                 .HasForeignKey(d => d.order_id)
@@ -460,7 +461,8 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.discount_percent).HasPrecision(5, 2).HasDefaultValue(0);
             entity.Property(e => e.discount_amount).HasPrecision(18, 2).HasDefaultValue(0);
             entity.Property(e => e.final_total_cost).HasPrecision(18, 2).HasDefaultValue(0);
-
+            entity.Property(e => e.ink_type_names).HasColumnType("text");
+            entity.Property(e => e.alternative_material_reason).HasColumnType("text");
             entity.Property(e => e.created_at)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP")
                 .HasColumnType("timestamp without time zone");

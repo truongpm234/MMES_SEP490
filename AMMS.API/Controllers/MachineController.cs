@@ -36,5 +36,16 @@ namespace AMMS.API.Controllers
             var result = await _service.GetAllAsync();
             return Ok(result);
         }
+
+        [HttpGet("availability-snapshot")]
+        public async Task<IActionResult> GetAvailabilitySnapshot(
+    [FromQuery] DateTime? at,
+    CancellationToken ct = default)
+        {
+            var anchor = at ?? AMMS.Shared.Helpers.AppTime.NowVnUnspecified();
+            var result = await _service.GetAvailabilitySnapshotAsync(anchor, ct);
+            return Ok(result);
+        }
+
     }
 }

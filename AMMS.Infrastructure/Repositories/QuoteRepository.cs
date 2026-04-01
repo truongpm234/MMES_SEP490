@@ -72,6 +72,7 @@ namespace AMMS.Infrastructure.Repositories
                 product_name = req.product_name,
                 quantity = req.quantity ?? 0,
                 is_send_design = req.is_send_design ?? false,
+                delivery_date_change_reason = req.delivery_date_change_reason,
             };
 
             foreach (var est in ests)
