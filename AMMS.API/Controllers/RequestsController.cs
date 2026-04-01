@@ -1,5 +1,5 @@
-﻿using AMMS.Application.Helpers;
-using AMMS.Application.Interfaces;
+﻿using AMMS.Application.Interfaces;
+using AMMS.Application.Services;
 using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
@@ -7,6 +7,7 @@ using AMMS.Shared.DTOs.Email;
 using AMMS.Shared.DTOs.PayOS;
 using AMMS.Shared.DTOs.Requests;
 using AMMS.Shared.DTOs.Requests.AMMS.Shared.DTOs.Requests;
+using AMMS.Shared.DTOs.Socket;
 using AMMS.Shared.Helpers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -31,7 +32,9 @@ namespace AMMS.API.Controllers
         private readonly IConfiguration _config;
         private readonly IPayOsService _payos;
         private readonly ILogger<RequestsController> _logger;
+        private readonly IRealtimePublisher _rt;
         public RequestsController(
+            IRealtimePublisher rt,
             IRequestService service,
             IDealService dealService,
             IPaymentsService paymentService,
@@ -40,6 +43,7 @@ namespace AMMS.API.Controllers
             ISmsOtpService smsOtp,
             IConfiguration config, IPayOsService payos, ILogger<RequestsController> logger)
         {
+            _rt = rt;
             _service = service;
             _dealService = dealService;
             _paymentService = paymentService;
@@ -1324,6 +1328,24 @@ namespace AMMS.API.Controllers
                     detail = ex.Message
                 });
             }
+        }
+        [HttpGet("notify-customer-pay")]
+        public async Task<IActionResult> Notification(int id)
+        {
+            var res = await _db.order_requests.SingleOrDefaultAsync(o => o.order_request_id == id || o.order_id == id);
+            if (res?.process_status == "Accepted")
+            {
+                var req = new RequestChangedEvent(id, "not paid", "Deposited", "Payment", DateTime.Now, "Customer");
+                await _rt.PublishRequestChangedAsync(req);
+                return Ok(new { action = "Deposited" });
+            }
+            else if (res?.process_status == "Paid")
+            {
+                var req = new RequestChangedEvent(id, "not paid", "Full Paid", "Payment", DateTime.Now, "Customer");
+                await _rt.PublishRequestChangedAsync(req);
+                return Ok(new { action = "Full paid" });
+            }
+            return NotFound("Not payment yet");
         }
     }
 }
