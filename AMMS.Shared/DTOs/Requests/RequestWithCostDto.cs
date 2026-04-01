@@ -31,6 +31,7 @@ namespace AMMS.Shared.DTOs.Requests
         public string? wave_type { get; set; }
         public string? paper_alternative { get; set; }
         public string? wave_alternative { get; set; }
+        public string? ink_type_names { get; set; }
         public DateTime? verified_at { get; set; }
         public DateTime? quote_expires_at { get; set; }
         public int? order_id { get; set; }

@@ -24,7 +24,7 @@ namespace AMMS.Shared.DTOs.Orders
 
         public string product_name { get; set; } = string.Empty;
         public int quantity { get; set; }
-
+        public string? ink_type_names { get; set; }
         public int? production_id { get; set; }
         public DateTime? production_start_date { get; set; }
         public DateTime? production_end_date { get; set; }

@@ -88,6 +88,8 @@ namespace AMMS.Infrastructure.Repositories
                 paper_name = displayPaperName,
                 wave_type = displayWaveType,
 
+                ink_type_names = estimate?.ink_type_names,
+
                 paper_alternative = estimate?.paper_alternative,
                 wave_alternative = estimate?.wave_alternative,
                 alternative_material_reason = estimate?.alternative_material_reason,
