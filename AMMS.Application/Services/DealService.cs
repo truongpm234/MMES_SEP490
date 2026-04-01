@@ -649,10 +649,17 @@ namespace AMMS.Application.Services
             var prod = await _prodRepo.GetLatestByOrderIdAsync(id, ct)
                 ?? throw new InvalidOperationException("Production not found");
 
-            if (!string.Equals(prod.status, "Finished", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(prod.status, "Paid", StringComparison.OrdinalIgnoreCase))
+            var prodStatus = (prod.status ?? "").Trim();
+
+            var allowRemainingPayment =
+                string.Equals(prodStatus, "Finished", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(prodStatus, "Paid", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(prodStatus, "PendingPaid", StringComparison.OrdinalIgnoreCase);
+
+            if (!allowRemainingPayment)
             {
-                throw new InvalidOperationException("Production must be Finished before sending remaining-payment email.");
+                throw new InvalidOperationException(
+                    "Production must be Finished, PendingPaid or Paid before remaining payment.");
             }
 
             if (string.IsNullOrWhiteSpace(req.customer_email))
@@ -693,10 +700,17 @@ namespace AMMS.Application.Services
             var prod = await _prodRepo.GetLatestByOrderIdAsync(id, ct)
                 ?? throw new InvalidOperationException("Production not found");
 
-            if (!string.Equals(prod.status, "Finished", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(prod.status, "Paid", StringComparison.OrdinalIgnoreCase))
+            var prodStatus = (prod.status ?? "").Trim();
+
+            var allowRemainingPayment =
+                string.Equals(prodStatus, "Finished", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(prodStatus, "PendingPaid", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(prodStatus, "Paid", StringComparison.OrdinalIgnoreCase);
+
+            if (!allowRemainingPayment)
             {
-                throw new InvalidOperationException("Production must be Finished before creating remaining-payment link.");
+                throw new InvalidOperationException(
+                    "Production must be Finished, PendingPaid or Paid before creating remaining-payment link.");
             }
 
             var est = await ResolveAcceptedEstimateAsync(req, ct);

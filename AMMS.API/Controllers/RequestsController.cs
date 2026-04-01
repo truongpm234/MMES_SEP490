@@ -141,6 +141,7 @@ namespace AMMS.API.Controllers
             var res = await _db.cost_estimates.FirstOrDefaultAsync(c => c.order_request_id == order_req_id.order_request_id && c.is_active == true);
             return Ok(res);
         }
+
         [HttpGet("paged")]
         public async Task<IActionResult> GetPaged([FromQuery] int page, [FromQuery] int pageSize)
         {

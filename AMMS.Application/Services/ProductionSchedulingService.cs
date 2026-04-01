@@ -627,7 +627,20 @@ namespace AMMS.Application.Services
 
             var laneCount = Math.Max(1, m.quantity);
             var normalizedAnchor = _cal.NormalizeStart(planningAnchor);
-            var laneStates = Enumerable.Repeat(normalizedAnchor, laneCount).ToList();
+            var laneStates = await _machineRepo.GetLaneAvailableTimesAsync(
+    machineCode,
+    normalizedAnchor,
+    ignoreOverdueOrders: true,
+    ct);
+
+            var state = new MachinePoolState
+            {
+                Machine = m,
+                LaneAvailableAt = laneStates.Count > 0
+                    ? laneStates
+                    : Enumerable.Repeat(normalizedAnchor, laneCount).ToList()
+            };
+
 
             var machineKey = machineCode.ToUpperInvariant();
 
@@ -656,12 +669,6 @@ namespace AMMS.Application.Services
                 var end = r.End < start ? start : r.End;
                 AssignReservationToLane(laneStates, start, end);
             }
-
-            var state = new MachinePoolState
-            {
-                Machine = m,
-                LaneAvailableAt = laneStates
-            };
 
             cache[machineCode] = state;
             return state;

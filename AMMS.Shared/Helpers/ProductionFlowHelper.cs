@@ -28,5 +28,17 @@ namespace AMMS.Shared.Helpers
 
         public static bool NeedsRaloGate(string? code)
             => !IsInitialParallel(code);
+
+        public static string ResolveCoatingDisplayName(string? coatingType)
+        {
+            var code = (coatingType ?? "").Trim().ToUpperInvariant();
+
+            return code switch
+            {
+                "KEO_NUOC" => "Keo nước",
+                "KEO_DAU" => "Keo dầu",
+                _ => string.IsNullOrWhiteSpace(coatingType) ? "Keo phủ" : coatingType!.Trim()
+            };
+        }
     }
 }

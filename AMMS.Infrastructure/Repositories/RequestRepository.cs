@@ -73,6 +73,7 @@ namespace AMMS.Infrastructure.Repositories
                 customer_phone = request.customer_phone,
                 customer_email = request.customer_email,
                 delivery_date = request.delivery_date,
+                delivery_date_change_reason = request.delivery_date_change_reason,
                 product_name = request.product_name,
                 quantity = request.quantity,
                 description = request.description,
@@ -89,7 +90,7 @@ namespace AMMS.Infrastructure.Repositories
 
                 paper_alternative = estimate?.paper_alternative,
                 wave_alternative = estimate?.wave_alternative,
-
+                alternative_material_reason = estimate?.alternative_material_reason,
                 coating_type = estimate?.coating_type,
 
                 order_id = request.order_id,
@@ -188,6 +189,7 @@ namespace AMMS.Infrastructure.Repositories
                     customer_phone = r.customer_phone ?? "",
                     customer_email = r.customer_email,
                     delivery_date = r.delivery_date,
+                    delivery_date_change_reason = r.delivery_date_change_reason,
                     product_name = r.product_name,
                     quantity = r.quantity,
                     description = r.description,
@@ -926,6 +928,7 @@ namespace AMMS.Infrastructure.Repositories
                 customer_phone = SafeText(request.customer_phone),
                 email = SafeText(request.customer_email),
                 delevery_date = request.delivery_date,
+                delivery_date_change_reason = SafeText(request.delivery_date_change_reason),
                 consultant_note = SafeText(request.consultant_note),
                 product_name = SafeText(request.product_name),
                 quantity = request.quantity ?? 0,
@@ -1049,6 +1052,7 @@ namespace AMMS.Infrastructure.Repositories
                     customer_phone = r.customer_phone ?? "",
                     customer_email = r.customer_email,
                     delivery_date = r.delivery_date,
+                    delivery_date_change_reason = r.delivery_date_change_reason,
                     consultant_note = r.consultant_note,
                     product_name = r.product_name ?? "",
                     quantity = r.quantity ?? 0,

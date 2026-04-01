@@ -40,5 +40,10 @@ namespace AMMS.Application.Services
         {
             return await _repo.GetAllAsync();
         }
+
+        public Task<MachineAvailabilitySnapshotDto> GetAvailabilitySnapshotAsync(
+    DateTime anchor,
+    CancellationToken ct = default)
+    => _repo.GetAvailabilitySnapshotAsync(anchor, ignoreOverdueOrders: true, ct);
     }
 }

@@ -10,6 +10,8 @@
 
         public DateTime? delivery_date { get; set; }
 
+        public string? delivery_date_change_reason { get; set; }
+
         public string? product_name { get; set; } = null!;
 
         public int? quantity { get; set; }

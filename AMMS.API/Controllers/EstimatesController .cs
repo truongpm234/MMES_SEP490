@@ -190,6 +190,7 @@ namespace AMMS.API.Controllers
                 req.estimate_id,
                 req.paper_alternative,
                 req.wave_alternative,
+                req.alternative_material_reason,
                 ct);
 
             return NoContent();

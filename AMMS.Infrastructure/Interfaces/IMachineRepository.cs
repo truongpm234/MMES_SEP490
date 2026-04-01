@@ -1,5 +1,6 @@
 ﻿using AMMS.Infrastructure.Entities;
 using AMMS.Shared.DTOs.Estimates;
+using AMMS.Shared.DTOs.Machines;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -25,6 +26,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task AllocateAsync(string machineCode, int need = 1, CancellationToken ct = default);
         Task ReleaseAsync(string machineCode, int release = 1, CancellationToken ct = default);
         Task<machine?> FindBestMachineByProcessCodeAsync(string processCode, CancellationToken ct = default);
-
+        Task<List<DateTime>> GetLaneAvailableTimesAsync(string machineCode, DateTime anchor, bool ignoreOverdueOrders, CancellationToken ct = default);
+        Task<MachineAvailabilitySnapshotDto> GetAvailabilitySnapshotAsync(DateTime anchor,bool ignoreOverdueOrders, CancellationToken ct = default);
     }
 }

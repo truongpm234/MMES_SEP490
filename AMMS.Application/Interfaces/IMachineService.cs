@@ -14,5 +14,8 @@ namespace AMMS.Application.Interfaces
         Task<List<FreeMachineDto>> GetFreeMachinesAsync();
         Task<MachineCapacityResponse> GetCapacityAsync();
         Task<List<machine>> GetAllAsync();
+        Task<MachineAvailabilitySnapshotDto> GetAvailabilitySnapshotAsync(
+    DateTime anchor,
+    CancellationToken ct = default);
     }
 }

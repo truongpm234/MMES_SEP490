@@ -11,6 +11,7 @@ namespace AMMS.Shared.DTOs.Requests
 
         // Thông tin đơn / giao hàng
         public DateTime? delivery_date { get; set; }
+        public string? delivery_date_change_reason { get; set; }
         public string? detail_address { get; set; }
 
         // Sản phẩm

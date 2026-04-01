@@ -13,6 +13,7 @@ namespace AMMS.Shared.DTOs.Requests
         public string? customer_phone { get; set; }
         public string? customer_email { get; set; }
         public DateTime? delivery_date { get; set; }
+        public string? delivery_date_change_reason { get; set; }
         public string? product_name { get; set; }
         public int? quantity { get; set; }
         public string? description { get; set; }
@@ -23,6 +24,7 @@ namespace AMMS.Shared.DTOs.Requests
         public string? product_type { get; set; }
         public int? number_of_plates { get; set; }
         public string? production_processes { get; set; }
+        public string? alternative_material_reason { get; set; }
         public string? coating_type { get; set; }
         public string? paper_code { get; set; }
         public string? paper_name { get; set; }

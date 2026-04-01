@@ -2,6 +2,8 @@
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Estimates;
+using AMMS.Shared.DTOs.Machines;
+using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
@@ -211,5 +213,127 @@ namespace AMMS.Infrastructure.Repositories
 
             return best?.Machine;
         }
+
+        public async Task<List<DateTime>> GetLaneAvailableTimesAsync(
+    string machineCode,
+    DateTime anchor,
+    bool ignoreOverdueOrders,
+    CancellationToken ct = default)
+        {
+            var machine = await _db.machines
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.machine_code == machineCode && x.is_active, ct)
+                ?? throw new InvalidOperationException($"Machine '{machineCode}' not found");
+
+            var laneCount = Math.Max(1, machine.quantity);
+            var lanes = Enumerable.Repeat(anchor, laneCount).ToList();
+
+            var machineKey = machineCode.Trim().ToUpperInvariant();
+
+            var rows = await (
+                from t in _db.tasks.AsNoTracking()
+                join p in _db.productions.AsNoTracking() on t.prod_id equals p.prod_id into pj
+                from p in pj.DefaultIfEmpty()
+                join o in _db.orders.AsNoTracking() on p.order_id equals o.order_id into oj
+                from o in oj.DefaultIfEmpty()
+                join r in _db.order_requests.AsNoTracking() on o.order_id equals r.order_id into rj
+                from r in rj.OrderByDescending(x => x.order_request_id).Take(1).DefaultIfEmpty()
+                where t.machine != null
+                      && t.machine.Trim().ToUpper() == machineKey
+                      && !(
+                            t.status != null
+                            && t.status.Trim().ToUpper() == "FINISHED"
+                            && t.end_time != null
+                            && t.end_time <= anchor)
+                select new
+                {
+                    Start = t.planned_start_time ?? t.start_time ?? anchor,
+                    End = t.planned_end_time ?? t.end_time ?? ((t.planned_start_time ?? t.start_time ?? anchor).AddHours(1)),
+                    DeliveryDate = r != null ? r.delivery_date : null
+                })
+                .ToListAsync(ct);
+
+            var reservations = rows
+                .Where(x => !ignoreOverdueOrders || !x.DeliveryDate.HasValue || x.DeliveryDate.Value >= anchor)
+                .OrderBy(x => x.Start)
+                .ToList();
+
+            foreach (var r in reservations)
+            {
+                var start = r.Start;
+                var end = r.End < start ? start : r.End;
+                MachineHelper.AssignReservationToLane(lanes, start, end);
+            }
+
+            return lanes;
+        }
+
+        public async Task<MachineAvailabilitySnapshotDto> GetAvailabilitySnapshotAsync(
+    DateTime anchor,
+    bool ignoreOverdueOrders,
+    CancellationToken ct = default)
+        {
+            var machineRows = await _db.machines
+                .AsNoTracking()
+                .Where(x => x.is_active)
+                .OrderBy(x => x.process_code)
+                .ThenBy(x => x.machine_code)
+                .ToListAsync(ct);
+
+            var result = new List<MachineAvailabilityLineDto>();
+
+            foreach (var m in machineRows)
+            {
+                var laneTimes = await GetLaneAvailableTimesAsync(m.machine_code, anchor, ignoreOverdueOrders, ct);
+                var busyNow = laneTimes.Count(x => x > anchor);
+                var freeNow = Math.Max(0, Math.Max(1, m.quantity) - busyNow);
+                var earliest = laneTimes.Count == 0 ? anchor : laneTimes.Min();
+                var allFree = laneTimes.Count == 0 ? anchor : laneTimes.Max();
+
+                result.Add(new MachineAvailabilityLineDto
+                {
+                    machine_code = m.machine_code,
+                    process_code = m.process_code,
+                    process_name = m.process_name,
+                    quantity = Math.Max(1, m.quantity),
+                    busy_now = busyNow,
+                    free_now = freeNow,
+                    generated_at = anchor,
+                    earliest_any_lane_free_at = earliest,
+                    all_lanes_free_at = allFree,
+                    lane_free_times = laneTimes.OrderBy(x => x).ToList()
+                });
+            }
+
+            var workshopAllFreeAt = result.Count == 0 ? anchor : result.Max(x => x.all_lanes_free_at);
+
+            var raloEarliest = result
+                .Where(x => string.Equals(x.process_code, "RALO", StringComparison.OrdinalIgnoreCase))
+                .Select(x => x.earliest_any_lane_free_at)
+                .DefaultIfEmpty(anchor)
+                .Max();
+
+            var catEarliest = result
+                .Where(x => string.Equals(x.process_code, "CAT", StringComparison.OrdinalIgnoreCase))
+                .Select(x => x.earliest_any_lane_free_at)
+                .DefaultIfEmpty(anchor)
+                .Max();
+
+            DateTime? raloCatBothFreeAt = null;
+            if (result.Any(x => string.Equals(x.process_code, "RALO", StringComparison.OrdinalIgnoreCase))
+                && result.Any(x => string.Equals(x.process_code, "CAT", StringComparison.OrdinalIgnoreCase)))
+            {
+                raloCatBothFreeAt = raloEarliest > catEarliest ? raloEarliest : catEarliest;
+            }
+
+            return new MachineAvailabilitySnapshotDto
+            {
+                generated_at = anchor,
+                workshop_all_free_at = workshopAllFreeAt,
+                ralo_cat_both_free_at = raloCatBothFreeAt,
+                machines = result
+            };
+        }
+
     }
 }

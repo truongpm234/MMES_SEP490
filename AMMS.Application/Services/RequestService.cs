@@ -81,6 +81,7 @@ namespace AMMS.Application.Services
                 customer_phone = req.customer_phone,
                 customer_email = req.customer_email,
                 delivery_date = ToDeliveryDate(req.delivery_date),
+                delivery_date_change_reason = req.delivery_date_change_reason,
                 product_name = req.product_name,
                 quantity = req.quantity,
                 description = req.description,
@@ -162,6 +163,8 @@ namespace AMMS.Application.Services
             await _currentUser.EnsureCanAccessAssignedRequestAsync(id);
             var entity = await _requestRepo.GetByIdAsync(id);
             var ce = await _estimateRepo.GetByOrderRequestIdAsync(id);
+            var oldDeliveryDate = entity.delivery_date;
+            var newDeliveryDate = ToDeliveryDate(req.delivery_date);
             if (entity == null)
             {
                 return new UpdateRequestResponse
@@ -181,6 +184,18 @@ namespace AMMS.Application.Services
             entity.design_file_path = req.design_file_path ?? entity.design_file_path;
             entity.detail_address = req.detail_address ?? entity.detail_address;
             entity.delivery_date = ToDeliveryDate(req.delivery_date);
+            if (req.delivery_date.HasValue)
+            {
+                entity.delivery_date = newDeliveryDate;
+
+                var changed = oldDeliveryDate != newDeliveryDate;
+                if (changed && req.delivery_date_change_reason != null)
+                {
+                    entity.delivery_date_change_reason = string.IsNullOrWhiteSpace(req.delivery_date_change_reason)
+                        ? null
+                        : req.delivery_date_change_reason.Trim();
+                }
+            }
             entity.product_type = req.product_type ?? entity.product_type;
             entity.number_of_plates = req.number_of_plates ?? entity.number_of_plates;
             entity.product_length_mm = req.product_length_mm ?? entity.product_length_mm;

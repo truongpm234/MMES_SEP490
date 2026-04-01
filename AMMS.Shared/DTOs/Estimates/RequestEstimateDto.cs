@@ -52,6 +52,8 @@ namespace AMMS.Shared.DTOs.Estimates
         public decimal ink_cost { get; set; }
         public decimal ink_weight_kg { get; set; }
         public decimal ink_rate_per_m2 { get; set; }
+        public string? ink_type_names { get; set; }
+        public string? alternative_material_reason { get; set; }
         public decimal coating_glue_cost { get; set; }
         public decimal coating_glue_weight_kg { get; set; }
         public decimal coating_glue_rate_per_m2 { get; set; }

@@ -14,6 +14,7 @@ namespace AMMS.Shared.DTOs.Email
         public string? customer_email { get; set; }
         public string? detail_address { get; set; }
         public DateTime? delivery_date { get; set; }
+        public string? delivery_date_change_reason { get; set; }
         public DateTime? order_request_date { get; set; }
         public string? product_name { get; set; }
         public int quantity { get; set; }

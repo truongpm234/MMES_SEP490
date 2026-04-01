@@ -357,23 +357,15 @@ namespace AMMS.Infrastructure.Repositories
             var happyCaseQty = Math.Max(orderQty, SafeMul(sheetsRequired, nUp));
             var maxProductQty = Math.Max(happyCaseQty, SafeMul(Math.Max(sheetsTotal, 1), nUp));
             var clampedMaxProductQty = Math.Min(maxProductQty, TokenQtyMax);
-
-            var maxSheetQty = Math.Min(Math.Max(sheetsTotal, Math.Max(sheetsRequired, 1)), TokenQtyMax);
-
-            var finalSuggestedTarget = Math.Min(
-                clampedMaxProductQty,
-                Math.Max(orderQty, (int)Math.Ceiling(orderQty * 1.10m)));
+            var sheetProductCap = Math.Min(SafeMul(Math.Max(sheetsTotal, 1), nUp), TokenQtyMax);
 
             var routeCodes = route.Select(x => Norm(x.process_code)).ToList();
             var cutIndex = routeCodes.FindIndex(x => x == "CAT");
 
             if (IsRalo(pcode))
             {
-                var minPlateQty = Math.Max(1, numberOfPlates);
-                var maxPlateQty = minPlateQty + 1;
-
-                minPlateQty = Math.Min(minPlateQty, TokenQtyMax);
-                maxPlateQty = Math.Min(maxPlateQty, TokenQtyMax);
+                var plateQty = Math.Max(1, numberOfPlates);
+                plateQty = Math.Min(plateQty, TokenQtyMax);
 
                 return new TaskQtyPolicyDto
                 {
@@ -382,9 +374,9 @@ namespace AMMS.Infrastructure.Repositories
                     process_name = pname,
                     qty_unit = "bản",
 
-                    min_allowed = minPlateQty,
-                    max_allowed = maxPlateQty,
-                    suggested_qty = minPlateQty,
+                    min_allowed = plateQty,
+                    max_allowed = plateQty,
+                    suggested_qty = plateQty,
 
                     order_qty = orderQty,
                     sheets_required = sheetsRequired,
@@ -393,88 +385,37 @@ namespace AMMS.Infrastructure.Repositories
                     n_up = nUp,
                     number_of_plates = numberOfPlates,
 
-                    happy_case_qty = minPlateQty,
+                    happy_case_qty = plateQty,
                     stage_index = currentIndex,
                     stage_count = route.Count
                 };
             }
-
-            var isSheetStage = cutIndex >= 0
-    ? currentIndex <= cutIndex
-    : IsSheetBasedStage(pcode);
 
             if (pcode == "CAT")
             {
-                var minCutQty = Math.Max(1, sheetsRequired);
-                var maxCutQty = Math.Max(minCutQty, sheetsTotal);
-
-                minCutQty = Math.Min(minCutQty, TokenQtyMax);
-                maxCutQty = Math.Min(maxCutQty, TokenQtyMax);
-
                 return new TaskQtyPolicyDto
                 {
                     task_id = taskId,
                     process_code = pcode,
                     process_name = pname,
-                    qty_unit = "tờ",
+                    qty_unit = "sp",
 
-                    min_allowed = minCutQty,
-                    max_allowed = maxCutQty,
-                    suggested_qty = maxCutQty,
-
-                    order_qty = orderQty,
-                    sheets_required = sheetsRequired,
-                    sheets_waste = sheetsWaste,
-                    sheets_total = sheetsTotal,
-                    n_up = nUp,
-                    number_of_plates = numberOfPlates,
-
-                    happy_case_qty = Math.Max(sheetsRequired, 1),
-                    stage_index = currentIndex,
-                    stage_count = route.Count
-                };
-            }
-
-            if (isSheetStage)
-            {
-                return new TaskQtyPolicyDto
-                {
-                    task_id = taskId,
-                    process_code = pcode,
-                    process_name = pname,
-                    qty_unit = "tờ",
                     min_allowed = 1,
-                    max_allowed = maxSheetQty,
-                    suggested_qty = maxSheetQty,
+                    max_allowed = sheetProductCap,
+                    suggested_qty = sheetProductCap,
+
                     order_qty = orderQty,
                     sheets_required = sheetsRequired,
                     sheets_waste = sheetsWaste,
                     sheets_total = sheetsTotal,
                     n_up = nUp,
                     number_of_plates = numberOfPlates,
-                    happy_case_qty = Math.Min(Math.Max(sheetsRequired, 1), TokenQtyMax),
+
+                    happy_case_qty = sheetProductCap,
                     stage_index = currentIndex,
                     stage_count = route.Count
                 };
             }
-
-            var productStageIndexes = BuildProductStageIndexes(routeCodes, cutIndex);
-            if (productStageIndexes.Count == 0)
-            {
-                productStageIndexes.Add(currentIndex);
-            }
-
-            var position = productStageIndexes.IndexOf(currentIndex);
-            if (position < 0)
-                position = Math.Max(0, productStageIndexes.Count - 1);
-
-            var suggestedQty = ComputeProgressiveSuggestedQty(
-                maxQty: clampedMaxProductQty,
-                finalSuggestedQty: finalSuggestedTarget,
-                position: position,
-                count: productStageIndexes.Count);
-
-            suggestedQty = Clamp(suggestedQty, 1, clampedMaxProductQty);
 
             return new TaskQtyPolicyDto
             {
@@ -482,16 +423,19 @@ namespace AMMS.Infrastructure.Repositories
                 process_code = pcode,
                 process_name = pname,
                 qty_unit = "sp",
+
                 min_allowed = 1,
-                max_allowed = clampedMaxProductQty,
-                suggested_qty = suggestedQty,
+                max_allowed = sheetProductCap,
+                suggested_qty = sheetProductCap,
+
                 order_qty = orderQty,
                 sheets_required = sheetsRequired,
                 sheets_waste = sheetsWaste,
                 sheets_total = sheetsTotal,
                 n_up = nUp,
                 number_of_plates = numberOfPlates,
-                happy_case_qty = happyCaseQty,
+
+                happy_case_qty = sheetProductCap,
                 stage_index = currentIndex,
                 stage_count = route.Count
             };
