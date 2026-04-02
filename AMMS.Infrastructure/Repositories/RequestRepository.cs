@@ -956,6 +956,7 @@ namespace AMMS.Infrastructure.Repositories
                 print_width_mm = request.print_width_mm,
                 print_length_mm = request.print_length_mm,
                 reason = SafeText(request.reason),
+                alternative_material_reason = SafeText(request.alternative_material_reason),
                 note = SafeText(request.note),
                 verified_at = request.verified_at,
                 quote_expires_at = request.quote_expires_at,
