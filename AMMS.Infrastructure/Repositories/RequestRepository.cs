@@ -956,7 +956,6 @@ namespace AMMS.Infrastructure.Repositories
                 print_width_mm = request.print_width_mm,
                 print_length_mm = request.print_length_mm,
                 reason = SafeText(request.reason),
-                alternative_material_reason = SafeText(request.alternative_material_reason),
                 note = SafeText(request.note),
                 verified_at = request.verified_at,
                 quote_expires_at = request.quote_expires_at,
@@ -966,10 +965,7 @@ namespace AMMS.Infrastructure.Repositories
                     var discountAmount = ce.discount_amount < 0m ? 0m : ce.discount_amount;
                     var vatBase = Math.Max(ce.subtotal - discountAmount, 0m);
                     var vatAmount = vatPercent <= 0m ? 0m : vatBase * vatPercent / 100m;
-                    var displayPaperCode = EstimateMaterialAlternativeHelper.ResolvePaperCode(
-    ce.paper_alternative,
-    ce.paper_code);
-
+                    var displayPaperCode = EstimateMaterialAlternativeHelper.ResolvePaperCode( ce.paper_alternative, ce.paper_code);
                     var displayPaperName = EstimateMaterialAlternativeHelper.ResolvePaperName(
                         displayPaperCode,
                         ce.paper_name,
@@ -999,7 +995,7 @@ namespace AMMS.Infrastructure.Repositories
 
                         paper_sheets_used = ce.paper_sheets_used,
                         paper_unit_price = ce.paper_unit_price,
-
+                        alternative_material_reason = SafeText(ce.alternative_material_reason),
                         ink_weight_kg = ce.ink_weight_kg,
                         ink_rate_per_m2 = ce.ink_rate_per_m2,
                         ink_type_names = ce.ink_type_names,
