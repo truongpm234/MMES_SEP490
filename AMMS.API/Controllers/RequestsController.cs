@@ -1333,18 +1333,23 @@ namespace AMMS.API.Controllers
         [HttpGet("notify-customer-pay")]
         public async Task<IActionResult> Notification(int id)
         {
-            var res = await _db.order_requests.SingleOrDefaultAsync(o => o.order_request_id == id || o.order_id == id);
-            if (res?.process_status == "Accepted")
+            var res = await _db.order_requests.FirstOrDefaultAsync(o => o.order_request_id == id);
+            if (res != null)
             {
-                var req = new RequestChangedEvent(id, "not paid", "Deposited", "Payment", DateTime.Now, "Customer");
-                await _rt.PublishRequestChangedAsync(req);
-                return Ok(new { action = "Deposited" });
-            }
-            else if (res?.process_status == "Paid")
-            {
-                var req = new RequestChangedEvent(id, "not paid", "Full Paid", "Payment", DateTime.Now, "Customer");
-                await _rt.PublishRequestChangedAsync(req);
-                return Ok(new { action = "Full paid" });
+                res = await _db.order_requests
+                    .FirstOrDefaultAsync(o => o.order_id == id);
+                if (res?.process_status == "Accepted")
+                {
+                    var req = new RequestChangedEvent(id, "not paid", "Deposited", "Payment", DateTime.Now, "Customer");
+                    await _rt.PublishRequestChangedAsync(req);
+                    return Ok(new { action = "Deposited" });
+                }
+                else if (res?.process_status == "Paid")
+                {
+                    var req = new RequestChangedEvent(id, "not paid", "Full Paid", "Payment", DateTime.Now, "Customer");
+                    await _rt.PublishRequestChangedAsync(req);
+                    return Ok(new { action = "Full paid" });
+                }
             }
             return NotFound("Not payment yet");
         }
