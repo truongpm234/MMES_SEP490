@@ -946,7 +946,7 @@ namespace AMMS.Infrastructure.Repositories
                 paper_code = selectedPaperCode,
                 paper_name = selectedPaperName,
                 wave_type = selectedWaveType,
-
+                is_send_design = request.is_send_design,
                 product_length_mm = request.product_length_mm,
                 product_width_mm = request.product_width_mm,
                 product_height_mm = request.product_height_mm,
@@ -1001,7 +1001,8 @@ namespace AMMS.Infrastructure.Repositories
 
                         ink_weight_kg = ce.ink_weight_kg,
                         ink_rate_per_m2 = ce.ink_rate_per_m2,
-
+                        ink_type_names = ce.ink_type_names,
+                        
                         coating_glue_weight_kg = ce.coating_glue_weight_kg,
                         coating_glue_rate_per_m2 = ce.coating_glue_rate_per_m2,
 

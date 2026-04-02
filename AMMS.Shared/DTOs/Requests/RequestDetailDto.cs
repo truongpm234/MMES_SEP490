@@ -10,7 +10,7 @@
 
         public DateTime? delevery_date { get; set; }
         public string? delivery_date_change_reason { get; set; }
-
+        public bool? is_send_design { get; set; }
         public string consultant_note { get; set; } = "";
         public string product_name { get; set; } = "";
         public int quantity { get; set; }
