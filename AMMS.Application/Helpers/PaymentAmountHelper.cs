@@ -12,7 +12,7 @@ namespace AMMS.Application.Helpers
             return (int)Math.Round(
                 est.deposit_amount,
                 0,
-                MidpointRounding.AwayFromZero);
+                MidpointRounding.AwayFromZero)/100;
         }
 
         public static int GetRemainingAmount(cost_estimate est)

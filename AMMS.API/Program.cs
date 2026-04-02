@@ -291,7 +291,7 @@ builder.Services.AddSingleton<IEmailBackgroundQueue, EmailBackgroundQueue>();
 builder.Services.AddHostedService<EmailDispatcherHostedService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IAccessService, AccessService>();
-
+builder.Services.AddScoped<IContractCompareService, ContractCompareService>();
 // Logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();

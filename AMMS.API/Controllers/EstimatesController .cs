@@ -163,6 +163,15 @@ namespace AMMS.API.Controllers
                     req.file.ContentType ?? "application/pdf",
                     ct);
 
+                if (result.customer_signed_contract_path == null)
+                {
+                    return BadRequest(new
+                    {
+                        message = result.compare_warning ?? "Uploaded contract does not match consultant contract enough to save.",
+                        data = result
+                    });
+                }
+
                 return Ok(new
                 {
                     message = "Upload signed contract successfully",

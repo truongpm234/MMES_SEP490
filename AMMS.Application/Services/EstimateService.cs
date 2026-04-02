@@ -19,7 +19,7 @@ namespace AMMS.Application.Services
         private readonly IOrderRepository _orderRepo;
         private readonly IMaterialRepository _materialRepo;
         private readonly IBomRepository _bomRepo;
-
+        private readonly IContractCompareService _contractCompareService;
         public EstimateService(
             ICostEstimateRepository costEstimateRepository,
             IQuoteRepository quoteRepo,
@@ -28,7 +28,8 @@ namespace AMMS.Application.Services
             IRequestRepository requestRepository,
             IOrderRepository orderRepo,
             IMaterialRepository materialRepo,
-            IBomRepository bomRepo)
+            IBomRepository bomRepo,
+            IContractCompareService contractCompareService)
         {
             _estimateRepo = costEstimateRepository;
             _quoteRepo = quoteRepo;
@@ -38,6 +39,7 @@ namespace AMMS.Application.Services
             _orderRepo = orderRepo;
             _materialRepo = materialRepo;
             _bomRepo = bomRepo;
+            _contractCompareService = contractCompareService;
         }
 
         public async Task UpdateFinalCostAsync(int orderRequestId, decimal? finalCostInput)
@@ -312,12 +314,12 @@ namespace AMMS.Application.Services
         }
 
         public async Task<UploadCustomerSignedContractResponse> UploadCustomerSignedContractAsync(
-        int requestId,
-        int estimateId,
-        Stream fileStream,
-        string fileName,
-        string contentType,
-        CancellationToken ct = default)
+    int requestId,
+    int estimateId,
+    Stream fileStream,
+    string fileName,
+    string contentType,
+    CancellationToken ct = default)
         {
             if (requestId <= 0) throw new ArgumentException("request_id must be > 0");
             if (estimateId <= 0) throw new ArgumentException("estimate_id must be > 0");
@@ -330,20 +332,46 @@ namespace AMMS.Application.Services
             if (estimate == null || estimate.order_request_id != requestId)
                 throw new InvalidOperationException("Estimate not found");
 
+            if (string.IsNullOrWhiteSpace(estimate.consultant_contract_path))
+                throw new InvalidOperationException("Consultant contract has not been uploaded yet");
+
             var ext = Path.GetExtension(fileName)?.Trim().ToLowerInvariant();
             if (ext != ".pdf")
                 throw new ArgumentException("Customer signed contract must be .pdf");
+
+            byte[] pdfBytes;
+            await using (var pdfMs = new MemoryStream())
+            {
+                if (fileStream.CanSeek) fileStream.Position = 0;
+                await fileStream.CopyToAsync(pdfMs, ct);
+                pdfBytes = pdfMs.ToArray();
+            }
+
+            var compareResult = await _contractCompareService.CompareAsync(
+                requestId,
+                estimateId,
+                estimate.consultant_contract_path!,
+                pdfBytes,
+                ct);
+
+            if (compareResult.similarity_percent < 95m)
+            {
+                return new UploadCustomerSignedContractResponse
+                {
+                    request_id = requestId,
+                    estimate_id = estimateId,
+                    customer_signed_contract_path = null,
+                    compare_result = compareResult,
+                    compare_warning = $"Hợp đồng khách tải lên chưa khớp so với hợp đồng tư vấn viên cung câp. Quý khách vui lòng xem lại và tải lại sau."
+                };
+            }
 
             var safeFileName = Path.GetFileName(fileName);
             var publicId = $"contracts/request_{requestId}/estimate_{estimateId}/customer_signed";
 
             string pdfUrl;
-            await using (var uploadPdfStream = new MemoryStream())
+            await using (var uploadPdfStream = new MemoryStream(pdfBytes))
             {
-                if (fileStream.CanSeek) fileStream.Position = 0;
-                await fileStream.CopyToAsync(uploadPdfStream, ct);
-                uploadPdfStream.Position = 0;
-
                 pdfUrl = await _cloudinaryStorage.UploadRawWithPublicIdAsync(
                     uploadPdfStream,
                     safeFileName,
@@ -359,7 +387,7 @@ namespace AMMS.Application.Services
                 request_id = requestId,
                 estimate_id = estimateId,
                 customer_signed_contract_path = pdfUrl,
-                compare_result = null,
+                compare_result = compareResult,
                 compare_warning = null
             };
         }
