@@ -1333,7 +1333,12 @@ namespace AMMS.API.Controllers
         [HttpGet("notify-customer-pay")]
         public async Task<IActionResult> Notification(int id)
         {
-            var res = await _db.order_requests.SingleOrDefaultAsync(o => o.order_request_id == id || o.order_id == id);
+            var res = await _db.order_requests.FirstOrDefaultAsync(o => o.order_request_id == id);
+            if (res == null)
+            {
+                res = await _db.order_requests
+                    .FirstOrDefaultAsync(o => o.order_id == id);
+            }
             if (res?.process_status == "Accepted")
             {
                 var req = new RequestChangedEvent(id, "not paid", "Deposited", "Payment", DateTime.Now, "Customer");
