@@ -1338,13 +1338,13 @@ namespace AMMS.API.Controllers
             {
                 if (res?.process_status == "Accepted")
                 {
-                    var req = new RequestChangedEvent(id, "not paid", "Deposited", "Payment", DateTime.Now, "Customer");
+                    var req = new RequestChangedEvent(res.order_id, id, "not paid", "Deposited", "Payment", DateTime.Now, "Customer");
                     await _rt.PublishRequestChangedAsync(req);
                     return Ok(new { action = "Deposited" });
                 }
                 else if (res?.process_status == "Paid")
                 {
-                    var req = new RequestChangedEvent(id, "not paid", "Full Paid", "Payment", DateTime.Now, "Customer");
+                    var req = new RequestChangedEvent(res.order_id, id, "not paid", "Full Paid", "Payment", DateTime.Now, "Customer");
                     await _rt.PublishRequestChangedAsync(req);
                     return Ok(new { action = "Full paid" });
                 }

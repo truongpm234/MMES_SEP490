@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace AMMS.Shared.DTOs.Socket
+﻿namespace AMMS.Shared.DTOs.Socket
 {
     public static class RealtimeGroups
     {
@@ -14,10 +8,11 @@ namespace AMMS.Shared.DTOs.Socket
     }
 
     public record RequestChangedEvent(
+        int? order_id,
         int request_id,
         string? old_status,
         string? new_status,
-        string action,          
+        string action,
         DateTime changed_at,
         string? changed_by
     );

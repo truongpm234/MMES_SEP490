@@ -187,6 +187,7 @@ namespace AMMS.Application.Services
                 }
 
                 await _rt.PublishRequestChangedAsync(new(
+                    order_id: req.order_id,
                     request_id: req.order_request_id,
                     old_status: "Verified",
                     new_status: "Waiting",
@@ -244,7 +245,7 @@ namespace AMMS.Application.Services
 
             var safeReason = System.Net.WebUtility.HtmlEncode(reason ?? "");
 
-            RequestChangedEvent evt = new RequestChangedEvent(orderRequestId, "", req.process_status, "customer_rejected", DateTime.Now, "Customer");
+            RequestChangedEvent evt = new RequestChangedEvent(null, orderRequestId, "", req.process_status, "customer_rejected", DateTime.Now, "Customer");
             await _rt.PublishRequestChangedAsync(evt);
 
             await SendConsultantStatusEmailAsync(req, est, $"KHACH TU CHOI (LY DO: {safeReason})");

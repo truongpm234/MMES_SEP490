@@ -103,6 +103,7 @@ namespace AMMS.Application.Services
             await _requestRepo.SaveChangesAsync();
 
             await _rt.PublishRequestChangedAsync(new(
+                order_id: entity.order_id,
                 request_id: entity.order_request_id,
                 old_status: null,
                 new_status: entity.process_status,
@@ -142,6 +143,7 @@ namespace AMMS.Application.Services
             await _requestRepo.SaveChangesAsync();
 
             await _rt.PublishRequestChangedAsync(new(
+                order_id: entity.order_id,
                 request_id: entity.order_request_id,
                 old_status: null,
                 new_status: entity.process_status,
@@ -517,6 +519,7 @@ namespace AMMS.Application.Services
             await _requestRepo.SaveChangesAsync();
 
             await _rt.PublishRequestChangedAsync(new(
+                order_id: req.order_id,
                 request_id: req.order_request_id,
                 old_status: oldStatus,
                 new_status: req.process_status,
@@ -581,6 +584,7 @@ namespace AMMS.Application.Services
             ));
 
             await _rt.PublishRequestChangedAsync(new(
+                order_id: req.order_id,
                 request_id: req.order_request_id,
                 old_status: oldStatus,
                 new_status: req.process_status,
@@ -767,6 +771,7 @@ namespace AMMS.Application.Services
             await _estimateRepo.SaveChangesAsync();
 
             await _rt.PublishRequestChangedAsync(new(
+                order_id: clonedRequest.order_id,
                 request_id: clonedRequest.order_request_id,
                 old_status: null,
                 new_status: clonedRequest.process_status,
