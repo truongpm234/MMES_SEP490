@@ -920,7 +920,7 @@ namespace AMMS.Infrastructure.Repositories
                 {
                     name = "Cuộn kẽm",
                     code = "PLATE_INPUT",
-                    quantity = plateQty,
+                    quantity = 1,
                     unit = "cuộn"
                 });
 
