@@ -38,7 +38,6 @@
 
             var ttl = TimeSpan.FromMinutes(Math.Max(1, req.ttl_minutes));
 
-            // null / 0 / âm => tự dùng suggested_qty
             var isAuto = !req.qty_good.HasValue || req.qty_good.Value <= 0;
 
             int qtyGood;
@@ -56,7 +55,7 @@
                 {
                     return BadRequest(new
                     {
-                        message = $"Số lượng báo cáo không hợp lệ. Công đoạn [{policy.process_code} - {policy.process_name}] chỉ cho phép trong khoảng {policy.min_allowed}..{policy.max_allowed} {policy.qty_unit}.",
+                        message = $"Số lượng báo cáo không hợp lệ. Công đoạn [{policy.process_code} - {policy.process_name}] chỉ cho phép trong khoảng 1 ---> {policy.max_allowed} {policy.qty_unit}.",
                         task_id = req.task_id,
                         process_code = policy.process_code,
                         process_name = policy.process_name,

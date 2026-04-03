@@ -920,13 +920,13 @@ namespace AMMS.Infrastructure.Repositories
                 {
                     name = "Cuộn kẽm",
                     code = "PLATE_INPUT",
-                    quantity = plateQty,
+                    quantity = 1,
                     unit = "cuộn"
                 });
 
                 var output = new StageMaterialDto
                 {
-                    name = $"Bản kẽm cho {productName}",
+                    name = $"Bản kẽm",
                     code = "RALO",
                     quantity = plateQty,
                     unit = "bản"
@@ -953,7 +953,7 @@ namespace AMMS.Infrastructure.Repositories
 
                 var output = new StageMaterialDto
                 {
-                    name = $"Phôi giấy đã cắt cho {productName}",
+                    name = $"Phôi giấy cắt",
                     code = "CAT",
                     quantity = cutOutputQty,
                     unit = "sp"
@@ -972,7 +972,7 @@ namespace AMMS.Infrastructure.Repositories
             {
                 inputs.Add(new StageMaterialDto
                 {
-                    name = prevOutput?.Name ?? $"Phôi giấy đã cắt cho {productName}",
+                    name = prevOutput?.Name ?? $"Phôi giấy cắt",
                     code = prevOutput?.Code ?? "CAT",
                     quantity = prevOutput?.Quantity ?? cutOutputQty,
                     unit = prevOutput?.Unit ?? "sp"
@@ -1002,7 +1002,7 @@ namespace AMMS.Infrastructure.Repositories
 
                 var output = new StageMaterialDto
                 {
-                    name = $"Bán thành phẩm đã in {productName}",
+                    name = $"Bán thành phẩm in",
                     code = "IN",
                     quantity = finalQty,
                     unit = "sp"
@@ -1023,7 +1023,7 @@ namespace AMMS.Infrastructure.Repositories
 
                 inputs.Add(new StageMaterialDto
                 {
-                    name = prevOutput?.Name ?? $"Bán thành phẩm đã in {productName}",
+                    name = prevOutput?.Name ?? $"Bán thành phẩm in",
                     code = prevOutput?.Code ?? "IN",
                     quantity = prevOutput?.Quantity ?? defaultProductQty,
                     unit = prevOutput?.Unit ?? "sp"
@@ -1039,7 +1039,7 @@ namespace AMMS.Infrastructure.Repositories
 
                 var output = new StageMaterialDto
                 {
-                    name = $"Bán thành phẩm đã phủ {productName}",
+                    name = $"Bán thành phẩm phủ",
                     code = "PHU",
                     quantity = finalQty,
                     unit = "sp"
@@ -1058,7 +1058,7 @@ namespace AMMS.Infrastructure.Repositories
             {
                 inputs.Add(new StageMaterialDto
                 {
-                    name = prevOutput?.Name ?? $"Bán thành phẩm trước cán {productName}",
+                    name = prevOutput?.Name ?? $"Bán thành phẩm trước cán",
                     code = prevOutput?.Code ?? "PHU",
                     quantity = prevOutput?.Quantity ?? defaultProductQty,
                     unit = prevOutput?.Unit ?? "sp"
@@ -1074,7 +1074,7 @@ namespace AMMS.Infrastructure.Repositories
 
                 var output = new StageMaterialDto
                 {
-                    name = $"Bán thành phẩm đã cán {productName}",
+                    name = $"Bán thành phẩm đã cán",
                     code = "CAN",
                     quantity = finalQty,
                     unit = "sp"
@@ -1093,7 +1093,7 @@ namespace AMMS.Infrastructure.Repositories
             {
                 inputs.Add(new StageMaterialDto
                 {
-                    name = prevOutput?.Name ?? $"Bán thành phẩm trước bồi {productName}",
+                    name = prevOutput?.Name ?? $"Bán thành phẩm trước bồi",
                     code = prevOutput?.Code ?? "IN",
                     quantity = prevOutput?.Quantity ?? defaultProductQty,
                     unit = prevOutput?.Unit ?? "sp"
@@ -1117,7 +1117,7 @@ namespace AMMS.Infrastructure.Repositories
 
                 var output = new StageMaterialDto
                 {
-                    name = $"Bán thành phẩm đã bồi {productName}",
+                    name = $"Bán thành phẩm đã bồi",
                     code = "BOI",
                     quantity = finalQty,
                     unit = "sp"
@@ -1136,7 +1136,7 @@ namespace AMMS.Infrastructure.Repositories
             {
                 inputs.Add(new StageMaterialDto
                 {
-                    name = prevOutput?.Name ?? $"Bán thành phẩm trước bế {productName}",
+                    name = prevOutput?.Name ?? $"Bán thành phẩm trước bế",
                     code = prevOutput?.Code ?? "PREV",
                     quantity = prevOutput?.Quantity ?? defaultProductQty,
                     unit = prevOutput?.Unit ?? "sp"
@@ -1144,7 +1144,7 @@ namespace AMMS.Infrastructure.Repositories
 
                 var output = new StageMaterialDto
                 {
-                    name = $"Bán thành phẩm đã bế {productName}",
+                    name = $"Bán thành phẩm đã bế",
                     code = "BE",
                     quantity = finalQty,
                     unit = "sp"
@@ -1163,7 +1163,7 @@ namespace AMMS.Infrastructure.Repositories
             {
                 inputs.Add(new StageMaterialDto
                 {
-                    name = prevOutput?.Name ?? $"Bán thành phẩm trước dứt {productName}",
+                    name = prevOutput?.Name ?? $"Bán thành phẩm trước dứt",
                     code = prevOutput?.Code ?? "PREV",
                     quantity = prevOutput?.Quantity ?? defaultProductQty,
                     unit = prevOutput?.Unit ?? "sp"
@@ -1171,7 +1171,7 @@ namespace AMMS.Infrastructure.Repositories
 
                 var output = new StageMaterialDto
                 {
-                    name = $"Bán thành phẩm đã dứt {productName}",
+                    name = $"Bán thành phẩm đã dứt",
                     code = "DUT",
                     quantity = finalQty,
                     unit = "sp"
@@ -1190,7 +1190,7 @@ namespace AMMS.Infrastructure.Repositories
             {
                 inputs.Add(new StageMaterialDto
                 {
-                    name = prevOutput?.Name ?? $"Bán thành phẩm trước dán {productName}",
+                    name = prevOutput?.Name ?? $"Bán thành phẩm trước dán",
                     code = prevOutput?.Code ?? "PREV",
                     quantity = prevOutput?.Quantity ?? defaultProductQty,
                     unit = prevOutput?.Unit ?? "sp"

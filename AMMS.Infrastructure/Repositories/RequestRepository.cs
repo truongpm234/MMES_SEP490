@@ -946,7 +946,7 @@ namespace AMMS.Infrastructure.Repositories
                 paper_code = selectedPaperCode,
                 paper_name = selectedPaperName,
                 wave_type = selectedWaveType,
-
+                is_send_design = request.is_send_design,
                 product_length_mm = request.product_length_mm,
                 product_width_mm = request.product_width_mm,
                 product_height_mm = request.product_height_mm,
@@ -965,10 +965,7 @@ namespace AMMS.Infrastructure.Repositories
                     var discountAmount = ce.discount_amount < 0m ? 0m : ce.discount_amount;
                     var vatBase = Math.Max(ce.subtotal - discountAmount, 0m);
                     var vatAmount = vatPercent <= 0m ? 0m : vatBase * vatPercent / 100m;
-                    var displayPaperCode = EstimateMaterialAlternativeHelper.ResolvePaperCode(
-    ce.paper_alternative,
-    ce.paper_code);
-
+                    var displayPaperCode = EstimateMaterialAlternativeHelper.ResolvePaperCode( ce.paper_alternative, ce.paper_code);
                     var displayPaperName = EstimateMaterialAlternativeHelper.ResolvePaperName(
                         displayPaperCode,
                         ce.paper_name,
@@ -998,10 +995,11 @@ namespace AMMS.Infrastructure.Repositories
 
                         paper_sheets_used = ce.paper_sheets_used,
                         paper_unit_price = ce.paper_unit_price,
-
+                        alternative_material_reason = SafeText(ce.alternative_material_reason),
                         ink_weight_kg = ce.ink_weight_kg,
                         ink_rate_per_m2 = ce.ink_rate_per_m2,
-
+                        ink_type_names = ce.ink_type_names,
+                        
                         coating_glue_weight_kg = ce.coating_glue_weight_kg,
                         coating_glue_rate_per_m2 = ce.coating_glue_rate_per_m2,
 
