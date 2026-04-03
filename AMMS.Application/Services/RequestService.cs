@@ -26,6 +26,7 @@ namespace AMMS.Application.Services
         private readonly IAccessService _accessService;
         private readonly IProductTypeRepository _productTypeRepo;
         private readonly IProductTypeProcessRepository _productTypeProcessRepo;
+        private readonly IProductionSchedulingService _productionSchedulingService;
 
         public RequestService(
             IRequestRepository requestRepo,
@@ -40,7 +41,8 @@ namespace AMMS.Application.Services
             ICloudinaryFileStorageService cloudinaryStorage,
             IAccessService accessService,
             IProductTypeRepository productTypeRepo,
-            IProductTypeProcessRepository productTypeProcessRepo)
+            IProductTypeProcessRepository productTypeProcessRepo,
+            IProductionSchedulingService productionSchedulingService)
         {
             _requestRepo = requestRepo;
             _orderRepo = orderRepo;
@@ -55,6 +57,7 @@ namespace AMMS.Application.Services
             _accessService = accessService;
             _productTypeRepo = productTypeRepo;
             _productTypeProcessRepo = productTypeProcessRepo;
+            _productionSchedulingService = productionSchedulingService;
         }
 
         private DateTime? ToDeliveryDate(DateTime? dateTime)
@@ -1149,7 +1152,21 @@ namespace AMMS.Application.Services
         }
         public async Task<DateTime?> RecalculateAndPersistAsync(int orderRequestId, CancellationToken ct = default)
         {
-            return await _requestRepo.RecalculateAndPersistAsync(orderRequestId, ct);
+            var preview = await _productionSchedulingService.PreviewByOrderRequestAsync(orderRequestId, ct);
+            if (preview == null)
+                return null;
+
+            var tracked = await _requestRepo.GetRequestForUpdateAsync(orderRequestId, ct);
+            if (tracked == null)
+                return null;
+
+            tracked.estimate_finish_date = DateTime.SpecifyKind(
+                preview.estimated_finish_date,
+                DateTimeKind.Unspecified);
+
+            await _requestRepo.SaveChangesAsync();
+
+            return tracked.estimate_finish_date;
         }
 
         public async Task<string> UploadPrintReadyFileAsync(

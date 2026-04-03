@@ -9,11 +9,11 @@ namespace AMMS.Shared.DTOs.Productions
     public class StageMaterialDto
     {
         public string name { get; set; } = string.Empty;
-
         public string? code { get; set; }
-
         public decimal quantity { get; set; }
-
+        public decimal estimated_quantity { get; set; }
+        public decimal? actual_quantity { get; set; }
+        public string quantity_source { get; set; } = "Estimated";
         public string unit { get; set; } = string.Empty;
     }
 }

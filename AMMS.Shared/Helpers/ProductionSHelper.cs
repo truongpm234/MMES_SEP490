@@ -9,7 +9,7 @@ namespace AMMS.Shared.Helpers
 {
     public class ProductionSHelper
     {
-        private static readonly HashSet<int> FullAccessRoleIds = new()
+        public static readonly HashSet<int> FullAccessRoleIds = new()
         {
             4,6, 3
         };
@@ -55,5 +55,72 @@ namespace AMMS.Shared.Helpers
                 .Where(x => CanAccessProcess(roleId, x.ProcessCode))
                 .ToList();
         }
+
+        public static StageMaterialDto BuildStageMaterial(
+    string name,
+    string? code,
+    decimal estimatedQty,
+    decimal? actualQty,
+    string unit)
+        {
+            estimatedQty = Math.Max(0m, estimatedQty);
+            if (actualQty.HasValue)
+                actualQty = Math.Max(0m, actualQty.Value);
+
+            return new StageMaterialDto
+            {
+                name = name,
+                code = code,
+                unit = unit,
+
+                estimated_quantity = estimatedQty,
+                actual_quantity = actualQty,
+
+                quantity = actualQty ?? estimatedQty,
+                quantity_source = actualQty.HasValue ? "Actual" : "Estimated"
+            };
+        }
+
+        public static decimal? ToActualQty(int qtyGood)
+            => qtyGood > 0 ? qtyGood : null;
+
+        public static decimal CapEstimatedByPreviousOutput(StageOutputRef? prevOutput, decimal proposed)
+        {
+            proposed = Math.Max(0m, proposed);
+
+            if (prevOutput?.ActualQuantity is decimal prevActual && prevActual > 0m)
+                return Math.Min(proposed, prevActual);
+
+            if (prevOutput != null && prevOutput.EstimatedQuantity > 0m)
+                return Math.Min(proposed, prevOutput.EstimatedQuantity);
+
+            return proposed;
+        }
+
+        public static decimal? CapActualByPreviousOutput(StageOutputRef? prevOutput, decimal? proposed)
+        {
+            if (!proposed.HasValue)
+                return null;
+
+            if (prevOutput?.ActualQuantity is decimal prevActual && prevActual > 0m)
+                return Math.Min(proposed.Value, prevActual);
+
+            return proposed.Value;
+        }
+
+        public static decimal ResolveEstimatedOutputQty(
+            string processCode,
+            ProductionDetailDto detail,
+            decimal defaultEstimatedQty)
+        {
+            var code = (processCode ?? "").Trim().ToUpperInvariant();
+
+            if (code == "DAN" && detail.quantity > 0)
+                return detail.quantity;
+
+            return defaultEstimatedQty;
+        }
+
+
     }
 }

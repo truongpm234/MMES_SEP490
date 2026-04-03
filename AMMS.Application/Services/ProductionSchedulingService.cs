@@ -405,10 +405,11 @@ namespace AMMS.Application.Services
                 select new
                 {
                     order_id = o.order_id,
+                    order_delivery_date = o.delivery_date,
                     order_request_id = (int?)r.order_request_id,
                     accepted_estimate_id = (int?)r.accepted_estimate_id,
                     request_qty = (int?)r.quantity,
-                    delivery_date = (DateTime?)r.delivery_date,
+                    request_delivery_date = (DateTime?)r.delivery_date,
                     number_of_plates = (int?)r.number_of_plates,
                     is_one_side_box = (bool?)r.is_one_side_box,
                     product_length_mm = (int?)r.product_length_mm,
@@ -448,7 +449,7 @@ namespace AMMS.Application.Services
                         : (!string.IsNullOrWhiteSpace(row.first_item_process)
                             ? row.first_item_process
                             : est?.production_processes),
-                DesiredDeliveryDate = est?.desired_delivery_date ?? row.delivery_date
+                DesiredDeliveryDate = row.request_delivery_date ?? row.order_delivery_date ?? est?.desired_delivery_date
             };
         }
 
@@ -491,7 +492,7 @@ namespace AMMS.Application.Services
                 HeightMm = req.product_height_mm,
                 TotalAreaM2 = est?.total_area_m2 ?? 0m,
                 RawProductionProcessCsv = est?.production_processes,
-                DesiredDeliveryDate = est?.desired_delivery_date ?? req.delivery_date
+                DesiredDeliveryDate = req.delivery_date ?? est?.desired_delivery_date
             };
         }
 
@@ -516,7 +517,10 @@ namespace AMMS.Application.Services
                 .FirstOrDefaultAsync(ct);
         }
 
-        private async Task<PlanBuildResult> BuildStagePlansAsync(PlanningContext ctx, DateTime now, CancellationToken ct)
+        private async Task<PlanBuildResult> BuildStagePlansAsync(
+    PlanningContext ctx,
+    DateTime now,
+    CancellationToken ct)
         {
             var allSteps = await _db.product_type_processes
                 .AsNoTracking()
@@ -534,26 +538,64 @@ namespace AMMS.Application.Services
 
             var normalizedCsv = ProductionProcessSelectionHelper.BuildCsv(steps, x => x.process_code);
 
-            var earliestAnchor = EstimateInitialPlanningAnchor(ctx, now, steps.Count);
+            var normalizedNow = _cal.NormalizeStart(now);
 
-            var firstPass = await BuildStagePlansFromAnchorAsync(
+            var normalAnchor = EstimateInitialPlanningAnchor(ctx, normalizedNow, steps.Count);
+
+            DateTime earliestAnchor;
+            DateTime? finishDeadline = null;
+
+            if (ctx.DesiredDeliveryDate.HasValue)
+            {
+                finishDeadline = ResolveFinishDeadline(ctx.DesiredDeliveryDate.Value);
+
+                var urgentAnchor = _cal.NormalizeStart(
+                    normalizedNow.AddMinutes(Math.Max(0, _opt.UrgentLeadFloorMinutes)));
+
+                earliestAnchor = normalAnchor > finishDeadline.Value
+                    ? urgentAnchor
+                    : normalAnchor;
+            }
+            else
+            {
+                earliestAnchor = normalAnchor;
+            }
+
+            var earliestPlan = await BuildStagePlansFromAnchorAsync(
                 ctx,
                 earliestAnchor,
                 steps,
                 normalizedCsv,
                 ct);
 
-            var preferredAnchor = EstimatePreferredAnchorByDueDate(ctx, firstPass, earliestAnchor);
+            if (!finishDeadline.HasValue || earliestPlan.Stages.Count == 0)
+                return earliestPlan;
 
-            if (preferredAnchor <= earliestAnchor)
-                return firstPass;
+            var earliestFinish = earliestPlan.Stages.Max(x => x.PlannedEnd);
 
-            return await BuildStagePlansFromAnchorAsync(
+            if (earliestFinish > finishDeadline.Value)
+            {
+                _logger.LogWarning(
+                    "Schedule late even from earliest feasible anchor. OrderId={OrderId}, OrderRequestId={OrderRequestId}, EarliestAnchor={EarliestAnchor}, EstimatedFinish={EstimatedFinish}, Deadline={Deadline}",
+                    ctx.OrderId,
+                    ctx.OrderRequestId,
+                    earliestAnchor,
+                    earliestFinish,
+                    finishDeadline.Value);
+
+                return earliestPlan;
+            }
+
+            var latestOnTimePlan = await FindLatestOnTimePlanAsync(
                 ctx,
-                preferredAnchor,
                 steps,
                 normalizedCsv,
+                earliestAnchor,
+                finishDeadline.Value,
+                earliestPlan,
                 ct);
+
+            return latestOnTimePlan ?? earliestPlan;
         }
 
         private async Task<List<machine>> GetCandidateMachinesAsync(
@@ -627,48 +669,28 @@ namespace AMMS.Application.Services
 
             var laneCount = Math.Max(1, m.quantity);
             var normalizedAnchor = _cal.NormalizeStart(planningAnchor);
+
             var laneStates = await _machineRepo.GetLaneAvailableTimesAsync(
-    machineCode,
-    normalizedAnchor,
-    ignoreOverdueOrders: true,
-    ct);
+                machineCode,
+                normalizedAnchor,
+                ignoreOverdueOrders: true,
+                ct);
+
+            var normalizedLaneStates = laneStates.Count > 0
+                ? laneStates.OrderBy(x => x).ToList()
+                : Enumerable.Repeat(normalizedAnchor, laneCount).ToList();
+
+            if (normalizedLaneStates.Count < laneCount)
+            {
+                normalizedLaneStates.AddRange(
+                    Enumerable.Repeat(normalizedAnchor, laneCount - normalizedLaneStates.Count));
+            }
 
             var state = new MachinePoolState
             {
                 Machine = m,
-                LaneAvailableAt = laneStates.Count > 0
-                    ? laneStates
-                    : Enumerable.Repeat(normalizedAnchor, laneCount).ToList()
+                LaneAvailableAt = normalizedLaneStates
             };
-
-
-            var machineKey = machineCode.ToUpperInvariant();
-
-            var reservations = await _db.tasks
-                .AsNoTracking()
-                .Where(t => t.machine != null &&
-                            t.machine.Trim().ToUpper() == machineKey)
-                .Where(t => !(
-                    t.status != null &&
-                    t.status.Trim().ToUpper() == "FINISHED" &&
-                    t.end_time != null &&
-                    t.end_time <= planningAnchor))
-                .Select(t => new ExistingReservation
-                {
-                    Start = t.planned_start_time ?? t.start_time ?? planningAnchor,
-                    End = t.planned_end_time
-                          ?? t.end_time
-                          ?? ((t.planned_start_time ?? t.start_time ?? planningAnchor).AddHours(1))
-                })
-                .OrderBy(x => x.Start)
-                .ToListAsync(ct);
-
-            foreach (var r in reservations)
-            {
-                var start = r.Start;
-                var end = r.End < start ? start : r.End;
-                AssignReservationToLane(laneStates, start, end);
-            }
 
             cache[machineCode] = state;
             return state;
@@ -1010,6 +1032,74 @@ namespace AMMS.Application.Services
                 NormalizedProcessCsv = normalizedCsv,
                 Stages = result
             };
+        }
+
+        private DateTime ResolveFinishDeadline(DateTime deliveryDate)
+        {
+            var due = DateTime.SpecifyKind(deliveryDate, DateTimeKind.Unspecified);
+
+            // delivery_date thường là date-only -> map thành cuối ngày giao hàng
+            if (due.TimeOfDay == TimeSpan.Zero)
+            {
+                var cutoffHour = _opt.DeliveryCutoffHour <= 0 ? 17 : _opt.DeliveryCutoffHour;
+                due = due.Date.AddHours(cutoffHour);
+            }
+
+            if (_opt.DueDateSafetyHours > 0)
+                due = due.AddHours(-_opt.DueDateSafetyHours);
+
+            return due;
+        }
+
+        private async Task<PlanBuildResult?> FindLatestOnTimePlanAsync(
+            PlanningContext ctx,
+            List<product_type_process> steps,
+            string normalizedCsv,
+            DateTime earliestAnchor,
+            DateTime finishDeadline,
+            PlanBuildResult seedPlan,
+            CancellationToken ct)
+        {
+            if (seedPlan.Stages.Count == 0)
+                return seedPlan;
+
+            var seedStart = seedPlan.Stages.Min(x => x.PlannedStart);
+            var seedEnd = seedPlan.Stages.Max(x => x.PlannedEnd);
+            var totalSpan = seedEnd - seedStart;
+
+            var candidateAnchor = _cal.NormalizeStart(finishDeadline - totalSpan);
+            if (candidateAnchor < earliestAnchor)
+                candidateAnchor = earliestAnchor;
+
+            var stepMinutes = Math.Max(5, _opt.AnchorSearchStepMinutes);
+
+            var totalMinutes = Math.Max(0, (candidateAnchor - earliestAnchor).TotalMinutes);
+            var maxIterations = Math.Max(1, (int)Math.Ceiling(totalMinutes / stepMinutes) + 1);
+
+            var anchor = candidateAnchor;
+
+            for (var i = 0; i < maxIterations; i++)
+            {
+                var plan = await BuildStagePlansFromAnchorAsync(
+                    ctx,
+                    anchor,
+                    steps,
+                    normalizedCsv,
+                    ct);
+
+                var finish = plan.Stages.Count == 0
+                    ? anchor
+                    : plan.Stages.Max(x => x.PlannedEnd);
+
+                if (finish <= finishDeadline)
+                    return plan;
+
+                anchor = anchor.AddMinutes(-stepMinutes);
+                if (anchor < earliestAnchor)
+                    break;
+            }
+
+            return null;
         }
 
         private static bool IsFinished(task t)

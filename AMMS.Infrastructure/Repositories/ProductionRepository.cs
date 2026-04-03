@@ -603,7 +603,9 @@ namespace AMMS.Infrastructure.Repositories
                     input_materials = io.inputs,
                     output_product = io.output,
                     planned_start_time = task?.planned_start_time,
-                    planned_end_time = task?.planned_end_time
+                    planned_end_time = task?.planned_end_time,
+                    estimated_output_quantity = io.output.estimated_quantity,
+                    actual_output_quantity = io.output.actual_quantity
                 };
 
                 stages.Add(stage);
@@ -899,15 +901,23 @@ namespace AMMS.Infrastructure.Repositories
         {
             var inputs = new List<StageMaterialDto>();
             var code = (processCode ?? "").Trim().ToUpperInvariant();
-            var productName = string.IsNullOrWhiteSpace(detail.product_name) ? "sản phẩm" : detail.product_name.Trim();
+            var productName = string.IsNullOrWhiteSpace(detail.product_name)
+                ? "sản phẩm"
+                : detail.product_name.Trim();
 
+            sheetsRequired = Math.Max(0, sheetsRequired);
+            sheetsWaste = Math.Max(0, sheetsWaste);
             sheetsTotal = Math.Max(sheetsTotal, Math.Max(sheetsRequired + sheetsWaste, 1));
             nUp = Math.Max(nUp, 1);
 
-            var cutInputSheets = sheetsTotal;
-            var cutOutputQty = sheetsTotal * nUp;
-            var defaultProductQty = cutOutputQty;
-            var finalQty = qtyGood > 0 ? qtyGood : defaultProductQty;
+            var cutInputSheetsEstimate = sheetsTotal;
+            var cutOutputEstimate = sheetsTotal * nUp;
+            var defaultEstimatedProductQty = cutOutputEstimate;
+
+            var stageActualQty = ProductionSHelper.ToActualQty(qtyGood);
+
+            var prevEstimatedQty = prevOutput?.EstimatedQuantity ?? defaultEstimatedProductQty;
+            var prevActualQty = prevOutput?.ActualQuantity;
 
             var resolvedPaperCode = string.IsNullOrWhiteSpace(paperCode) ? "PAPER" : paperCode.Trim();
             var resolvedPaperName = string.IsNullOrWhiteSpace(paperName) ? "Giấy in" : paperName.Trim();
@@ -916,326 +926,357 @@ namespace AMMS.Infrastructure.Repositories
             {
                 var plateQty = Math.Max(numberOfPlates ?? 0, 1);
 
-                inputs.Add(new StageMaterialDto
-                {
-                    name = "Cuộn kẽm",
-                    code = "PLATE_INPUT",
-                    quantity = 1,
-                    unit = "cuộn"
-                });
+                inputs.Add(ProductionSHelper.BuildStageMaterial(
+                    name: "Cuộn kẽm",
+                    code: "PLATE_INPUT",
+                    estimatedQty: 1m,
+                    actualQty: null,
+                    unit: "cuộn"));
 
-                var output = new StageMaterialDto
-                {
-                    name = $"Bản kẽm",
-                    code = "RALO",
-                    quantity = plateQty,
-                    unit = "bản"
-                };
+                var outputEstimatedQty = plateQty;
+                var outputActualQty = stageActualQty.HasValue
+                    ? Math.Min(stageActualQty.Value, outputEstimatedQty)
+                    : (decimal?)null;
 
-                return (inputs, output, new StageOutputRef
-                {
-                    Name = output.name ?? "",
-                    Code = output.code,
-                    Unit = output.unit ?? "bản",
-                    Quantity = plateQty
-                });
+                var output = ProductionSHelper.BuildStageMaterial(
+                    name: "Bản kẽm",
+                    code: "RALO",
+                    estimatedQty: outputEstimatedQty,
+                    actualQty: outputActualQty,
+                    unit: "bản");
+
+                return (
+                    inputs,
+                    output,
+                    new StageOutputRef
+                    {
+                        Name = output.name ?? "",
+                        Code = output.code,
+                        Unit = output.unit,
+                        EstimatedQuantity = outputEstimatedQty,
+                        ActualQuantity = outputActualQty
+                    });
             }
 
             if (code == "CAT")
             {
-                inputs.Add(new StageMaterialDto
-                {
-                    name = resolvedPaperName,
-                    code = resolvedPaperCode,
-                    quantity = cutInputSheets,
-                    unit = "tờ"
-                });
+                inputs.Add(ProductionSHelper.BuildStageMaterial(
+                    name: resolvedPaperName,
+                    code: resolvedPaperCode,
+                    estimatedQty: cutInputSheetsEstimate,
+                    actualQty: null,
+                    unit: "tờ"));
 
-                var output = new StageMaterialDto
-                {
-                    name = $"Phôi giấy cắt",
-                    code = "CAT",
-                    quantity = cutOutputQty,
-                    unit = "sp"
-                };
+                var outputEstimatedQty = cutOutputEstimate;
+                var outputActualQty = stageActualQty.HasValue
+                    ? Math.Min(stageActualQty.Value, outputEstimatedQty)
+                    : (decimal?)null;
 
-                return (inputs, output, new StageOutputRef
-                {
-                    Name = output.name ?? "",
-                    Code = output.code,
-                    Unit = "sp",
-                    Quantity = cutOutputQty
-                });
+                var output = ProductionSHelper.BuildStageMaterial(
+                    name: "Phôi giấy cắt",
+                    code: "CAT",
+                    estimatedQty: outputEstimatedQty,
+                    actualQty: outputActualQty,
+                    unit: "sp");
+
+                return (
+                    inputs,
+                    output,
+                    new StageOutputRef
+                    {
+                        Name = output.name ?? "",
+                        Code = output.code,
+                        Unit = output.unit,
+                        EstimatedQuantity = outputEstimatedQty,
+                        ActualQuantity = outputActualQty
+                    });
             }
+
+            // input chính luôn lấy từ output công đoạn trước
+            var mainInputName = prevOutput?.Name ?? $"Bán thành phẩm trước {processName}";
+            var mainInputCode = prevOutput?.Code ?? "PREV";
+            var mainInputUnit = prevOutput?.Unit ?? "sp";
+
+            inputs.Add(ProductionSHelper.BuildStageMaterial(
+                name: mainInputName,
+                code: mainInputCode,
+                estimatedQty: prevEstimatedQty,
+                actualQty: prevActualQty,
+                unit: mainInputUnit));
 
             if (code == "IN")
             {
-                inputs.Add(new StageMaterialDto
-                {
-                    name = prevOutput?.Name ?? $"Phôi giấy cắt",
-                    code = prevOutput?.Code ?? "CAT",
-                    quantity = prevOutput?.Quantity ?? cutOutputQty,
-                    unit = prevOutput?.Unit ?? "sp"
-                });
-
                 if (!string.IsNullOrWhiteSpace(inkTypeNames))
                 {
-                    inputs.Add(new StageMaterialDto
-                    {
-                        name = $"Mực in ({inkTypeNames.Trim()})",
-                        code = "INK_TYPES",
-                        quantity = estInkWeightKg > 0 ? estInkWeightKg : 0,
-                        unit = "kg"
-                    });
+                    inputs.Add(ProductionSHelper.BuildStageMaterial(
+                        name: $"Mực in ({inkTypeNames.Trim()})",
+                        code: "INK_TYPES",
+                        estimatedQty: estInkWeightKg > 0 ? estInkWeightKg : 0m,
+                        actualQty: null,
+                        unit: "kg"));
                 }
 
                 if ((numberOfPlates ?? 0) > 0)
                 {
-                    inputs.Add(new StageMaterialDto
-                    {
-                        name = "Bản kẽm in",
-                        code = "PLATE",
-                        quantity = numberOfPlates.Value,
-                        unit = "bản"
-                    });
+                    inputs.Add(ProductionSHelper.BuildStageMaterial(
+                        name: "Bản kẽm in",
+                        code: "PLATE",
+                        estimatedQty: numberOfPlates.Value,
+                        actualQty: null,
+                        unit: "bản"));
                 }
 
-                var output = new StageMaterialDto
-                {
-                    name = $"Bán thành phẩm in",
-                    code = "IN",
-                    quantity = finalQty,
-                    unit = "sp"
-                };
+                var outputEstimatedQty = ProductionSHelper.CapEstimatedByPreviousOutput(
+                    prevOutput,
+                    ProductionSHelper.ResolveEstimatedOutputQty(code, detail, prevEstimatedQty));
 
-                return (inputs, output, new StageOutputRef
-                {
-                    Name = output.name ?? "",
-                    Code = output.code,
-                    Unit = "sp",
-                    Quantity = finalQty
-                });
+                var outputActualQty = ProductionSHelper.CapActualByPreviousOutput(prevOutput, stageActualQty);
+
+                var output = ProductionSHelper.BuildStageMaterial(
+                    name: "Bán thành phẩm in",
+                    code: "IN",
+                    estimatedQty: outputEstimatedQty,
+                    actualQty: outputActualQty,
+                    unit: "sp");
+
+                return (
+                    inputs,
+                    output,
+                    new StageOutputRef
+                    {
+                        Name = output.name ?? "",
+                        Code = output.code,
+                        Unit = output.unit,
+                        EstimatedQuantity = outputEstimatedQty,
+                        ActualQuantity = outputActualQty
+                    });
             }
 
             if (code == "PHU")
             {
                 var coatingDisplay = ProductionFlowHelper.ResolveCoatingDisplayName(coatingType);
 
-                inputs.Add(new StageMaterialDto
-                {
-                    name = prevOutput?.Name ?? $"Bán thành phẩm in",
-                    code = prevOutput?.Code ?? "IN",
-                    quantity = prevOutput?.Quantity ?? defaultProductQty,
-                    unit = prevOutput?.Unit ?? "sp"
-                });
+                inputs.Add(ProductionSHelper.BuildStageMaterial(
+                    name: coatingDisplay,
+                    code: string.IsNullOrWhiteSpace(coatingType) ? "COATING" : coatingType.Trim(),
+                    estimatedQty: 0m,
+                    actualQty: null,
+                    unit: "kg"));
 
-                inputs.Add(new StageMaterialDto
-                {
-                    name = coatingDisplay,
-                    code = string.IsNullOrWhiteSpace(coatingType) ? "COATING" : coatingType.Trim(),
-                    quantity = 0,
-                    unit = "kg"
-                });
+                var outputEstimatedQty = ProductionSHelper.CapEstimatedByPreviousOutput(
+                    prevOutput,
+                    ProductionSHelper.ResolveEstimatedOutputQty(code, detail, prevEstimatedQty));
 
-                var output = new StageMaterialDto
-                {
-                    name = $"Bán thành phẩm phủ",
-                    code = "PHU",
-                    quantity = finalQty,
-                    unit = "sp"
-                };
+                var outputActualQty = ProductionSHelper.CapActualByPreviousOutput(prevOutput, stageActualQty);
 
-                return (inputs, output, new StageOutputRef
-                {
-                    Name = output.name ?? "",
-                    Code = output.code,
-                    Unit = "sp",
-                    Quantity = finalQty
-                });
+                var output = ProductionSHelper.BuildStageMaterial(
+                    name: "Bán thành phẩm phủ",
+                    code: "PHU",
+                    estimatedQty: outputEstimatedQty,
+                    actualQty: outputActualQty,
+                    unit: "sp");
+
+                return (
+                    inputs,
+                    output,
+                    new StageOutputRef
+                    {
+                        Name = output.name ?? "",
+                        Code = output.code,
+                        Unit = output.unit,
+                        EstimatedQuantity = outputEstimatedQty,
+                        ActualQuantity = outputActualQty
+                    });
             }
 
             if (code == "CAN")
             {
-                inputs.Add(new StageMaterialDto
-                {
-                    name = prevOutput?.Name ?? $"Bán thành phẩm trước cán",
-                    code = prevOutput?.Code ?? "PHU",
-                    quantity = prevOutput?.Quantity ?? defaultProductQty,
-                    unit = prevOutput?.Unit ?? "sp"
-                });
+                inputs.Add(ProductionSHelper.BuildStageMaterial(
+                    name: "Màng cán",
+                    code: "MANG_CAN",
+                    estimatedQty: 0m,
+                    actualQty: null,
+                    unit: "kg"));
 
-                inputs.Add(new StageMaterialDto
-                {
-                    name = "Màng cán",
-                    code = "MANG_CAN",
-                    quantity = 0,
-                    unit = "kg"
-                });
+                var outputEstimatedQty = ProductionSHelper.CapEstimatedByPreviousOutput(
+                    prevOutput,
+                    ProductionSHelper.ResolveEstimatedOutputQty(code, detail, prevEstimatedQty));
 
-                var output = new StageMaterialDto
-                {
-                    name = $"Bán thành phẩm đã cán",
-                    code = "CAN",
-                    quantity = finalQty,
-                    unit = "sp"
-                };
+                var outputActualQty = ProductionSHelper.CapActualByPreviousOutput(prevOutput, stageActualQty);
 
-                return (inputs, output, new StageOutputRef
-                {
-                    Name = output.name ?? "",
-                    Code = output.code,
-                    Unit = "sp",
-                    Quantity = finalQty
-                });
+                var output = ProductionSHelper.BuildStageMaterial(
+                    name: "Bán thành phẩm đã cán",
+                    code: "CAN",
+                    estimatedQty: outputEstimatedQty,
+                    actualQty: outputActualQty,
+                    unit: "sp");
+
+                return (
+                    inputs,
+                    output,
+                    new StageOutputRef
+                    {
+                        Name = output.name ?? "",
+                        Code = output.code,
+                        Unit = output.unit,
+                        EstimatedQuantity = outputEstimatedQty,
+                        ActualQuantity = outputActualQty
+                    });
             }
 
             if (code == "BOI")
             {
-                inputs.Add(new StageMaterialDto
-                {
-                    name = prevOutput?.Name ?? $"Bán thành phẩm trước bồi",
-                    code = prevOutput?.Code ?? "IN",
-                    quantity = prevOutput?.Quantity ?? defaultProductQty,
-                    unit = prevOutput?.Unit ?? "sp"
-                });
+                inputs.Add(ProductionSHelper.BuildStageMaterial(
+                    name: string.IsNullOrWhiteSpace(waveType) ? "Sóng carton" : waveType.Trim(),
+                    code: string.IsNullOrWhiteSpace(waveType) ? "WAVE" : waveType.Trim(),
+                    estimatedQty: 0m,
+                    actualQty: null,
+                    unit: "tờ"));
 
-                inputs.Add(new StageMaterialDto
-                {
-                    name = string.IsNullOrWhiteSpace(waveType) ? "Sóng carton" : $"{waveType.Trim()}",
-                    code = string.IsNullOrWhiteSpace(waveType) ? "WAVE" : waveType.Trim(),
-                    quantity = 0,
-                    unit = "tờ"
-                });
+                inputs.Add(ProductionSHelper.BuildStageMaterial(
+                    name: "Keo bồi",
+                    code: "KEO_BOI",
+                    estimatedQty: 0m,
+                    actualQty: null,
+                    unit: "kg"));
 
-                inputs.Add(new StageMaterialDto
-                {
-                    name = "Keo bồi",
-                    code = "KEO_BOI",
-                    quantity = 0,
-                    unit = "kg"
-                });
+                var outputEstimatedQty = ProductionSHelper.CapEstimatedByPreviousOutput(
+                    prevOutput,
+                    ProductionSHelper.ResolveEstimatedOutputQty(code, detail, prevEstimatedQty));
 
-                var output = new StageMaterialDto
-                {
-                    name = $"Bán thành phẩm đã bồi",
-                    code = "BOI",
-                    quantity = finalQty,
-                    unit = "sp"
-                };
+                var outputActualQty = ProductionSHelper.CapActualByPreviousOutput(prevOutput, stageActualQty);
 
-                return (inputs, output, new StageOutputRef
-                {
-                    Name = output.name ?? "",
-                    Code = output.code,
-                    Unit = "sp",
-                    Quantity = finalQty
-                });
+                var output = ProductionSHelper.BuildStageMaterial(
+                    name: "Bán thành phẩm đã bồi",
+                    code: "BOI",
+                    estimatedQty: outputEstimatedQty,
+                    actualQty: outputActualQty,
+                    unit: "sp");
+
+                return (
+                    inputs,
+                    output,
+                    new StageOutputRef
+                    {
+                        Name = output.name ?? "",
+                        Code = output.code,
+                        Unit = output.unit,
+                        EstimatedQuantity = outputEstimatedQty,
+                        ActualQuantity = outputActualQty
+                    });
             }
 
             if (code == "BE")
             {
-                inputs.Add(new StageMaterialDto
-                {
-                    name = prevOutput?.Name ?? $"Bán thành phẩm trước bế",
-                    code = prevOutput?.Code ?? "PREV",
-                    quantity = prevOutput?.Quantity ?? defaultProductQty,
-                    unit = prevOutput?.Unit ?? "sp"
-                });
+                var outputEstimatedQty = ProductionSHelper.CapEstimatedByPreviousOutput(
+                    prevOutput,
+                    ProductionSHelper.ResolveEstimatedOutputQty(code, detail, prevEstimatedQty));
 
-                var output = new StageMaterialDto
-                {
-                    name = $"Bán thành phẩm đã bế",
-                    code = "BE",
-                    quantity = finalQty,
-                    unit = "sp"
-                };
+                var outputActualQty = ProductionSHelper.CapActualByPreviousOutput(prevOutput, stageActualQty);
 
-                return (inputs, output, new StageOutputRef
-                {
-                    Name = output.name ?? "",
-                    Code = output.code,
-                    Unit = "sp",
-                    Quantity = finalQty
-                });
+                var output = ProductionSHelper.BuildStageMaterial(
+                    name: "Bán thành phẩm đã bế",
+                    code: "BE",
+                    estimatedQty: outputEstimatedQty,
+                    actualQty: outputActualQty,
+                    unit: "sp");
+
+                return (
+                    inputs,
+                    output,
+                    new StageOutputRef
+                    {
+                        Name = output.name ?? "",
+                        Code = output.code,
+                        Unit = output.unit,
+                        EstimatedQuantity = outputEstimatedQty,
+                        ActualQuantity = outputActualQty
+                    });
             }
 
             if (code == "DUT")
             {
-                inputs.Add(new StageMaterialDto
-                {
-                    name = prevOutput?.Name ?? $"Bán thành phẩm trước dứt",
-                    code = prevOutput?.Code ?? "PREV",
-                    quantity = prevOutput?.Quantity ?? defaultProductQty,
-                    unit = prevOutput?.Unit ?? "sp"
-                });
+                var outputEstimatedQty = ProductionSHelper.CapEstimatedByPreviousOutput(
+                    prevOutput,
+                    ProductionSHelper.ResolveEstimatedOutputQty(code, detail, prevEstimatedQty));
 
-                var output = new StageMaterialDto
-                {
-                    name = $"Bán thành phẩm đã dứt",
-                    code = "DUT",
-                    quantity = finalQty,
-                    unit = "sp"
-                };
+                var outputActualQty = ProductionSHelper.CapActualByPreviousOutput(prevOutput, stageActualQty);
 
-                return (inputs, output, new StageOutputRef
-                {
-                    Name = output.name ?? "",
-                    Code = output.code,
-                    Unit = "sp",
-                    Quantity = finalQty
-                });
+                var output = ProductionSHelper.BuildStageMaterial(
+                    name: "Bán thành phẩm đã dứt",
+                    code: "DUT",
+                    estimatedQty: outputEstimatedQty,
+                    actualQty: outputActualQty,
+                    unit: "sp");
+
+                return (
+                    inputs,
+                    output,
+                    new StageOutputRef
+                    {
+                        Name = output.name ?? "",
+                        Code = output.code,
+                        Unit = output.unit,
+                        EstimatedQuantity = outputEstimatedQty,
+                        ActualQuantity = outputActualQty
+                    });
             }
 
             if (code == "DAN")
             {
-                inputs.Add(new StageMaterialDto
-                {
-                    name = prevOutput?.Name ?? $"Bán thành phẩm trước dán",
-                    code = prevOutput?.Code ?? "PREV",
-                    quantity = prevOutput?.Quantity ?? defaultProductQty,
-                    unit = prevOutput?.Unit ?? "sp"
-                });
+                var outputEstimatedQty = ProductionSHelper.CapEstimatedByPreviousOutput(
+                    prevOutput,
+                    ProductionSHelper.ResolveEstimatedOutputQty(code, detail, prevEstimatedQty));
 
-                var output = new StageMaterialDto
-                {
-                    name = $"Thành phẩm hoàn chỉnh {productName}",
-                    code = "DAN",
-                    quantity = finalQty,
-                    unit = "sp"
-                };
+                var outputActualQty = ProductionSHelper.CapActualByPreviousOutput(prevOutput, stageActualQty);
 
-                return (inputs, output, new StageOutputRef
-                {
-                    Name = output.name ?? "",
-                    Code = output.code,
-                    Unit = "sp",
-                    Quantity = finalQty
-                });
+                var output = ProductionSHelper.BuildStageMaterial(
+                    name: $"Thành phẩm hoàn chỉnh {productName}",
+                    code: "DAN",
+                    estimatedQty: outputEstimatedQty,
+                    actualQty: outputActualQty,
+                    unit: "sp");
+
+                return (
+                    inputs,
+                    output,
+                    new StageOutputRef
+                    {
+                        Name = output.name ?? "",
+                        Code = output.code,
+                        Unit = output.unit,
+                        EstimatedQuantity = outputEstimatedQty,
+                        ActualQuantity = outputActualQty
+                    });
             }
 
-            inputs.Add(new StageMaterialDto
+            // fallback
             {
-                name = prevOutput?.Name ?? $"Bán thành phẩm trước {processName}",
-                code = prevOutput?.Code ?? "PREV",
-                quantity = prevOutput?.Quantity ?? defaultProductQty,
-                unit = prevOutput?.Unit ?? "sp"
-            });
+                var outputEstimatedQty = ProductionSHelper.CapEstimatedByPreviousOutput(
+                    prevOutput,
+                    ProductionSHelper.ResolveEstimatedOutputQty(code, detail, prevEstimatedQty));
 
-            var fallback = new StageMaterialDto
-            {
-                name = $"Bán thành phẩm sau {processName}",
-                code = processCode,
-                quantity = finalQty,
-                unit = "sp"
-            };
+                var outputActualQty = ProductionSHelper.CapActualByPreviousOutput(prevOutput, stageActualQty);
 
-            return (inputs, fallback, new StageOutputRef
-            {
-                Name = fallback.name ?? "",
-                Code = fallback.code,
-                Unit = fallback.unit ?? "sp",
-                Quantity = finalQty
-            });
+                var output = ProductionSHelper.BuildStageMaterial(
+                    name: $"Bán thành phẩm sau {processName}",
+                    code: processCode,
+                    estimatedQty: outputEstimatedQty,
+                    actualQty: outputActualQty,
+                    unit: "sp");
+
+                return (
+                    inputs,
+                    output,
+                    new StageOutputRef
+                    {
+                        Name = output.name ?? "",
+                        Code = output.code,
+                        Unit = output.unit,
+                        EstimatedQuantity = outputEstimatedQty,
+                        ActualQuantity = outputActualQty
+                    });
+            }
         }
 
         private static List<TaskLogDto> LogsByTaskId(List<TaskLogDto> all, int taskId)
