@@ -1,4 +1,5 @@
 ﻿using AMMS.Application.Interfaces;
+using AMMS.Shared.DTOs.Materials;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AMMS.API.Controllers
@@ -75,6 +76,43 @@ namespace AMMS.API.Controllers
         {
             var glue = await _materialService.GetAllPhuGlueTypeAsync();
             return Ok(glue);
+        }
+        [HttpPost("{materialId}/increase-stock")]
+        public async Task<IActionResult> IncreaseStock(int materialId, [FromBody] UpdateStockQtyDto dto)
+        {
+            try
+            {
+                var result = await _materialService.IncreaseStockAsync(materialId, dto.Quantity);
+                if (!result)
+                    return NotFound(new { message = "Không tìm thấy material." });
+
+                return Ok(new { message = "Tăng stock_qty thành công." });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("{materialId}/decrease-stock")]
+        public async Task<IActionResult> DecreaseStock(int materialId, [FromBody] UpdateStockQtyDto dto)
+        {
+            try
+            {
+                var result = await _materialService.DecreaseStockAsync(materialId, dto.Quantity);
+                if (!result)
+                    return NotFound(new { message = "Không tìm thấy material." });
+
+                return Ok(new { message = "Giảm stock_qty thành công." });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
         }
     }
 }

@@ -16,5 +16,7 @@ namespace AMMS.Application.Interfaces
         Task<MaterialTypeGlueDto> GetAllBoiGlueTypeAsync();
         Task<MaterialTypeGlueDto> GetAllDanGlueTypeAsync();
         Task<MaterialTypeGlueDto> GetAllPhuGlueTypeAsync();
+        Task<bool> IncreaseStockAsync(int materialId, decimal quantity);
+        Task<bool> DecreaseStockAsync(int materialId, decimal quantity);
     }
 }
