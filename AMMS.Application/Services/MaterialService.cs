@@ -64,5 +64,20 @@ namespace AMMS.Application.Services
         public Task<PagedResultLite<MaterialShortageDto>> GetShortageForAllOrdersPagedAsync(
             int page, int pageSize, CancellationToken ct = default) =>
             _materialRepository.GetShortageForAllOrdersPagedAsync(page, pageSize, ct);
+        public async Task<bool> IncreaseStockAsync(int materialId, decimal quantity)
+        {
+            if (quantity <= 0)
+                throw new ArgumentException("Quantity phải lớn hơn 0.");
+
+            return await _materialRepository.IncreaseStockAsync(materialId, quantity);
+        }
+
+        public async Task<bool> DecreaseStockAsync(int materialId, decimal quantity)
+        {
+            if (quantity <= 0)
+                throw new ArgumentException("Quantity phải lớn hơn 0.");
+
+            return await _materialRepository.DecreaseStockAsync(materialId, quantity);
+        }
     }
 }
