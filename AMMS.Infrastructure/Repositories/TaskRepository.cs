@@ -164,35 +164,67 @@ namespace AMMS.Infrastructure.Repositories
                 .Include(x => x.process)
                 .FirstOrDefaultAsync(x => x.task_id == currentTaskId, ct);
 
-            if (current == null || !current.prod_id.HasValue || !current.seq_num.HasValue)
+            if (current == null || !current.prod_id.HasValue)
                 return false;
 
-            var prodId = current.prod_id.Value;
-            var currentSeq = current.seq_num.Value;
+            var prodTasks = await _db.tasks
+                .Include(x => x.process)
+                .Where(x => x.prod_id == current.prod_id.Value)
+                .OrderBy(x => x.seq_num)
+                .ThenBy(x => x.task_id)
+                .ToListAsync(ct);
 
-            var hasOtherReady = await _db.tasks
-                .AnyAsync(x =>
-                    x.prod_id == prodId &&
-                    x.task_id != currentTaskId &&
-                    x.status == "Ready", ct);
+            if (prodTasks.Count == 0)
+                return false;
+
+            var hasOtherReady = prodTasks.Any(x =>
+                x.task_id != currentTaskId &&
+                string.Equals(x.status, "Ready", StringComparison.OrdinalIgnoreCase));
 
             if (hasOtherReady)
                 return false;
 
-            var next = await _db.tasks
+            var hasInitialParallel = prodTasks.Any(x =>
+                ProductionFlowHelper.IsInitialParallel(x.process?.process_code));
+
+            if (hasInitialParallel)
+            {
+                var unfinishedInitialParallel = prodTasks.Any(x =>
+                    ProductionFlowHelper.IsInitialParallel(x.process?.process_code) &&
+                    !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase));
+
+                if (unfinishedInitialParallel)
+                    return false;
+            }
+
+            var currentSeq = current.seq_num ?? int.MinValue;
+
+            var next = prodTasks
                 .Where(x =>
-                    x.prod_id == prodId &&
-                    x.seq_num > currentSeq &&
-                    x.status != "Finished")
-                .OrderBy(x => x.seq_num)
+                    x.task_id != currentTaskId &&
+                    !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase) &&
+                    x.end_time == null &&
+                    (x.seq_num ?? int.MaxValue) > currentSeq)
+                .OrderBy(x => x.seq_num ?? int.MaxValue)
                 .ThenBy(x => x.task_id)
-                .FirstOrDefaultAsync(ct);
+                .FirstOrDefault();
 
             if (next == null)
                 return false;
 
+            var nextSeq = next.seq_num ?? int.MaxValue;
+
+            var hasPreviousUnfinished = prodTasks.Any(x =>
+                x.task_id != next.task_id &&
+                (x.seq_num ?? int.MaxValue) < nextSeq &&
+                !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase));
+
+            if (hasPreviousUnfinished)
+                return false;
+
             next.status = "Ready";
             next.start_time ??= now;
+
             await TryAllocateMachineWhenReadyAsync(next, ct);
 
             return true;

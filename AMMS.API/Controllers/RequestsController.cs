@@ -1215,67 +1215,6 @@ CancellationToken ct)
             }
         }
 
-        private async Task EnsureProductionAndTasksCreatedAsync(int orderId, CancellationToken ct)
-        {
-            var req = await _db.order_requests
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.order_id == orderId, ct);
-
-            if (req == null)
-                throw new InvalidOperationException("Order request not found for this order");
-
-            var ord = await _db.orders
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.order_id == orderId, ct);
-
-            if (ord == null)
-                throw new InvalidOperationException("Order not found");
-
-            if (!ord.layout_confirmed)
-                throw new InvalidOperationException("Layout has not been confirmed yet");
-
-            var prod = await _db.productions
-                .AsNoTracking()
-                .Where(p => p.order_id == orderId && p.end_date == null)
-                .OrderByDescending(p => p.prod_id)
-                .FirstOrDefaultAsync(ct);
-
-            var hasTasks = prod != null &&
-                           await _db.tasks.AsNoTracking().AnyAsync(t => t.prod_id == prod.prod_id, ct);
-
-            if (prod != null && hasTasks)
-                return;
-
-            var productTypeId = await _db.product_types
-                .Where(x => x.code == req.product_type)
-                .Select(x => x.product_type_id)
-                .FirstOrDefaultAsync(ct);
-
-            if (productTypeId <= 0)
-                throw new InvalidOperationException("product_type invalid (cannot map product_type_id)");
-
-            var item = await _db.order_items
-                .AsNoTracking()
-                .Where(x => x.order_id == orderId)
-                .OrderBy(x => x.item_id)
-                .FirstOrDefaultAsync(ct);
-
-            await _schedulingService.ScheduleOrderAsync(
-                orderId: orderId,
-                productTypeId: productTypeId,
-                productionProcessCsv: item?.production_process,
-                managerId: 3
-            );
-
-            var trackedOrder = await _db.orders.FirstOrDefaultAsync(x => x.order_id == orderId, ct);
-            if (trackedOrder != null &&
-                string.Equals(trackedOrder.status, "LayoutPending", StringComparison.OrdinalIgnoreCase))
-            {
-                trackedOrder.status = "Scheduled";
-                await _db.SaveChangesAsync(ct);
-            }
-        }
-
         [HttpPost("upload-print-ready-file/{requestId:int}")]
         [Consumes("multipart/form-data")]
         [RequestSizeLimit(200_000_000)]

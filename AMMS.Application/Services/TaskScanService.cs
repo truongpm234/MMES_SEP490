@@ -112,21 +112,8 @@ namespace AMMS.Application.Services
                 await _logRepo.AddAsync(log);
                 await _taskRepo.SaveChangesAsync(innerCt);
 
-                bool promotedNext = false;
-
-                if (hasRalo)
-                {
-                    if (ProductionFlowHelper.IsRalo(currentCode))
-                    {
-                        promotedNext = await _taskRepo.PromoteAllTasksAfterRaloAsync(t.prod_id.Value, now, innerCt);
-                        await _taskRepo.SaveChangesAsync(innerCt);
-                    }
-                }
-                else
-                {
-                    promotedNext = await _taskRepo.PromoteNextTaskToReadyAsync(t.task_id, now, innerCt);
-                    await _taskRepo.SaveChangesAsync(innerCt);
-                }
+                bool promotedNext = await _taskRepo.PromoteNextTaskToReadyAsync(t.task_id, now, innerCt);
+                await _taskRepo.SaveChangesAsync(innerCt);
 
                 if (t.prod_id.HasValue)
                 {
