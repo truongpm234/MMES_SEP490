@@ -1002,11 +1002,7 @@ namespace AMMS.Application.Services
                 "KEO_BOI");
             var laminationMaterial = await ResolveMaterialByCodesAsync(
                 "MANG_CAN",
-                "LAMINATION");
-            var plateMaterial = await ResolveMaterialByCodesAsync(
-                "PLATE",
-                "BAN_KEM",
-                "KEM");
+                "LAMINATION");           
 
             var bomLines = new List<bom>();
 
@@ -1079,16 +1075,6 @@ namespace AMMS.Application.Services
                 "Màng cán",
                 "kg",
                 est.lamination_weight_kg);
-
-            if ((req.number_of_plates ?? 0) > 0)
-            {
-                AddBomLine(
-                    plateMaterial,
-                    "PLATE",
-                    "Bản kẽm",
-                    "bản",
-                    req.number_of_plates.Value);
-            }
 
             foreach (var line in bomLines)
             {

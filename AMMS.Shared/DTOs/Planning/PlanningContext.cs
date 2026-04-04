@@ -25,5 +25,7 @@ namespace AMMS.Shared.DTOs.Planning
         public DateTime? DesiredDeliveryDate { get; init; }
         public DateTime QueueDateTime { get; init; }
         public int QueueOrderKey { get; init; }
+        public int WaveSheetsRequired { get; set; }
+        public int WaveSheetsUsed { get; set; }
     }
 }

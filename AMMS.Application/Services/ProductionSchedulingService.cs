@@ -466,7 +466,9 @@ namespace AMMS.Application.Services
                 DesiredDeliveryDate = row.request_delivery_date ?? row.order_delivery_date ?? est?.desired_delivery_date,
 
                 QueueDateTime = row.order_date ?? AppTime.NowVnUnspecified(),
-                QueueOrderKey = row.order_id
+                QueueOrderKey = row.order_id,
+                WaveSheetsRequired = est?.wave_sheets_required ?? 0,
+                WaveSheetsUsed = est?.wave_sheets_used ?? 0,
             };
         }
 
@@ -510,7 +512,8 @@ namespace AMMS.Application.Services
                 TotalAreaM2 = est?.total_area_m2 ?? 0m,
                 RawProductionProcessCsv = est?.production_processes,
                 DesiredDeliveryDate = req.delivery_date ?? est?.desired_delivery_date,
-
+                WaveSheetsRequired = est?.wave_sheets_required ?? 0,
+                WaveSheetsUsed = est?.wave_sheets_used ?? 0,
                 QueueDateTime = req.order_request_date ?? AppTime.NowVnUnspecified(),
                 QueueOrderKey = req.order_request_id
             };
@@ -750,6 +753,9 @@ namespace AMMS.Application.Services
 
             if (pcode == "DAN")
                 return SafeInt(ctx.OrderQty, 1);
+
+            if (pcode == "BOI" && ctx.WaveSheetsUsed > 0)
+                return ctx.WaveSheetsUsed;
 
             if (ctx.SheetsTotal > 0) return ctx.SheetsTotal;
             if (ctx.SheetsRequired > 0) return ctx.SheetsRequired;

@@ -963,21 +963,21 @@ namespace AMMS.Infrastructure.Repositories
                 inputs.Add(ProductionSHelper.BuildStageMaterial(
                     name: resolvedPaperName,
                     code: resolvedPaperCode,
-                    estimatedQty: cutInputSheetsEstimate,
+                    estimatedQty: sheetsTotal,
                     actualQty: null,
                     unit: "tờ"));
 
-                var outputEstimatedQty = cutOutputEstimate;
+                var outputEstimatedQty = sheetsTotal;
                 var outputActualQty = stageActualQty.HasValue
                     ? Math.Min(stageActualQty.Value, outputEstimatedQty)
                     : (decimal?)null;
 
                 var output = ProductionSHelper.BuildStageMaterial(
-                    name: "Phôi giấy cắt",
-                    code: "CAT",
+                    name: "Tờ in khổ máy",
+                    code: "PRESS_SHEET",
                     estimatedQty: outputEstimatedQty,
                     actualQty: outputActualQty,
-                    unit: "sp");
+                    unit: "tờ");
 
                 return (
                     inputs,
@@ -1037,7 +1037,7 @@ namespace AMMS.Infrastructure.Repositories
                     code: "IN",
                     estimatedQty: outputEstimatedQty,
                     actualQty: outputActualQty,
-                    unit: "sp");
+                    unit: "tờ");
 
                 return (
                     inputs,
@@ -1074,7 +1074,7 @@ namespace AMMS.Infrastructure.Repositories
                     code: "PHU",
                     estimatedQty: outputEstimatedQty,
                     actualQty: outputActualQty,
-                    unit: "sp");
+                    unit: "tờ");
 
                 return (
                     inputs,
@@ -1109,7 +1109,7 @@ namespace AMMS.Infrastructure.Repositories
                     code: "CAN",
                     estimatedQty: outputEstimatedQty,
                     actualQty: outputActualQty,
-                    unit: "sp");
+                    unit: "tờ");
 
                 return (
                     inputs,
@@ -1151,7 +1151,7 @@ namespace AMMS.Infrastructure.Repositories
                     code: "BOI",
                     estimatedQty: outputEstimatedQty,
                     actualQty: outputActualQty,
-                    unit: "sp");
+                    unit: "tờ");
 
                 return (
                     inputs,
@@ -1179,7 +1179,7 @@ namespace AMMS.Infrastructure.Repositories
                     code: "BE",
                     estimatedQty: outputEstimatedQty,
                     actualQty: outputActualQty,
-                    unit: "sp");
+                    unit: "tờ");
 
                 return (
                     inputs,
@@ -1207,7 +1207,7 @@ namespace AMMS.Infrastructure.Repositories
                     code: "DUT",
                     estimatedQty: outputEstimatedQty,
                     actualQty: outputActualQty,
-                    unit: "sp");
+                    unit: "tờ");
 
                 return (
                     inputs,
@@ -1235,7 +1235,7 @@ namespace AMMS.Infrastructure.Repositories
                     code: "DAN",
                     estimatedQty: outputEstimatedQty,
                     actualQty: outputActualQty,
-                    unit: "sp");
+                    unit: "tờ");
 
                 return (
                     inputs,
@@ -1263,7 +1263,7 @@ namespace AMMS.Infrastructure.Repositories
                     code: processCode,
                     estimatedQty: outputEstimatedQty,
                     actualQty: outputActualQty,
-                    unit: "sp");
+                    unit: "tờ");
 
                 return (
                     inputs,
