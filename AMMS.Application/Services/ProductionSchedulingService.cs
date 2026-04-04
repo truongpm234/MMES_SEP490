@@ -220,7 +220,13 @@ namespace AMMS.Application.Services
                           && t.planned_start_time != null
                           && t.planned_start_time <= now
                           && (o == null || o.is_enough != false)
-                    orderby o.delivery_date, p.planned_start_date, t.planned_start_time, t.seq_num, t.task_id
+                    orderby
+    (o != null ? o.order_date : DateTime.MaxValue),
+    (o != null ? o.order_id : int.MaxValue),
+    p.planned_start_date,
+    t.planned_start_time,
+    t.seq_num,
+    t.task_id
                     select t
                 ).ToListAsync(ct);
 
@@ -374,10 +380,10 @@ namespace AMMS.Application.Services
         }
 
         private async Task<PlanningContext?> BuildPlanningContextByOrderIdAsync(
-            int orderId,
-            int productTypeId,
-            string? rawProductionProcessCsv,
-            CancellationToken ct)
+    int orderId,
+    int productTypeId,
+    string? rawProductionProcessCsv,
+    CancellationToken ct)
         {
             var row = await (
                 from o in _db.orders.AsNoTracking()
@@ -405,6 +411,7 @@ namespace AMMS.Application.Services
                 select new
                 {
                     order_id = o.order_id,
+                    order_date = o.order_date,
                     order_delivery_date = o.delivery_date,
                     order_request_id = (int?)r.order_request_id,
                     accepted_estimate_id = (int?)r.accepted_estimate_id,
@@ -449,7 +456,10 @@ namespace AMMS.Application.Services
                         : (!string.IsNullOrWhiteSpace(row.first_item_process)
                             ? row.first_item_process
                             : est?.production_processes),
-                DesiredDeliveryDate = row.request_delivery_date ?? row.order_delivery_date ?? est?.desired_delivery_date
+                DesiredDeliveryDate = row.request_delivery_date ?? row.order_delivery_date ?? est?.desired_delivery_date,
+
+                QueueDateTime = row.order_date ?? AppTime.NowVnUnspecified(),
+                QueueOrderKey = row.order_id
             };
         }
 
@@ -492,7 +502,10 @@ namespace AMMS.Application.Services
                 HeightMm = req.product_height_mm,
                 TotalAreaM2 = est?.total_area_m2 ?? 0m,
                 RawProductionProcessCsv = est?.production_processes,
-                DesiredDeliveryDate = req.delivery_date ?? est?.desired_delivery_date
+                DesiredDeliveryDate = req.delivery_date ?? est?.desired_delivery_date,
+
+                QueueDateTime = req.order_request_date ?? AppTime.NowVnUnspecified(),
+                QueueOrderKey = req.order_request_id
             };
         }
 
@@ -537,65 +550,39 @@ namespace AMMS.Application.Services
                 ctx.RawProductionProcessCsv);
 
             var normalizedCsv = ProductionProcessSelectionHelper.BuildCsv(steps, x => x.process_code);
-
             var normalizedNow = _cal.NormalizeStart(now);
 
-            var normalAnchor = EstimateInitialPlanningAnchor(ctx, normalizedNow, steps.Count);
+            // neo thời gian sớm nhất theo logic nội bộ hiện có
+            var baseAnchor = EstimateInitialPlanningAnchor(ctx, normalizedNow, steps.Count);
 
-            DateTime earliestAnchor;
-            DateTime? finishDeadline = null;
+            // neo FIFO: đơn cũ phải xếp trước đơn mới
+            var fifoAnchor = await ResolveQueueAnchorAsync(ctx, baseAnchor, ct);
 
-            if (ctx.DesiredDeliveryDate.HasValue)
-            {
-                finishDeadline = ResolveFinishDeadline(ctx.DesiredDeliveryDate.Value);
-
-                var urgentAnchor = _cal.NormalizeStart(
-                    normalizedNow.AddMinutes(Math.Max(0, _opt.UrgentLeadFloorMinutes)));
-
-                earliestAnchor = normalAnchor > finishDeadline.Value
-                    ? urgentAnchor
-                    : normalAnchor;
-            }
-            else
-            {
-                earliestAnchor = normalAnchor;
-            }
-
-            var earliestPlan = await BuildStagePlansFromAnchorAsync(
+            var plan = await BuildStagePlansFromAnchorAsync(
                 ctx,
-                earliestAnchor,
+                fifoAnchor,
                 steps,
                 normalizedCsv,
                 ct);
 
-            if (!finishDeadline.HasValue || earliestPlan.Stages.Count == 0)
-                return earliestPlan;
-
-            var earliestFinish = earliestPlan.Stages.Max(x => x.PlannedEnd);
-
-            if (earliestFinish > finishDeadline.Value)
+            if (ctx.DesiredDeliveryDate.HasValue && plan.Stages.Count > 0)
             {
-                _logger.LogWarning(
-                    "Schedule late even from earliest feasible anchor. OrderId={OrderId}, OrderRequestId={OrderRequestId}, EarliestAnchor={EarliestAnchor}, EstimatedFinish={EstimatedFinish}, Deadline={Deadline}",
-                    ctx.OrderId,
-                    ctx.OrderRequestId,
-                    earliestAnchor,
-                    earliestFinish,
-                    finishDeadline.Value);
+                var finishDeadline = ResolveFinishDeadline(ctx.DesiredDeliveryDate.Value);
+                var estimatedFinish = plan.Stages.Max(x => x.PlannedEnd);
 
-                return earliestPlan;
+                if (estimatedFinish > finishDeadline)
+                {
+                    _logger.LogWarning(
+                        "FIFO scheduling may cause lateness. OrderId={OrderId}, RequestId={RequestId}, Anchor={Anchor}, EstimatedFinish={EstimatedFinish}, Deadline={Deadline}",
+                        ctx.OrderId,
+                        ctx.OrderRequestId,
+                        fifoAnchor,
+                        estimatedFinish,
+                        finishDeadline);
+                }
             }
 
-            var latestOnTimePlan = await FindLatestOnTimePlanAsync(
-                ctx,
-                steps,
-                normalizedCsv,
-                earliestAnchor,
-                finishDeadline.Value,
-                earliestPlan,
-                ct);
-
-            return latestOnTimePlan ?? earliestPlan;
+            return plan;
         }
 
         private async Task<List<machine>> GetCandidateMachinesAsync(
@@ -1111,6 +1098,57 @@ namespace AMMS.Application.Services
         {
             public machine Machine { get; init; } = null!;
             public List<DateTime> LaneAvailableAt { get; init; } = new();
+        }
+        private async Task<DateTime> ResolveQueueAnchorAsync(
+    PlanningContext ctx,
+    DateTime proposedAnchor,
+    CancellationToken ct)
+        {
+            if (!_opt.enforce_fifo_by_order_date)
+                return proposedAnchor;
+
+            if (!ctx.OrderId.HasValue || ctx.OrderId.Value <= 0)
+                return proposedAnchor;
+
+            var currentOrderId = ctx.OrderId.Value;
+            var currentOrderDate = DateTime.SpecifyKind(ctx.QueueDateTime, DateTimeKind.Unspecified);
+
+            var olderQueueTails = await (
+                from pr in _db.productions.AsNoTracking()
+                join o in _db.orders.AsNoTracking() on pr.order_id equals o.order_id
+                where pr.order_id != null
+                      && o.order_id != currentOrderId
+                      && (
+                            o.order_date < currentOrderDate ||
+                            (o.order_date == currentOrderDate && o.order_id < currentOrderId)
+                         )
+                let lastTaskEnd = _db.tasks.AsNoTracking()
+                    .Where(t => t.prod_id == pr.prod_id)
+                    .Select(t => (DateTime?)t.planned_end_time ?? t.end_time)
+                    .OrderByDescending(x => x)
+                    .FirstOrDefault()
+                select new
+                {
+                    queue_tail = lastTaskEnd
+                                 ?? pr.planned_start_date
+                                 ?? pr.actual_start_date
+                                 ?? pr.created_at
+                }
+            ).ToListAsync(ct);
+
+            var maxOlderTail = olderQueueTails
+                .Where(x => x.queue_tail.HasValue)
+                .Select(x => x.queue_tail!.Value)
+                .DefaultIfEmpty(DateTime.MinValue)
+                .Max();
+
+            if (maxOlderTail == DateTime.MinValue)
+                return proposedAnchor;
+
+            var gapMinutes = Math.Max(0, _opt.order_gap_minutes);
+            var fifoAnchor = _cal.NormalizeStart(maxOlderTail.AddMinutes(gapMinutes));
+
+            return fifoAnchor > proposedAnchor ? fifoAnchor : proposedAnchor;
         }
 
         private sealed class StagePlanDraft

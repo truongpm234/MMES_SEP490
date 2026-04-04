@@ -1152,8 +1152,8 @@ namespace AMMS.API.Controllers
         }
         [HttpPut("designer-confirm-layout")]
         public async Task<IActionResult> DesignerConfirmLayout(
-    [FromBody] ConfirmLayoutRequestDto dto,
-    CancellationToken ct)
+[FromBody] ConfirmLayoutRequestDto dto,
+CancellationToken ct)
         {
             try
             {
@@ -1183,30 +1183,26 @@ namespace AMMS.API.Controllers
                     if (ord == null)
                         throw new InvalidOperationException("Order not found");
 
-                    if (!ord.layout_confirmed)
+                    ord.layout_confirmed = true;
+
+                    if (string.IsNullOrWhiteSpace(ord.status) ||
+                        string.Equals(ord.status, "LayoutPending", StringComparison.OrdinalIgnoreCase))                     
                     {
-                        ord.layout_confirmed = true;
-
-                        if (string.IsNullOrWhiteSpace(ord.status) ||
-                            string.Equals(ord.status, "LayoutPending", StringComparison.OrdinalIgnoreCase))
-                        {
-                            ord.status = "Scheduled";
-                        }
-
-                        await _db.SaveChangesAsync(ct);
+                        ord.status = "Scheduled";
                     }
 
+                    await _db.SaveChangesAsync(ct);
                     await tx.CommitAsync(ct);
                 });
 
-                await EnsureProductionAndTasksCreatedAsync(orderId, ct);
+                _service.QueueRelease(orderId);
 
-                return Ok(new
+                return Accepted(new
                 {
                     ok = true,
                     request_id = dto.request_id,
                     order_id = orderId,
-                    message = "Designer confirmed layout. Production flow released successfully."
+                    message = "Designer confirmed layout. Production release started in background."
                 });
             }
             catch (Exception ex)
