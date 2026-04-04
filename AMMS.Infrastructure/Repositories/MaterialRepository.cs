@@ -282,5 +282,29 @@ namespace AMMS.Infrastructure.Repositories
             response.MostStockGlueNames = paperMaxStockProduct;
             return response;
         }
+
+        public async Task<bool> IncreaseStockAsync(int materialId, decimal quantity)
+        {
+            var material = await _db.materials.FirstOrDefaultAsync(x => x.material_id == materialId);
+            if (material == null) return false;
+
+            material.stock_qty = (material.stock_qty ?? 0) + quantity;
+            await _db.SaveChangesAsync();
+            return true;
+        }
+
+        public async Task<bool> DecreaseStockAsync(int materialId, decimal quantity)
+        {
+            var material = await _db.materials.FirstOrDefaultAsync(x => x.material_id == materialId);
+            if (material == null) return false;
+
+            var currentStock = material.stock_qty ?? 0;
+            if (currentStock < quantity)
+                throw new InvalidOperationException("Số lượng tồn kho không đủ để giảm.");
+
+            material.stock_qty = currentStock - quantity;
+            await _db.SaveChangesAsync();
+            return true;
+        }
     }
 }

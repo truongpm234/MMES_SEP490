@@ -575,6 +575,51 @@ public partial class AppDbContext : DbContext
                   .HasForeignKey(e => e.product_type_id);
         });
 
+        modelBuilder.Entity<notification>(entity =>
+        {
+            entity.ToTable("notifications", "AMMS_DB");
+
+            entity.HasKey(e => e.Id).HasName("notifications_pkey");
+
+            entity.Property(e => e.Id)
+                  .HasColumnName("id")
+                  .ValueGeneratedOnAdd();
+
+            entity.Property(e => e.Content)
+                  .HasColumnName("content")
+                  .HasColumnType("text")
+                  .IsRequired();
+
+            entity.Property(e => e.UserId)
+                  .HasColumnName("user_id");
+
+            entity.Property(e => e.RoleId)
+                  .HasColumnName("role_id");
+
+            entity.Property(e => e.Time)
+                  .HasColumnName("time")
+                  .HasColumnType("timestamptz")
+                  .HasDefaultValueSql("now()");
+
+            entity.Property(e => e.IsCheck)
+                  .HasColumnName("is_check")
+                  .HasDefaultValue(false);
+
+            entity.Property(e => e.Status)
+                  .HasColumnName("status")
+                  .HasMaxLength(20)
+                  .HasDefaultValue("active");
+
+            entity.HasIndex(e => e.UserId)
+                  .HasDatabaseName("ix_notifications_user_id");
+
+            entity.HasIndex(e => e.RoleId)
+                  .HasDatabaseName("ix_notifications_role_id");
+
+            entity.HasIndex(e => e.Time)
+                  .HasDatabaseName("ix_notifications_time_desc");
+        });
+
         modelBuilder.Entity<estimate_config>(e =>
         {
             e.HasKey(x => new { x.config_group, x.config_key });
