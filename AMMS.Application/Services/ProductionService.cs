@@ -4,7 +4,6 @@ using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Enums;
 using AMMS.Shared.DTOs.Productions;
-using AMMS.Shared.DTOs.Socket;
 using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
 
@@ -81,8 +80,7 @@ namespace AMMS.Application.Services
         public async Task<int?> StartProductionAndPromoteFirstTaskAsync(int orderId, CancellationToken ct = default)
         {
             var res = await _db.order_requests.FirstOrDefaultAsync(o => o.order_id == orderId);
-            var evt = new RequestChangedEvent(orderId, res.order_request_id, "Scheduled", "InProcessing", "Start", AppTime.NowVnUnspecified(), "production-manager");
-            await _hub.PublishRequestChangedAsync(evt);
+            //Khánh sửa signalr
             return await _repo.StartProductionByOrderIdAndPromoteFirstTaskAsync(orderId, AppTime.NowVnUnspecified(), ct);
         }
 

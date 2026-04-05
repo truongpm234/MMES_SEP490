@@ -1,5 +1,5 @@
-﻿using AMMS.Application.Interfaces;
-using AMMS.Application.Services;
+﻿using AMMS.Application.Helpers;
+using AMMS.Application.Interfaces;
 using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
@@ -11,6 +11,7 @@ using AMMS.Shared.DTOs.Socket;
 using AMMS.Shared.Helpers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
 using System.Text;
@@ -32,9 +33,9 @@ namespace AMMS.API.Controllers
         private readonly IConfiguration _config;
         private readonly IPayOsService _payos;
         private readonly ILogger<RequestsController> _logger;
-        private readonly IRealtimePublisher _rt;
+        private readonly IHubContext<RealtimeHub> _rt;
         public RequestsController(
-            IRealtimePublisher rt,
+            IHubContext<RealtimeHub> rt,
             IRequestService service,
             IDealService dealService,
             IPaymentsService paymentService,
@@ -375,6 +376,7 @@ namespace AMMS.API.Controllers
 
             // 6) Update status + gửi mail consultant
             await _dealService.RejectDealAsync(dto.order_request_id, dto.reason ?? "Customer rejected");
+            await _rt.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("createOrder", new { message = $"Yêu cầu {dto.order_request_id} đã bị từ chối" });
 
             return Ok(new { ok = true });
         }
@@ -1190,7 +1192,7 @@ CancellationToken ct)
                     ord.layout_confirmed = true;
 
                     if (string.IsNullOrWhiteSpace(ord.status) ||
-                        string.Equals(ord.status, "LayoutPending", StringComparison.OrdinalIgnoreCase))                     
+                        string.Equals(ord.status, "LayoutPending", StringComparison.OrdinalIgnoreCase))
                     {
                         ord.status = "Scheduled";
                     }
@@ -1368,14 +1370,12 @@ CancellationToken ct)
             {
                 if (res?.process_status == "Accepted")
                 {
-                    var req = new RequestChangedEvent(res.order_id, id, "not paid", "Deposited", "Payment", DateTime.Now, "Customer");
-                    await _rt.PublishRequestChangedAsync(req);
+                    //Khánh sửa signalr
                     return Ok(new { action = "Deposited" });
                 }
                 else if (res?.process_status == "Paid")
                 {
-                    var req = new RequestChangedEvent(res.order_id, id, "not paid", "Full Paid", "Payment", DateTime.Now, "Customer");
-                    await _rt.PublishRequestChangedAsync(req);
+                    //Khánh sửa signalr
                     return Ok(new { action = "Full paid" });
                 }
             }

@@ -12,11 +12,11 @@ namespace AMMS.Application.Helpers
         public Task LeaveRequestsAll()
             => Groups.RemoveFromGroupAsync(Context.ConnectionId, RealtimeGroups.RequestsAll);
 
-        public Task JoinRequestsByRole(string role)
-            => Groups.AddToGroupAsync(Context.ConnectionId, RealtimeGroups.RequestsByRole(role));
+        public Task JoinByRole(string role)
+            => Groups.AddToGroupAsync(Context.ConnectionId, RealtimeGroups.ByRole(role));
 
         public Task LeaveRequestsByRole(string role)
-            => Groups.RemoveFromGroupAsync(Context.ConnectionId, RealtimeGroups.RequestsByRole(role));
+            => Groups.RemoveFromGroupAsync(Context.ConnectionId, RealtimeGroups.ByRole(role));
 
         public Task JoinRequest(int requestId)
             => Groups.AddToGroupAsync(Context.ConnectionId, RealtimeGroups.Request(requestId));
