@@ -405,7 +405,7 @@ namespace AMMS.Application.Helpers
       </p>
 
       <div style='background:#fff7ed;border:1px solid #fdba74;border-radius:14px;padding:16px 18px;margin:18px 0;'>
-        <div style='font-size:13px;font-weight:900;color:#c2410c;text-transform:uppercase;margin-bottom:8px;'>Lời nhắn của tư vấn viên</div>
+        <div style='font-size:13px;font-weight:900;color:#c2410c;text-transform:uppercase;margin-bottom:8px;'>Lời nhắn của tư vấn viên hỗ trợ</div>
         <div style='font-size:13px;color:#7c2d12;line-height:1.7;'>
           {safeMessage}
         </div>
