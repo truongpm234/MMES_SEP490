@@ -82,9 +82,11 @@ public partial class order_request
 
     public string? delivery_note { get; set; }
 
-
     [Column("is_check_contract")]
     public bool? is_check_contract { get; set; }
+
+    [Column("contract_check_note")]
+    public string? contract_check_note { get; set; }
 
     public string? delivery_date_change_reason { get; set; }
 

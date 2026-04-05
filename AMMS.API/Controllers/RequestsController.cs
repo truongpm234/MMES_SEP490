@@ -1221,9 +1221,7 @@ CancellationToken ct)
 
 
         [HttpPut("contract-check-status")]
-        public async Task<IActionResult> UpdateContractCheckStatus(
-    [FromBody] UpdateContractCheckStatusDto dto,
-    CancellationToken ct)
+        public async Task<IActionResult> UpdateContractCheckStatus([FromBody] UpdateContractCheckStatusDto dto, CancellationToken ct)
         {
             try
             {
@@ -1243,6 +1241,7 @@ CancellationToken ct)
                     ok = true,
                     request_id = dto.request_id,
                     is_check_contract = dto.is_check_contract,
+                    contract_check_note = dto.note,
                     message = dto.is_check_contract.Value
                         ? "Contract checked successfully. Consultant can confirm layout."
                         : "Contract has issues. Consultant must ask customer to review and sign again."

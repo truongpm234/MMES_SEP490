@@ -386,6 +386,8 @@ namespace AMMS.Application.Services
             if (request != null)
             {
                 request.is_check_contract = null;
+                request.contract_check_note = null;
+
                 await _requestRepository.SaveChangesAsync();
             }
 

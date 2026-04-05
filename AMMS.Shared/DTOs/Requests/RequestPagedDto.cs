@@ -96,5 +96,6 @@ namespace AMMS.Shared.DTOs.Requests
         public int? wave_sheets_used { get; set; }
         public string? paper_alternative { get; set; }
         public string? wave_alternative { get; set; }
+        public string? contract_check_note { get; set; }
     }
 }

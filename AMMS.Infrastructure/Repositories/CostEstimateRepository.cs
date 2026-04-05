@@ -255,5 +255,32 @@ namespace AMMS.Infrastructure.Repositories
             return await _db.cost_estimates
                 .FirstOrDefaultAsync(x => x.order_request_id == requestId && x.is_active, ct);
         }
+
+        public async Task<ContractCheckEstimateInfoDto?> GetContractCheckEstimateInfoAsync(int requestId, int? acceptedEstimateId, CancellationToken ct = default)
+        {
+            var query = _db.cost_estimates
+                .AsNoTracking()
+                .Where(x => x.order_request_id == requestId);
+
+            if (acceptedEstimateId.HasValue && acceptedEstimateId.Value > 0)
+            {
+                query = query.Where(x => x.estimate_id == acceptedEstimateId.Value);
+            }
+            else
+            {
+                query = query
+                    .OrderByDescending(x => x.is_active)
+                    .ThenByDescending(x => x.estimate_id);
+            }
+
+            return await query
+                .Select(x => new ContractCheckEstimateInfoDto
+                {
+                    estimate_id = x.estimate_id,
+                    consultant_contract_path = x.consultant_contract_path,
+                    customer_signed_contract_path = x.customer_signed_contract_path
+                })
+                .FirstOrDefaultAsync(ct);
+        }
     }
 }

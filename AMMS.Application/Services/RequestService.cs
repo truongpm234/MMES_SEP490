@@ -109,6 +109,7 @@ namespace AMMS.Application.Services
                 assigned_consultant = assignedConsultant.user_id,
                 assigned_at = now,
                 is_check_contract = null,
+                contract_check_note = null,
             };
 
             await _requestRepo.AddAsync(entity);
@@ -147,7 +148,8 @@ namespace AMMS.Application.Services
                 process_status = "Pending",
                 is_check_contract = null,
                 assigned_consultant = assignedConsultant.user_id,
-                assigned_at = now
+                assigned_at = now,
+                contract_check_note = null,
             };
 
             await _requestRepo.AddAsync(entity);
@@ -173,10 +175,8 @@ namespace AMMS.Application.Services
         public async Task<UpdateRequestResponse> UpdateAsync(int id, UpdateOrderRequest req)
         {
             await _currentUser.EnsureCanAccessAssignedRequestAsync(id);
+
             var entity = await _requestRepo.GetByIdAsync(id);
-            var ce = await _estimateRepo.GetByOrderRequestIdAsync(id);
-            var oldDeliveryDate = entity.delivery_date;
-            var newDeliveryDate = ToDeliveryDate(req.delivery_date);
             if (entity == null)
             {
                 return new UpdateRequestResponse
@@ -186,6 +186,10 @@ namespace AMMS.Application.Services
                     UpdatedId = id
                 };
             }
+
+            var ce = await _estimateRepo.GetByOrderRequestIdAsync(id);
+            var oldDeliveryDate = entity.delivery_date;
+            var newDeliveryDate = ToDeliveryDate(req.delivery_date);
 
             entity.customer_name = req.customer_name ?? entity.customer_name;
             entity.customer_phone = req.customer_phone ?? entity.customer_phone;
@@ -255,6 +259,7 @@ namespace AMMS.Application.Services
             entity.quote_expires_at = null;
             entity.accepted_estimate_id = null;
             entity.is_check_contract = null;
+            entity.contract_check_note = null;
 
             await _requestRepo.UpdateAsync(entity);
             await _requestRepo.SaveChangesAsync();
@@ -435,7 +440,8 @@ namespace AMMS.Application.Services
                 process_status = "Pending",
                 is_check_contract = null,
                 assigned_consultant = assignedConsultant.user_id,
-                assigned_at = now
+                assigned_at = now,
+                contract_check_note = null,
             };
 
             await _requestRepo.AddAsync(entity);
@@ -511,6 +517,7 @@ namespace AMMS.Application.Services
                 req.note = dto.note;
 
             req.is_check_contract = null;
+            req.contract_check_note = null;
 
             if (st == "Verified")
             {
@@ -587,6 +594,7 @@ namespace AMMS.Application.Services
             req.quote_expires_at = null;
             req.accepted_estimate_id = null;
             req.is_check_contract = null;
+            req.contract_check_note = null;
 
             await _requestRepo.SaveChangesAsync();
 
@@ -668,6 +676,7 @@ namespace AMMS.Application.Services
                 assigned_consultant = clonedAssignedConsultantId,
                 assigned_at = clonedAssignedConsultantId.HasValue ? now : null,
                 is_check_contract = null,
+                contract_check_note = null,
             };
 
             await _requestRepo.AddAsync(clonedRequest);
@@ -1417,35 +1426,28 @@ namespace AMMS.Application.Services
                 throw new InvalidOperationException("Only Accepted/Paid request can review contract");
             }
 
-            var estimateId = req.accepted_estimate_id ??
-                             await _db.cost_estimates
-                                .AsNoTracking()
-                                .Where(x => x.order_request_id == dto.request_id)
-                                .OrderByDescending(x => x.is_active)
-                                .ThenByDescending(x => x.estimate_id)
-                                .Select(x => (int?)x.estimate_id)
-                                .FirstOrDefaultAsync(ct);
+            var estimateInfo = await _estimateRepo.GetContractCheckEstimateInfoAsync(
+                dto.request_id,
+                req.accepted_estimate_id,
+                ct);
 
-            if (!estimateId.HasValue || estimateId.Value <= 0)
+            if (estimateInfo == null)
                 throw new InvalidOperationException("No estimate found for this request");
 
-            var estimate = await _db.cost_estimates
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.estimate_id == estimateId.Value, ct);
-
-            if (estimate == null)
-                throw new InvalidOperationException("Estimate not found");
-
-            if (string.IsNullOrWhiteSpace(estimate.consultant_contract_path))
+            if (string.IsNullOrWhiteSpace(estimateInfo.consultant_contract_path))
                 throw new InvalidOperationException("Consultant contract has not been uploaded/generated");
 
-            if (string.IsNullOrWhiteSpace(estimate.customer_signed_contract_path))
+            if (string.IsNullOrWhiteSpace(estimateInfo.customer_signed_contract_path))
                 throw new InvalidOperationException("Customer signed contract has not been uploaded");
 
             req.is_check_contract = dto.is_check_contract.Value;
 
             if (dto.note != null)
-                req.note = string.IsNullOrWhiteSpace(dto.note) ? null : dto.note.Trim();
+            {
+                req.contract_check_note = string.IsNullOrWhiteSpace(dto.note)
+                    ? null
+                    : dto.note.Trim();
+            }
 
             await _requestRepo.SaveChangesAsync();
 

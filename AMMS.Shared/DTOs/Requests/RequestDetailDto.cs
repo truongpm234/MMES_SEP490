@@ -8,6 +8,7 @@
         public string customer_phone { get; set; } = "";
         public string email { get; set; } = "";
         public bool? is_check_contract { get; set; }
+        public string? contract_check_note { get; set; }
         public DateTime? delevery_date { get; set; }
         public string? delivery_date_change_reason { get; set; }
         public bool? is_send_design { get; set; }

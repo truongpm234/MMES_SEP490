@@ -117,6 +117,7 @@ namespace AMMS.Infrastructure.Repositories
                 consultant_contract_path = estimate?.consultant_contract_path,
                 customer_signed_contract_path = estimate?.customer_signed_contract_path,
                 is_check_contract = request.is_check_contract,
+                contract_check_note = request.contract_check_note,
             };
         }
 
@@ -276,6 +277,7 @@ namespace AMMS.Infrastructure.Repositories
                     paper_alternative = ce != null ? ce.paper_alternative : null,
                     wave_alternative = ce != null ? ce.wave_alternative : null,
                     is_check_contract = r.is_check_contract,
+                    contract_check_note = r.contract_check_note,
                 }
             )
             .Skip(skip)
@@ -391,6 +393,7 @@ namespace AMMS.Infrastructure.Repositories
                     paper_alternative = ce != null ? ce.paper_alternative : null,
                     wave_alternative = ce != null ? ce.wave_alternative : null,
                     is_check_contract = r.is_check_contract,
+                    contract_check_note = r.contract_check_note,
                 }
             ).FirstOrDefaultAsync();
         }
@@ -965,6 +968,7 @@ namespace AMMS.Infrastructure.Repositories
                 message_to_customer = SafeText(request.message_to_customer),
                 printer_ready_file_path = SafeText(request.print_ready_file),
                 is_check_contract = request.is_check_contract,
+                contract_check_note = SafeText(request.contract_check_note),
                 cost_estimate = estimates.Select(ce =>
                 {
                     var discountAmount = ce.discount_amount < 0m ? 0m : ce.discount_amount;
@@ -1076,6 +1080,7 @@ namespace AMMS.Infrastructure.Repositories
                     is_send_design = r.is_send_design,
                     message_to_customer = r.message_to_customer,
                     is_check_contract = r.is_check_contract,
+                    contract_check_note = r.contract_check_note,
                 })
                 .FirstOrDefaultAsync(ct);
 

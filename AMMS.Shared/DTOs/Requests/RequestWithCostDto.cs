@@ -54,5 +54,6 @@ namespace AMMS.Shared.DTOs.Requests
         public string? consultant_contract_path { get; set; }
         public string? customer_signed_contract_path { get; set; }
         public DateTime? estimate_finish_date { get; set; }
+        public string? contract_check_note { get; set; }
     }
 }
