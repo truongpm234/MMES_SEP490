@@ -23,7 +23,8 @@ namespace AMMS.Application.Services
         private readonly ICostEstimateRepository _estimateRepo;
         private readonly IMaterialRepository _materialRepo;
         private readonly IBomRepository _bomRepo;
-        private readonly IHubContext<RealtimeHub> _rt;
+        private readonly IRealtimePublisher _rt;
+        private readonly IHubContext<RealtimeHub> _hub;
         private readonly IAccessService _currentUser;
         private readonly IUserRepository _userRepo;
         private readonly ICloudinaryFileStorageService _cloudinaryStorage;
@@ -40,7 +41,8 @@ namespace AMMS.Application.Services
             ICostEstimateRepository estimateRepo,
             IMaterialRepository materialRepo,
             IBomRepository bomRepo,
-            IHubContext<RealtimeHub> rt,
+            IRealtimePublisher rt,
+            IHubContext<RealtimeHub> hub,
             AppDbContext db,
             IAccessService currentUser,
             IUserRepository userRepo,
@@ -59,6 +61,7 @@ namespace AMMS.Application.Services
             _bomRepo = bomRepo;
             _db = db;
             _rt = rt;
+            _hub = hub;
             _currentUser = currentUser;
             _userRepo = userRepo;
             _cloudinaryStorage = cloudinaryStorage;
@@ -118,7 +121,7 @@ namespace AMMS.Application.Services
             await _requestRepo.SaveChangesAsync();
 
             //khánh sửa signalr
-            await _rt.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("pending", new { message = $"Có yêu cầu #{entity.order_request_id} mới được tạo", id = entity.order_request_id });
+            await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("pending", new { message = $"Có yêu cầu #{entity.order_request_id} mới được tạo", id = entity.order_request_id });
 
             return new CreateRequestResponse
             {
@@ -153,7 +156,7 @@ namespace AMMS.Application.Services
             await _requestRepo.SaveChangesAsync();
 
             //Khánh sửa signalr
-            await _rt.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("consultantCreateRequest", new { message = $"Có yêu cầu {entity.order_request_id} cần duyệt", id = entity.order_request_id });
+            await _hub.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("consultantCreateRequest", new { message = $"Có yêu cầu {entity.order_request_id} cần duyệt", id = entity.order_request_id });
             return new CreateRequestResponse
             {
                 order_request_id = entity.order_request_id,
@@ -514,7 +517,7 @@ namespace AMMS.Application.Services
             {
                 req.verified_at = now;
                 req.quote_expires_at = now.AddDays(7);
-                await _rt.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("verified", new { message = $"Yêu cầu #{req.order_request_id} đã được duyệt", id = req.order_request_id });
+                await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("verified", new { message = $"Yêu cầu #{req.order_request_id} đã được duyệt", id = req.order_request_id });
             }
             else
             {
@@ -526,7 +529,7 @@ namespace AMMS.Application.Services
             {
                 req.accepted_estimate_id = null;
                 await _estimateRepo.DeactivateAllByRequestIdAsync(dto.request_id, ct);
-                await _rt.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("declined", new { message = $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa", id = req.order_request_id });
+                await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("declined", new { message = $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa", id = req.order_request_id });
             }
 
             await _requestRepo.SaveChangesAsync();
@@ -585,7 +588,7 @@ namespace AMMS.Application.Services
             await _requestRepo.SaveChangesAsync();
 
             //Khánh sửa signalr
-            await _rt.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("processing", new { message = $"Có yêu cầu #{req.order_request_id} cần duyệt" });
+            await _hub.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("processing", new { message = $"Có yêu cầu #{req.order_request_id} cần duyệt" });
             //Khánh sửa signalr
         }
 
@@ -767,7 +770,15 @@ namespace AMMS.Application.Services
 
             await _estimateRepo.SaveChangesAsync();
 
-            //Khánh sửa signalr
+            await _rt.PublishRequestChangedAsync(new(
+                order_id: clonedRequest.order_id,
+                request_id: clonedRequest.order_request_id,
+                old_status: null,
+                new_status: clonedRequest.process_status,
+                action: "cloned_from_request",
+                changed_at: now,
+                changed_by: null
+            ));
 
             return new CloneRequestResponseDto
             {
@@ -837,6 +848,16 @@ namespace AMMS.Application.Services
                 {
                     Success = false,
                     Message = "Only process_status = 'Accepted' can be converted to order",
+                    RequestId = requestId
+                };
+            }
+
+            if (req.is_check_contract != true)
+            {
+                return new ConvertRequestToOrderResponse
+                {
+                    Success = false,
+                    Message = "Contract has not been approved by manager yet",
                     RequestId = requestId
                 };
             }
@@ -1083,6 +1104,51 @@ namespace AMMS.Application.Services
                 OrderItemId = newItem.item_id,
                 OrderCode = newOrder.code
             };
+        }
+
+        private void QueueConvertToOrder(int requestId)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+
+                    var scopedRequestService = scope.ServiceProvider.GetRequiredService<IRequestService>();
+                    var scopedRt = scope.ServiceProvider.GetRequiredService<IRealtimePublisher>();
+                    var scopedDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+                    var result = await scopedRequestService.ConvertToOrderAsync(requestId);
+
+                    if (!result.Success)
+                    {
+                        _logger.LogWarning(
+                            "Background convert-to-order skipped/failed. RequestId={RequestId}, Message={Message}",
+                            requestId, result.Message);
+                        return;
+                    }
+
+                    var req = await scopedDb.order_requests
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(x => x.order_request_id == requestId);
+
+                    await scopedRt.PublishRequestChangedAsync(new(
+                        order_id: req.order_id,
+                        request_id: requestId,
+                        old_status: req?.process_status,
+                        new_status: req?.process_status,
+                        action: "order_created_after_contract_approved",
+                        changed_at: AppTime.NowVnUnspecified(),
+                        changed_by: "System"
+                    ));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Background convert-to-order failed. RequestId={RequestId}",
+                        requestId);
+                }
+            });
         }
 
         public Task<ConvertRequestToOrderResponse> ConvertToOrderInCurrentTransactionAsync(int requestId)
@@ -1385,9 +1451,6 @@ namespace AMMS.Application.Services
             if (req == null)
                 throw new InvalidOperationException("Order request not found");
 
-            if (!req.order_id.HasValue || req.order_id.Value <= 0)
-                throw new InvalidOperationException("Order has not been created yet");
-
             if (!string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(req.process_status, "Paid", StringComparison.OrdinalIgnoreCase))
             {
@@ -1408,6 +1471,10 @@ namespace AMMS.Application.Services
             if (string.IsNullOrWhiteSpace(estimateInfo.customer_signed_contract_path))
                 throw new InvalidOperationException("Customer signed contract has not been uploaded");
 
+            var shouldQueueConvert =
+                dto.is_check_contract.Value &&
+                !req.order_id.HasValue;
+
             req.is_check_contract = dto.is_check_contract.Value;
 
             if (dto.note != null)
@@ -1421,7 +1488,20 @@ namespace AMMS.Application.Services
 
             var now = AppTime.NowVnUnspecified();
 
-            //Khánh sửa signalr
+            await _rt.PublishRequestChangedAsync(new(
+                order_id: req.order_id,
+                request_id: req.order_request_id,
+                old_status: req.process_status,
+                new_status: req.process_status,
+                action: dto.is_check_contract.Value ? "contract_checked_ok" : "contract_need_resign",
+                changed_at: now,
+                changed_by: null
+            ));
+
+            if (shouldQueueConvert)
+            {
+                QueueConvertToOrder(req.order_request_id);
+            }
         }
     }
 }
