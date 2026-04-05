@@ -352,11 +352,7 @@ namespace AMMS.Application.Helpers
             return q.created_at.AddDays(7);
         }
 
-        public static string RequestResignContractUploadEmail(
-    order_request req,
-    cost_estimate? est,
-    string uploadUrl,
-    string customMessage)
+        public static string RequestResignContractUploadEmail(order_request req, cost_estimate? est, string uploadUrl, string customMessage)
         {
             var customerName = string.IsNullOrWhiteSpace(req.customer_name)
                 ? "Quý khách"
@@ -409,7 +405,7 @@ namespace AMMS.Application.Helpers
       </p>
 
       <div style='background:#fff7ed;border:1px solid #fdba74;border-radius:14px;padding:16px 18px;margin:18px 0;'>
-        <div style='font-size:13px;font-weight:900;color:#c2410c;text-transform:uppercase;margin-bottom:8px;'>Nội dung cần khách hàng thực hiện</div>
+        <div style='font-size:13px;font-weight:900;color:#c2410c;text-transform:uppercase;margin-bottom:8px;'>Lời nhắn của tư vấn viên</div>
         <div style='font-size:13px;color:#7c2d12;line-height:1.7;'>
           {safeMessage}
         </div>

@@ -740,8 +740,15 @@ namespace AMMS.API.Controllers
                 if (resolvedQuoteId > 0)
                     req.quote_id = resolvedQuoteId;
 
-                if (!string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase))
+                var wasAccepted = string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase);
+
+                if (!wasAccepted)
+                {
                     req.process_status = "Accepted";
+
+                    req.is_check_contract = null;
+                    req.contract_check_note = null;
+                }
 
                 await _db.cost_estimates
                     .Where(x => x.order_request_id == orderRequestId)
@@ -757,43 +764,23 @@ namespace AMMS.API.Controllers
                                 x => x.quote_id == resolvedQuoteId ? "Accepted" : "Rejected"), ct);
                 }
 
-                await _db.SaveChangesAsync(ct);
-
-                int orderId;
-
-                if (req.order_id == null)
+                if (req.order_id.HasValue)
                 {
-                    var convert = await _service.ConvertToOrderInCurrentTransactionAsync(orderRequestId);
-                    if (!convert.Success || convert.OrderId == null)
+                    var ord = await _db.orders.FirstOrDefaultAsync(x => x.order_id == req.order_id.Value, ct);
+                    if (ord == null)
                     {
                         await tx.RollbackAsync(ct);
-                        return (false, "ConvertToOrder failed: " + convert.Message);
+                        return (false, "Order not found");
                     }
 
-                    orderId = convert.OrderId.Value;
+                    ord.payment_status = "Deposited";
 
-                    req = await _service.GetRequestForUpdateAsync(orderRequestId, ct)
-                        ?? throw new InvalidOperationException("Request disappeared after convert");
+                    if (!ord.layout_confirmed &&
+                        string.IsNullOrWhiteSpace(ord.status))
+                    {
+                        ord.status = "LayoutPending";
+                    }
                 }
-                else
-                {
-                    orderId = req.order_id.Value;
-                }
-
-                var ord = await _db.orders.FirstOrDefaultAsync(x => x.order_id == orderId, ct);
-                if (ord == null)
-                {
-                    await tx.RollbackAsync(ct);
-                    return (false, "Order not found after convert");
-                }
-
-                if (!ord.layout_confirmed)
-                {
-                    ord.layout_confirmed = false;
-                    ord.status = "LayoutPending";
-                }
-
-                ord.payment_status = "Paid";
 
                 await _db.SaveChangesAsync(ct);
                 await tx.CommitAsync(ct);
@@ -807,7 +794,7 @@ namespace AMMS.API.Controllers
                 {
                 }
 
-                return (true, $"Deposit payment recorded successfully: order_id={orderId}");
+                return (true, "Deposit payment recorded successfully. Request is Accepted and waiting for contract approval.");
             });
         }
 
@@ -1152,13 +1139,33 @@ namespace AMMS.API.Controllers
         }
         [HttpPut("designer-confirm-layout")]
         public async Task<IActionResult> DesignerConfirmLayout(
-[FromBody] ConfirmLayoutRequestDto dto,
-CancellationToken ct)
+    [FromBody] ConfirmLayoutRequestDto dto,
+    CancellationToken ct)
         {
             try
             {
                 if (dto == null || dto.request_id <= 0)
                     return BadRequest(new { message = "request_id is required" });
+
+                // fallback tránh race với background tạo order
+                var current = await _service.GetByIdAsync(dto.request_id);
+                if (current == null)
+                    return NotFound(new { message = "Order request not found" });
+
+                if (current.is_check_contract != true)
+                    return BadRequest(new { message = "Manager has not approved contract yet. is_check_contract must be true before layout confirmation." });
+
+                if (!current.order_id.HasValue)
+                {
+                    var convert = await _service.ConvertToOrderAsync(dto.request_id);
+                    if (!convert.Success || !convert.OrderId.HasValue)
+                    {
+                        return BadRequest(new
+                        {
+                            message = convert.Message ?? "Order has not been created yet"
+                        });
+                    }
+                }
 
                 var strategy = _db.Database.CreateExecutionStrategy();
                 int orderId = 0;
@@ -1190,7 +1197,7 @@ CancellationToken ct)
                     ord.layout_confirmed = true;
 
                     if (string.IsNullOrWhiteSpace(ord.status) ||
-                        string.Equals(ord.status, "LayoutPending", StringComparison.OrdinalIgnoreCase))                     
+                        string.Equals(ord.status, "LayoutPending", StringComparison.OrdinalIgnoreCase))
                     {
                         ord.status = "Scheduled";
                     }
@@ -1217,8 +1224,7 @@ CancellationToken ct)
                     message = ex.Message
                 });
             }
-        }
-
+        }                         
 
         [HttpPut("contract-check-status")]
         public async Task<IActionResult> UpdateContractCheckStatus([FromBody] UpdateContractCheckStatusDto dto, CancellationToken ct)
@@ -1236,15 +1242,25 @@ CancellationToken ct)
 
                 await _service.UpdateContractCheckStatusAsync(dto, ct);
 
+                if (dto.is_check_contract.Value)
+                {
+                    return Accepted(new
+                    {
+                        ok = true,
+                        request_id = dto.request_id,
+                        is_check_contract = dto.is_check_contract,
+                        contract_check_note = dto.note,
+                        message = "Contract checked successfully. Order creation has been started in background."
+                    });
+                }
+
                 return Ok(new
                 {
                     ok = true,
                     request_id = dto.request_id,
                     is_check_contract = dto.is_check_contract,
                     contract_check_note = dto.note,
-                    message = dto.is_check_contract.Value
-                        ? "Contract checked successfully. Consultant can confirm layout."
-                        : "Contract has issues. Consultant must ask customer to review and sign again."
+                    message = "Contract has issues. Consultant must ask customer to review and sign again."
                 });
             }
             catch (ArgumentException ex)

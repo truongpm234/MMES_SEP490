@@ -873,6 +873,16 @@ namespace AMMS.Application.Services
                 };
             }
 
+            if (req.is_check_contract != true)
+            {
+                return new ConvertRequestToOrderResponse
+                {
+                    Success = false,
+                    Message = "Contract has not been approved by manager yet",
+                    RequestId = requestId
+                };
+            }
+
             if (req.quote_id == null)
             {
                 return new ConvertRequestToOrderResponse
@@ -1115,6 +1125,50 @@ namespace AMMS.Application.Services
                 OrderItemId = newItem.item_id,
                 OrderCode = newOrder.code
             };
+        }
+
+        private void QueueConvertToOrder(int requestId)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+
+                    var scopedRequestService = scope.ServiceProvider.GetRequiredService<IRequestService>();
+                    var scopedRt = scope.ServiceProvider.GetRequiredService<IRealtimePublisher>();
+                    var scopedDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+                    var result = await scopedRequestService.ConvertToOrderAsync(requestId);
+
+                    if (!result.Success)
+                    {
+                        _logger.LogWarning(
+                            "Background convert-to-order skipped/failed. RequestId={RequestId}, Message={Message}",
+                            requestId, result.Message);
+                        return;
+                    }
+
+                    var req = await scopedDb.order_requests
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(x => x.order_request_id == requestId);
+
+                    await scopedRt.PublishRequestChangedAsync(new(
+                        request_id: requestId,
+                        old_status: req?.process_status,
+                        new_status: req?.process_status,
+                        action: "order_created_after_contract_approved",
+                        changed_at: AppTime.NowVnUnspecified(),
+                        changed_by: "System"
+                    ));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Background convert-to-order failed. RequestId={RequestId}",
+                        requestId);
+                }
+            });
         }
 
         public Task<ConvertRequestToOrderResponse> ConvertToOrderInCurrentTransactionAsync(int requestId)
@@ -1417,9 +1471,6 @@ namespace AMMS.Application.Services
             if (req == null)
                 throw new InvalidOperationException("Order request not found");
 
-            if (!req.order_id.HasValue || req.order_id.Value <= 0)
-                throw new InvalidOperationException("Order has not been created yet");
-
             if (!string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(req.process_status, "Paid", StringComparison.OrdinalIgnoreCase))
             {
@@ -1439,6 +1490,10 @@ namespace AMMS.Application.Services
 
             if (string.IsNullOrWhiteSpace(estimateInfo.customer_signed_contract_path))
                 throw new InvalidOperationException("Customer signed contract has not been uploaded");
+
+            var shouldQueueConvert =
+                dto.is_check_contract.Value &&
+                !req.order_id.HasValue;
 
             req.is_check_contract = dto.is_check_contract.Value;
 
@@ -1461,6 +1516,11 @@ namespace AMMS.Application.Services
                 changed_at: now,
                 changed_by: null
             ));
+
+            if (shouldQueueConvert)
+            {
+                QueueConvertToOrder(req.order_request_id);
+            }
         }
     }
 }
