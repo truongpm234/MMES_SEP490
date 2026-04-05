@@ -7,7 +7,8 @@
         public string customer_name { get; set; } = "";
         public string customer_phone { get; set; } = "";
         public string email { get; set; } = "";
-
+        public bool? is_check_contract { get; set; }
+        public string? contract_check_note { get; set; }
         public DateTime? delevery_date { get; set; }
         public string? delivery_date_change_reason { get; set; }
         public bool? is_send_design { get; set; }
@@ -17,7 +18,7 @@
         public string process_status { get; set; } = "";
         public DateTime? request_date { get; set; }
         public string? alternative_material_reason { get; set; }
-
+        public string? printer_ready_file_path { get; set; }
         public string description { get; set; } = "";
         public string design_file_path { get; set; } = "";
         public string detail_address { get; set; } = "";

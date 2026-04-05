@@ -31,7 +31,8 @@ namespace AMMS.Shared.DTOs.Productions
         public int qty_bad { get; set; }
         public decimal waste_percent { get; set; }
         public DateTime? last_scan_time { get; set; }
-
+        public decimal estimated_output_quantity { get; set; }
+        public decimal? actual_output_quantity { get; set; }
         public List<TaskLogDto> logs { get; set; } = new();
         public List<StageMaterialDto> input_materials { get; set; } = new();
         public StageMaterialDto? output_product { get; set; }

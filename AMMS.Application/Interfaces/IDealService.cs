@@ -20,5 +20,6 @@ namespace AMMS.Application.Interfaces
         Task SendRemainingPaymentEmailAsync(int orderId, CancellationToken ct = default);
         Task<PayOsResultDto> CreateOrReuseRemainingPaymentLinkAsync(int orderId, CancellationToken ct = default);
         bool IsPaidStatus(string? status);
+        Task SendRequestResignContractEmailAsync(int requestId, string? customMessage, CancellationToken ct = default);
     }
 }

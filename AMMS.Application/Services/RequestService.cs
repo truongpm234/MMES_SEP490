@@ -8,6 +8,8 @@ using AMMS.Shared.DTOs.Requests;
 using AMMS.Shared.DTOs.User;
 using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace AMMS.Application.Services
 {
@@ -26,6 +28,9 @@ namespace AMMS.Application.Services
         private readonly IAccessService _accessService;
         private readonly IProductTypeRepository _productTypeRepo;
         private readonly IProductTypeProcessRepository _productTypeProcessRepo;
+        private readonly IProductionSchedulingService _productionSchedulingService;
+        private readonly IServiceScopeFactory _scopeFactory;
+        private readonly ILogger<RequestService> _logger;
 
         public RequestService(
             IRequestRepository requestRepo,
@@ -40,7 +45,10 @@ namespace AMMS.Application.Services
             ICloudinaryFileStorageService cloudinaryStorage,
             IAccessService accessService,
             IProductTypeRepository productTypeRepo,
-            IProductTypeProcessRepository productTypeProcessRepo)
+            IProductTypeProcessRepository productTypeProcessRepo,
+            IProductionSchedulingService productionSchedulingService,
+            IServiceScopeFactory serviceScopeFactory,
+            ILogger<RequestService> logger)
         {
             _requestRepo = requestRepo;
             _orderRepo = orderRepo;
@@ -55,6 +63,9 @@ namespace AMMS.Application.Services
             _accessService = accessService;
             _productTypeRepo = productTypeRepo;
             _productTypeProcessRepo = productTypeProcessRepo;
+            _productionSchedulingService = productionSchedulingService;
+            _scopeFactory = serviceScopeFactory;
+            _logger = logger;
         }
 
         private DateTime? ToDeliveryDate(DateTime? dateTime)
@@ -96,7 +107,9 @@ namespace AMMS.Application.Services
                 preliminary_estimated_price = req.preliminary_estimated_price,
                 estimate_finish_date = now.AddDays(7),
                 assigned_consultant = assignedConsultant.user_id,
-                assigned_at = now
+                assigned_at = now,
+                is_check_contract = null,
+                contract_check_note = null,
             };
 
             await _requestRepo.AddAsync(entity);
@@ -134,9 +147,10 @@ namespace AMMS.Application.Services
                 detail_address = req.detail_address,
                 order_request_date = now,
                 process_status = "Pending",
-
+                is_check_contract = null,
                 assigned_consultant = assignedConsultant.user_id,
-                assigned_at = now
+                assigned_at = now,
+                contract_check_note = null,
             };
 
             await _requestRepo.AddAsync(entity);
@@ -163,10 +177,8 @@ namespace AMMS.Application.Services
         public async Task<UpdateRequestResponse> UpdateAsync(int id, UpdateOrderRequest req)
         {
             await _currentUser.EnsureCanAccessAssignedRequestAsync(id);
+
             var entity = await _requestRepo.GetByIdAsync(id);
-            var ce = await _estimateRepo.GetByOrderRequestIdAsync(id);
-            var oldDeliveryDate = entity.delivery_date;
-            var newDeliveryDate = ToDeliveryDate(req.delivery_date);
             if (entity == null)
             {
                 return new UpdateRequestResponse
@@ -176,6 +188,10 @@ namespace AMMS.Application.Services
                     UpdatedId = id
                 };
             }
+
+            var ce = await _estimateRepo.GetByOrderRequestIdAsync(id);
+            var oldDeliveryDate = entity.delivery_date;
+            var newDeliveryDate = ToDeliveryDate(req.delivery_date);
 
             entity.customer_name = req.customer_name ?? entity.customer_name;
             entity.customer_phone = req.customer_phone ?? entity.customer_phone;
@@ -244,6 +260,8 @@ namespace AMMS.Application.Services
             entity.verified_at = null;
             entity.quote_expires_at = null;
             entity.accepted_estimate_id = null;
+            entity.is_check_contract = null;
+            entity.contract_check_note = null;
 
             await _requestRepo.UpdateAsync(entity);
             await _requestRepo.SaveChangesAsync();
@@ -422,9 +440,10 @@ namespace AMMS.Application.Services
                 print_length_mm = dto.print_length_mm,
                 order_request_date = now,
                 process_status = "Pending",
-
+                is_check_contract = null,
                 assigned_consultant = assignedConsultant.user_id,
-                assigned_at = now
+                assigned_at = now,
+                contract_check_note = null,
             };
 
             await _requestRepo.AddAsync(entity);
@@ -498,6 +517,9 @@ namespace AMMS.Application.Services
 
             if (dto.note != null)
                 req.note = dto.note;
+
+            req.is_check_contract = null;
+            req.contract_check_note = null;
 
             if (st == "Verified")
             {
@@ -574,6 +596,8 @@ namespace AMMS.Application.Services
             req.verified_at = null;
             req.quote_expires_at = null;
             req.accepted_estimate_id = null;
+            req.is_check_contract = null;
+            req.contract_check_note = null;
 
             await _requestRepo.SaveChangesAsync();
 
@@ -654,7 +678,9 @@ namespace AMMS.Application.Services
                 quote_expires_at = null,
                 consultant_note = source.consultant_note,
                 assigned_consultant = clonedAssignedConsultantId,
-                assigned_at = clonedAssignedConsultantId.HasValue ? now : null
+                assigned_at = clonedAssignedConsultantId.HasValue ? now : null,
+                is_check_contract = null,
+                contract_check_note = null,
             };
 
             await _requestRepo.AddAsync(clonedRequest);
@@ -985,100 +1011,96 @@ namespace AMMS.Application.Services
             await _orderRepo.SaveChangesAsync();
 
             var qty = (decimal)(newItem.quantity <= 0 ? 1 : newItem.quantity);
-            var bomTasks = new List<Task>();
 
-            if (est.sheets_total > 0)
+            var inkMaterial = await ResolveMaterialByCodesAsync("INK");
+            var coatingMaterial = await ResolveMaterialByCodesAsync(
+                est.coating_type,
+                "COATING",
+                "KEO_PHU");
+            var mountingGlueMaterial = await ResolveMaterialByCodesAsync(
+                "MOUNTING_GLUE",
+                "KEO_BOI");
+            var laminationMaterial = await ResolveMaterialByCodesAsync(
+                "MANG_CAN",
+                "LAMINATION");           
+
+            var bomLines = new List<bom>();
+
+            void AddBomLine(
+                material? materialEntity,
+                string fallbackCode,
+                string fallbackName,
+                string unit,
+                decimal qtyTotal)
             {
-                bomTasks.Add(_bomRepo.AddBomAsync(new bom
-                {
-                    order_item_id = newItem.item_id,
-                    material_id = resolvedPaperMaterial?.material_id,
-                    material_code = Trunc20(resolvedPaperCode ?? "PAPER"),
-                    material_name = resolvedPaperName ?? "Giấy",
-                    unit = "tờ",
-                    qty_total = est.sheets_total,
-                    qty_per_product = est.sheets_total / qty,
-                    source_estimate_id = est.estimate_id
-                }));
+                if (qtyTotal <= 0) return;
+
+                var code = !string.IsNullOrWhiteSpace(materialEntity?.code)
+                    ? materialEntity!.code
+                    : fallbackCode;
+
+                var name = !string.IsNullOrWhiteSpace(materialEntity?.name)
+                    ? materialEntity!.name
+                    : fallbackName;
+
+                bomLines.Add(CreateBomLine(
+                    orderItemId: newItem.item_id,
+                    estimateId: est.estimate_id,
+                    orderQty: qty,
+                    materialId: materialEntity?.material_id,
+                    materialCode: Trunc20(code),
+                    materialName: name,
+                    unit: unit,
+                    qtyTotal: qtyTotal));
             }
 
-            if (est.ink_weight_kg > 0)
+            AddBomLine(
+                resolvedPaperMaterial,
+                resolvedPaperCode ?? "PAPER",
+                resolvedPaperName ?? "Giấy",
+                "tờ",
+                est.sheets_total);
+
+            AddBomLine(
+                resolvedWaveMaterial,
+                resolvedWaveType ?? "WAVE",
+                resolvedWaveName ?? "Sóng carton",
+                "tờ",
+                est.wave_sheets_used ?? 0);
+
+            AddBomLine(
+                inkMaterial,
+                "INK",
+                "Mực in",
+                "kg",
+                est.ink_weight_kg);
+
+            AddBomLine(
+                coatingMaterial,
+                !string.IsNullOrWhiteSpace(est.coating_type) ? est.coating_type! : "COATING",
+                ResolveCoatingMaterialName(est.coating_type),
+                "kg",
+                est.coating_glue_weight_kg);
+
+            AddBomLine(
+                mountingGlueMaterial,
+                "MOUNTING_GLUE",
+                "Keo bồi",
+                "kg",
+                est.mounting_glue_weight_kg);
+
+            AddBomLine(
+                laminationMaterial,
+                "MANG_CAN",
+                "Màng cán",
+                "kg",
+                est.lamination_weight_kg);
+
+            foreach (var line in bomLines)
             {
-                bomTasks.Add(_bomRepo.AddBomAsync(new bom
-                {
-                    order_item_id = newItem.item_id,
-                    material_code = Trunc20("INK"),
-                    material_name = "Mực in",
-                    unit = "kg",
-                    qty_total = est.ink_weight_kg,
-                    qty_per_product = est.ink_weight_kg / qty,
-                    source_estimate_id = est.estimate_id
-                }));
+                await _bomRepo.AddBomAsync(line);
             }
 
-            if (est.coating_glue_weight_kg > 0)
-            {
-                bomTasks.Add(_bomRepo.AddBomAsync(new bom
-                {
-                    order_item_id = newItem.item_id,
-                    material_code = Trunc20(est.coating_type ?? "COATING_GLUE"),
-                    material_name = "Keo phủ",
-                    unit = "kg",
-                    qty_total = est.coating_glue_weight_kg,
-                    qty_per_product = est.coating_glue_weight_kg / qty,
-                    source_estimate_id = est.estimate_id
-                }));
-            }
-
-            if (est.mounting_glue_weight_kg > 0)
-            {
-                var codeBoi = string.IsNullOrWhiteSpace(resolvedWaveType)
-                    ? "MOUNTING_GLUE"
-                    : $"BOI_{resolvedWaveType}";
-
-                bomTasks.Add(_bomRepo.AddBomAsync(new bom
-                {
-                    order_item_id = newItem.item_id,
-                    material_code = Trunc20(codeBoi),
-                    material_name = "Keo bồi",
-                    unit = "kg",
-                    qty_total = est.mounting_glue_weight_kg,
-                    qty_per_product = est.mounting_glue_weight_kg / qty,
-                    source_estimate_id = est.estimate_id
-                }));
-            }
-
-            if (est.lamination_weight_kg > 0)
-            {
-                bomTasks.Add(_bomRepo.AddBomAsync(new bom
-                {
-                    order_item_id = newItem.item_id,
-                    material_code = Trunc20("LAMINATION"),
-                    material_name = "Màng cán",
-                    unit = "kg",
-                    qty_total = est.lamination_weight_kg,
-                    qty_per_product = est.lamination_weight_kg / qty,
-                    source_estimate_id = est.estimate_id
-                }));
-            }
-
-            // NEW: BOM wave
-            if (!string.IsNullOrWhiteSpace(resolvedWaveType) && (est.wave_sheets_used ?? 0) > 0)
-            {
-                bomTasks.Add(_bomRepo.AddBomAsync(new bom
-                {
-                    order_item_id = newItem.item_id,
-                    material_id = resolvedWaveMaterial?.material_id,
-                    material_code = Trunc20(resolvedWaveType),
-                    material_name = resolvedWaveName ?? $"Sóng {resolvedWaveType}",
-                    unit = "tờ",
-                    qty_total = est.wave_sheets_used ?? 0,
-                    qty_per_product = (est.wave_sheets_used ?? 0) / qty,
-                    source_estimate_id = est.estimate_id
-                }));
-            }
-
-            await Task.WhenAll(bomTasks);
             await _bomRepo.SaveChangesAsync();
 
             newOrder.is_enough = await _orderRepo.IsOrderEnoughByOrderIdAsync(newOrder.order_id);
@@ -1154,7 +1176,21 @@ namespace AMMS.Application.Services
         }
         public async Task<DateTime?> RecalculateAndPersistAsync(int orderRequestId, CancellationToken ct = default)
         {
-            return await _requestRepo.RecalculateAndPersistAsync(orderRequestId, ct);
+            var preview = await _productionSchedulingService.PreviewByOrderRequestAsync(orderRequestId, ct);
+            if (preview == null)
+                return null;
+
+            var tracked = await _requestRepo.GetRequestForUpdateAsync(orderRequestId, ct);
+            if (tracked == null)
+                return null;
+
+            tracked.estimate_finish_date = DateTime.SpecifyKind(
+                preview.estimated_finish_date,
+                DateTimeKind.Unspecified);
+
+            await _requestRepo.SaveChangesAsync();
+
+            return tracked.estimate_finish_date;
         }
 
         public async Task<string> UploadPrintReadyFileAsync(
@@ -1225,6 +1261,211 @@ namespace AMMS.Application.Services
             await _requestRepo.SaveChangesAsync();
 
             return url;
+        }
+
+        private async Task<material?> ResolveMaterialByCodesAsync(params string?[] codes)
+        {
+            foreach (var raw in codes)
+            {
+                var code = (raw ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(code))
+                    continue;
+
+                var material = await _materialRepo.GetByCodeAsync(code);
+                if (material != null)
+                    return material;
+            }
+
+            return null;
+        }
+
+        private static string ResolveCoatingMaterialName(string? coatingType)
+        {
+            var code = (coatingType ?? "").Trim().ToUpperInvariant();
+
+            return code switch
+            {
+                "KEO_NUOC" => "Keo phủ nước",
+                "KEO_DAU" => "Keo phủ dầu",
+                "UV" => "Phủ UV",
+                "" => "Vật tư phủ",
+                _ => coatingType!.Trim()
+            };
+        }
+
+        private static bom CreateBomLine(
+            int orderItemId,
+            int estimateId,
+            decimal orderQty,
+            int? materialId,
+            string materialCode,
+            string materialName,
+            string unit,
+            decimal qtyTotal)
+        {
+            if (orderQty <= 0) orderQty = 1;
+
+            return new bom
+            {
+                order_item_id = orderItemId,
+                material_id = materialId,
+                material_code = materialCode.Length <= 20 ? materialCode : materialCode.Substring(0, 20),
+                material_name = materialName,
+                unit = unit,
+                qty_total = qtyTotal,
+                qty_per_product = qtyTotal / orderQty,
+                source_estimate_id = estimateId
+            };
+        }
+
+        public void QueueRelease(int orderId)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await ExecuteAsync(orderId, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Background production release failed. OrderId={OrderId}",
+                        orderId);
+                }
+            });
+        }
+
+        public async Task ExecuteAsync(int orderId, CancellationToken ct = default)
+        {
+            using var scope = _scopeFactory.CreateScope();
+
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var scheduling = scope.ServiceProvider.GetRequiredService<IProductionSchedulingService>();
+
+            var ord = await db.orders
+                .FirstOrDefaultAsync(x => x.order_id == orderId, ct)
+                ?? throw new InvalidOperationException("Order not found");
+
+            if (!ord.layout_confirmed)
+                throw new InvalidOperationException("Layout has not been confirmed");
+
+            var req = await db.order_requests
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.order_id == orderId, ct)
+                ?? throw new InvalidOperationException("Order request not found for this order");
+
+            var existingProdId = await db.productions
+                .AsNoTracking()
+                .Where(x => x.order_id == orderId && x.end_date == null)
+                .OrderByDescending(x => x.prod_id)
+                .Select(x => (int?)x.prod_id)
+                .FirstOrDefaultAsync(ct);
+
+            if (existingProdId.HasValue)
+            {
+                var hasTasks = await db.tasks
+                    .AsNoTracking()
+                    .AnyAsync(x => x.prod_id == existingProdId.Value, ct);
+
+                if (hasTasks)
+                {
+                    if (string.Equals(ord.status, "Scheduling", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ord.status = "Scheduled";
+                        await db.SaveChangesAsync(ct);
+                    }
+                    return;
+                }
+            }
+
+            var productTypeId = await db.product_types
+                .AsNoTracking()
+                .Where(x => x.code == req.product_type)
+                .Select(x => x.product_type_id)
+                .FirstOrDefaultAsync(ct);
+
+            if (productTypeId <= 0)
+                throw new InvalidOperationException("product_type invalid (cannot map product_type_id)");
+
+            var item = await db.order_items
+                .AsNoTracking()
+                .Where(x => x.order_id == orderId)
+                .OrderBy(x => x.item_id)
+                .FirstOrDefaultAsync(ct);
+
+            await scheduling.ScheduleOrderAsync(
+                orderId: orderId,
+                productTypeId: productTypeId,
+                productionProcessCsv: item?.production_process,
+                managerId: 3);
+
+            ord = await db.orders.FirstOrDefaultAsync(x => x.order_id == orderId, ct)
+                ?? throw new InvalidOperationException("Order disappeared after schedule");
+
+            if (string.Equals(ord.status, "Scheduling", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(ord.status, "LayoutPending", StringComparison.OrdinalIgnoreCase))
+            {
+                ord.status = "Scheduled";
+                await db.SaveChangesAsync(ct);
+            }
+        }
+
+        public async Task UpdateContractCheckStatusAsync(UpdateContractCheckStatusDto dto, CancellationToken ct = default)
+        {
+            if (dto.request_id <= 0)
+                throw new ArgumentException("request_id is required");
+
+            if (!dto.is_check_contract.HasValue)
+                throw new ArgumentException("is_check_contract is required");
+
+            var req = await _requestRepo.GetByIdAsync(dto.request_id);
+            if (req == null)
+                throw new InvalidOperationException("Order request not found");
+
+            if (!req.order_id.HasValue || req.order_id.Value <= 0)
+                throw new InvalidOperationException("Order has not been created yet");
+
+            if (!string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(req.process_status, "Paid", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Only Accepted/Paid request can review contract");
+            }
+
+            var estimateInfo = await _estimateRepo.GetContractCheckEstimateInfoAsync(
+                dto.request_id,
+                req.accepted_estimate_id,
+                ct);
+
+            if (estimateInfo == null)
+                throw new InvalidOperationException("No estimate found for this request");
+
+            if (string.IsNullOrWhiteSpace(estimateInfo.consultant_contract_path))
+                throw new InvalidOperationException("Consultant contract has not been uploaded/generated");
+
+            if (string.IsNullOrWhiteSpace(estimateInfo.customer_signed_contract_path))
+                throw new InvalidOperationException("Customer signed contract has not been uploaded");
+
+            req.is_check_contract = dto.is_check_contract.Value;
+
+            if (dto.note != null)
+            {
+                req.contract_check_note = string.IsNullOrWhiteSpace(dto.note)
+                    ? null
+                    : dto.note.Trim();
+            }
+
+            await _requestRepo.SaveChangesAsync();
+
+            var now = AppTime.NowVnUnspecified();
+
+            await _rt.PublishRequestChangedAsync(new(
+                request_id: req.order_request_id,
+                old_status: req.process_status,
+                new_status: req.process_status,
+                action: dto.is_check_contract.Value ? "contract_checked_ok" : "contract_need_resign",
+                changed_at: now,
+                changed_by: null
+            ));
         }
     }
 }

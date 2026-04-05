@@ -42,6 +42,9 @@ var hangfireDashboardPath = builder.Configuration["Hangfire:DashboardPath"] ?? "
 
 var autoSendDealEnabled = builder.Configuration.GetValue("AutoSendDeal:Enabled", true);
 var autoSendDealCron = builder.Configuration["AutoSendDeal:Cron"] ?? "*/15 * * * *";
+var autoStartProductionEnabled = builder.Configuration.GetValue("AutoStartProduction:Enabled", true);
+var autoStartProductionCron = builder.Configuration["AutoStartProduction:Cron"] ?? "* * * * *";
+
 builder.Services.AddDbContext<AppDbContext>((sp, options) =>
 {
     options.UseNpgsql(
@@ -289,6 +292,7 @@ builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddSingleton<IRealtimePublisher, RealtimePublisher>();
 builder.Services.AddSingleton<IEmailBackgroundQueue, EmailBackgroundQueue>();
 builder.Services.AddHostedService<EmailDispatcherHostedService>();
+builder.Services.AddScoped<AutoStartProductionJob>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IAccessService, AccessService>();
 builder.Services.AddScoped<IContractCompareService, ContractCompareService>();
@@ -325,6 +329,16 @@ if (hangfireRunServer)
                     "auto-send-deal-after-verified-24h",
                     job => job.RunAsync(CancellationToken.None),
                     autoSendDealCron,
+                    vnTz
+                );
+            }
+
+            if (autoStartProductionEnabled)
+            {
+                RecurringJob.AddOrUpdate<AutoStartProductionJob>(
+                    "auto-start-production-by-planned-start",
+                    job => job.RunAsync(CancellationToken.None),
+                    autoStartProductionCron,
                     vnTz
                 );
             }
@@ -365,7 +379,6 @@ app.UseSwaggerUI(c =>
     c.DisplayRequestDuration();
 });
 
-//app.UseHttpsRedirection();
 app.UseRouting();
 
 app.UseCors("AllowAll");

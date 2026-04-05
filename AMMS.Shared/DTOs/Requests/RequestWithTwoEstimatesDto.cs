@@ -17,7 +17,7 @@ namespace AMMS.Shared.DTOs.Requests
         public string? delivery_date_change_reason { get; set; }
         public string? consultant_note { get; set; }
         public string? message_to_customer { get; set; }
-
+        public bool? is_check_contract { get; set; }
         public string product_name { get; set; } = "";
         public int quantity { get; set; }
         public string? description { get; set; }
@@ -34,7 +34,7 @@ namespace AMMS.Shared.DTOs.Requests
         public int? print_width_mm { get; set; }
         public int? print_length_mm { get; set; }
         public bool? is_send_design { get; set; }
-
+        public string? contract_check_note { get; set; }
         public List<CostEstimateCompareDto> estimates { get; set; } = new();
     }
 

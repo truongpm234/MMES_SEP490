@@ -220,7 +220,13 @@ namespace AMMS.Application.Services
                           && t.planned_start_time != null
                           && t.planned_start_time <= now
                           && (o == null || o.is_enough != false)
-                    orderby o.delivery_date, p.planned_start_date, t.planned_start_time, t.seq_num, t.task_id
+                    orderby
+                        (o != null ? o.order_date : DateTime.MaxValue),
+                        (o != null ? o.order_id : int.MaxValue),
+                        p.planned_start_date,
+                        t.planned_start_time,
+                        t.seq_num,
+                        t.task_id
                     select t
                 ).ToListAsync(ct);
 
@@ -240,61 +246,69 @@ namespace AMMS.Application.Services
                     .Include(x => x.process)
                     .AsTracking()
                     .Where(t => t.prod_id != null && prodIds.Contains(t.prod_id.Value))
+                    .OrderBy(t => t.seq_num)
+                    .ThenBy(t => t.task_id)
                     .ToListAsync(ct);
 
                 var promoted = 0;
 
-                foreach (var t in dueTasks)
+                foreach (var due in dueTasks)
                 {
-                    if (!t.prod_id.HasValue || !t.seq_num.HasValue)
+                    if (!due.prod_id.HasValue)
                         continue;
 
                     var prodTasks = allProdTasks
-                        .Where(x => x.prod_id == t.prod_id)
+                        .Where(x => x.prod_id == due.prod_id.Value)
                         .OrderBy(x => x.seq_num)
                         .ThenBy(x => x.task_id)
                         .ToList();
 
-                    var currentCode = ProductionFlowHelper.Norm(t.process?.process_code);
-                    var hasRalo = prodTasks.Any(x => ProductionFlowHelper.IsRalo(x.process?.process_code));
-                    var raloFinished = !hasRalo || prodTasks.Any(x =>
-                        ProductionFlowHelper.IsRalo(x.process?.process_code) &&
-                        string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase));
+                    if (prodTasks.Count == 0)
+                        continue;
 
-                    var prev = prodTasks
-                        .Where(x => x.seq_num < t.seq_num)
-                        .OrderByDescending(x => x.seq_num)
-                        .FirstOrDefault();
+                    var currentTask = prodTasks.FirstOrDefault(x => x.task_id == due.task_id);
+                    if (currentTask == null)
+                        continue;
 
-                    var prevFinished = prev == null || IsFinished(prev);
+                    var hasInitialParallel = prodTasks.Any(x =>
+                        ProductionFlowHelper.IsInitialParallel(x.process?.process_code));
 
-                    var canRelease =
-                        ProductionFlowHelper.IsInitialParallel(currentCode)
-                            ? true
-                            : hasRalo
-                                ? raloFinished
-                                : prevFinished;
+                    bool canRelease;
+
+                    if (hasInitialParallel)
+                    {
+                        canRelease = ProductionFlowHelper.IsInitialParallel(currentTask.process?.process_code);
+                    }
+                    else
+                    {
+                        var firstUnfinished = prodTasks.FirstOrDefault(x =>
+                            !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase));
+
+                        canRelease = firstUnfinished != null && firstUnfinished.task_id == currentTask.task_id;
+                    }
 
                     if (!canRelease)
                         continue;
 
-                    if (string.IsNullOrWhiteSpace(t.machine))
-                    {
-                        var pcode = ProductionProcessSelectionHelper.Norm(t.process?.process_code);
+                    if (string.Equals(currentTask.status, "Ready", StringComparison.OrdinalIgnoreCase))
+                        continue;
 
+                    if (string.IsNullOrWhiteSpace(currentTask.machine))
+                    {
+                        var pcode = ProductionProcessSelectionHelper.Norm(currentTask.process?.process_code);
                         if (!string.IsNullOrWhiteSpace(pcode))
                         {
                             var best = await _machineRepo.FindBestMachineByProcessCodeAsync(pcode, ct);
                             if (best != null)
-                                t.machine = best.machine_code;
+                                currentTask.machine = best.machine_code;
                         }
                     }
 
-                    if (string.IsNullOrWhiteSpace(t.machine))
+                    if (string.IsNullOrWhiteSpace(currentTask.machine))
                         continue;
 
                     var machine = await _db.machines
-                        .FirstOrDefaultAsync(x => x.machine_code == t.machine && x.is_active, ct);
+                        .FirstOrDefaultAsync(x => x.machine_code == currentTask.machine && x.is_active, ct);
 
                     if (machine == null)
                         continue;
@@ -308,9 +322,8 @@ namespace AMMS.Application.Services
                         machine.busy_quantity += 1;
                     }
 
-                    t.status = "Ready";
-                    t.start_time ??= now;
-
+                    currentTask.status = "Ready";
+                    currentTask.start_time ??= now;
                     promoted++;
                 }
 
@@ -374,10 +387,10 @@ namespace AMMS.Application.Services
         }
 
         private async Task<PlanningContext?> BuildPlanningContextByOrderIdAsync(
-            int orderId,
-            int productTypeId,
-            string? rawProductionProcessCsv,
-            CancellationToken ct)
+    int orderId,
+    int productTypeId,
+    string? rawProductionProcessCsv,
+    CancellationToken ct)
         {
             var row = await (
                 from o in _db.orders.AsNoTracking()
@@ -405,10 +418,12 @@ namespace AMMS.Application.Services
                 select new
                 {
                     order_id = o.order_id,
+                    order_date = o.order_date,
+                    order_delivery_date = o.delivery_date,
                     order_request_id = (int?)r.order_request_id,
                     accepted_estimate_id = (int?)r.accepted_estimate_id,
                     request_qty = (int?)r.quantity,
-                    delivery_date = (DateTime?)r.delivery_date,
+                    request_delivery_date = (DateTime?)r.delivery_date,
                     number_of_plates = (int?)r.number_of_plates,
                     is_one_side_box = (bool?)r.is_one_side_box,
                     product_length_mm = (int?)r.product_length_mm,
@@ -448,7 +463,12 @@ namespace AMMS.Application.Services
                         : (!string.IsNullOrWhiteSpace(row.first_item_process)
                             ? row.first_item_process
                             : est?.production_processes),
-                DesiredDeliveryDate = est?.desired_delivery_date ?? row.delivery_date
+                DesiredDeliveryDate = row.request_delivery_date ?? row.order_delivery_date ?? est?.desired_delivery_date,
+
+                QueueDateTime = row.order_date ?? AppTime.NowVnUnspecified(),
+                QueueOrderKey = row.order_id,
+                WaveSheetsRequired = est?.wave_sheets_required ?? 0,
+                WaveSheetsUsed = est?.wave_sheets_used ?? 0,
             };
         }
 
@@ -491,7 +511,11 @@ namespace AMMS.Application.Services
                 HeightMm = req.product_height_mm,
                 TotalAreaM2 = est?.total_area_m2 ?? 0m,
                 RawProductionProcessCsv = est?.production_processes,
-                DesiredDeliveryDate = est?.desired_delivery_date ?? req.delivery_date
+                DesiredDeliveryDate = req.delivery_date ?? est?.desired_delivery_date,
+                WaveSheetsRequired = est?.wave_sheets_required ?? 0,
+                WaveSheetsUsed = est?.wave_sheets_used ?? 0,
+                QueueDateTime = req.order_request_date ?? AppTime.NowVnUnspecified(),
+                QueueOrderKey = req.order_request_id
             };
         }
 
@@ -516,7 +540,10 @@ namespace AMMS.Application.Services
                 .FirstOrDefaultAsync(ct);
         }
 
-        private async Task<PlanBuildResult> BuildStagePlansAsync(PlanningContext ctx, DateTime now, CancellationToken ct)
+        private async Task<PlanBuildResult> BuildStagePlansAsync(
+    PlanningContext ctx,
+    DateTime now,
+    CancellationToken ct)
         {
             var allSteps = await _db.product_type_processes
                 .AsNoTracking()
@@ -533,27 +560,39 @@ namespace AMMS.Application.Services
                 ctx.RawProductionProcessCsv);
 
             var normalizedCsv = ProductionProcessSelectionHelper.BuildCsv(steps, x => x.process_code);
+            var normalizedNow = _cal.NormalizeStart(now);
 
-            var earliestAnchor = EstimateInitialPlanningAnchor(ctx, now, steps.Count);
+            // neo thời gian sớm nhất theo logic nội bộ hiện có
+            var baseAnchor = EstimateInitialPlanningAnchor(ctx, normalizedNow, steps.Count);
 
-            var firstPass = await BuildStagePlansFromAnchorAsync(
+            // neo FIFO: đơn cũ phải xếp trước đơn mới
+            var fifoAnchor = await ResolveQueueAnchorAsync(ctx, baseAnchor, ct);
+
+            var plan = await BuildStagePlansFromAnchorAsync(
                 ctx,
-                earliestAnchor,
+                fifoAnchor,
                 steps,
                 normalizedCsv,
                 ct);
 
-            var preferredAnchor = EstimatePreferredAnchorByDueDate(ctx, firstPass, earliestAnchor);
+            if (ctx.DesiredDeliveryDate.HasValue && plan.Stages.Count > 0)
+            {
+                var finishDeadline = ResolveFinishDeadline(ctx.DesiredDeliveryDate.Value);
+                var estimatedFinish = plan.Stages.Max(x => x.PlannedEnd);
 
-            if (preferredAnchor <= earliestAnchor)
-                return firstPass;
+                if (estimatedFinish > finishDeadline)
+                {
+                    _logger.LogWarning(
+                        "FIFO scheduling may cause lateness. OrderId={OrderId}, RequestId={RequestId}, Anchor={Anchor}, EstimatedFinish={EstimatedFinish}, Deadline={Deadline}",
+                        ctx.OrderId,
+                        ctx.OrderRequestId,
+                        fifoAnchor,
+                        estimatedFinish,
+                        finishDeadline);
+                }
+            }
 
-            return await BuildStagePlansFromAnchorAsync(
-                ctx,
-                preferredAnchor,
-                steps,
-                normalizedCsv,
-                ct);
+            return plan;
         }
 
         private async Task<List<machine>> GetCandidateMachinesAsync(
@@ -627,48 +666,28 @@ namespace AMMS.Application.Services
 
             var laneCount = Math.Max(1, m.quantity);
             var normalizedAnchor = _cal.NormalizeStart(planningAnchor);
+
             var laneStates = await _machineRepo.GetLaneAvailableTimesAsync(
-    machineCode,
-    normalizedAnchor,
-    ignoreOverdueOrders: true,
-    ct);
+                machineCode,
+                normalizedAnchor,
+                ignoreOverdueOrders: true,
+                ct);
+
+            var normalizedLaneStates = laneStates.Count > 0
+                ? laneStates.OrderBy(x => x).ToList()
+                : Enumerable.Repeat(normalizedAnchor, laneCount).ToList();
+
+            if (normalizedLaneStates.Count < laneCount)
+            {
+                normalizedLaneStates.AddRange(
+                    Enumerable.Repeat(normalizedAnchor, laneCount - normalizedLaneStates.Count));
+            }
 
             var state = new MachinePoolState
             {
                 Machine = m,
-                LaneAvailableAt = laneStates.Count > 0
-                    ? laneStates
-                    : Enumerable.Repeat(normalizedAnchor, laneCount).ToList()
+                LaneAvailableAt = normalizedLaneStates
             };
-
-
-            var machineKey = machineCode.ToUpperInvariant();
-
-            var reservations = await _db.tasks
-                .AsNoTracking()
-                .Where(t => t.machine != null &&
-                            t.machine.Trim().ToUpper() == machineKey)
-                .Where(t => !(
-                    t.status != null &&
-                    t.status.Trim().ToUpper() == "FINISHED" &&
-                    t.end_time != null &&
-                    t.end_time <= planningAnchor))
-                .Select(t => new ExistingReservation
-                {
-                    Start = t.planned_start_time ?? t.start_time ?? planningAnchor,
-                    End = t.planned_end_time
-                          ?? t.end_time
-                          ?? ((t.planned_start_time ?? t.start_time ?? planningAnchor).AddHours(1))
-                })
-                .OrderBy(x => x.Start)
-                .ToListAsync(ct);
-
-            foreach (var r in reservations)
-            {
-                var start = r.Start;
-                var end = r.End < start ? start : r.End;
-                AssignReservationToLane(laneStates, start, end);
-            }
 
             cache[machineCode] = state;
             return state;
@@ -734,6 +753,9 @@ namespace AMMS.Application.Services
 
             if (pcode == "DAN")
                 return SafeInt(ctx.OrderQty, 1);
+
+            if (pcode == "BOI" && ctx.WaveSheetsUsed > 0)
+                return ctx.WaveSheetsUsed;
 
             if (ctx.SheetsTotal > 0) return ctx.SheetsTotal;
             if (ctx.SheetsRequired > 0) return ctx.SheetsRequired;
@@ -1012,6 +1034,74 @@ namespace AMMS.Application.Services
             };
         }
 
+        private DateTime ResolveFinishDeadline(DateTime deliveryDate)
+        {
+            var due = DateTime.SpecifyKind(deliveryDate, DateTimeKind.Unspecified);
+
+            // delivery_date thường là date-only -> map thành cuối ngày giao hàng
+            if (due.TimeOfDay == TimeSpan.Zero)
+            {
+                var cutoffHour = _opt.DeliveryCutoffHour <= 0 ? 17 : _opt.DeliveryCutoffHour;
+                due = due.Date.AddHours(cutoffHour);
+            }
+
+            if (_opt.DueDateSafetyHours > 0)
+                due = due.AddHours(-_opt.DueDateSafetyHours);
+
+            return due;
+        }
+
+        private async Task<PlanBuildResult?> FindLatestOnTimePlanAsync(
+            PlanningContext ctx,
+            List<product_type_process> steps,
+            string normalizedCsv,
+            DateTime earliestAnchor,
+            DateTime finishDeadline,
+            PlanBuildResult seedPlan,
+            CancellationToken ct)
+        {
+            if (seedPlan.Stages.Count == 0)
+                return seedPlan;
+
+            var seedStart = seedPlan.Stages.Min(x => x.PlannedStart);
+            var seedEnd = seedPlan.Stages.Max(x => x.PlannedEnd);
+            var totalSpan = seedEnd - seedStart;
+
+            var candidateAnchor = _cal.NormalizeStart(finishDeadline - totalSpan);
+            if (candidateAnchor < earliestAnchor)
+                candidateAnchor = earliestAnchor;
+
+            var stepMinutes = Math.Max(5, _opt.AnchorSearchStepMinutes);
+
+            var totalMinutes = Math.Max(0, (candidateAnchor - earliestAnchor).TotalMinutes);
+            var maxIterations = Math.Max(1, (int)Math.Ceiling(totalMinutes / stepMinutes) + 1);
+
+            var anchor = candidateAnchor;
+
+            for (var i = 0; i < maxIterations; i++)
+            {
+                var plan = await BuildStagePlansFromAnchorAsync(
+                    ctx,
+                    anchor,
+                    steps,
+                    normalizedCsv,
+                    ct);
+
+                var finish = plan.Stages.Count == 0
+                    ? anchor
+                    : plan.Stages.Max(x => x.PlannedEnd);
+
+                if (finish <= finishDeadline)
+                    return plan;
+
+                anchor = anchor.AddMinutes(-stepMinutes);
+                if (anchor < earliestAnchor)
+                    break;
+            }
+
+            return null;
+        }
+
         private static bool IsFinished(task t)
         {
             return string.Equals(t.status, "Finished", StringComparison.OrdinalIgnoreCase)
@@ -1021,6 +1111,57 @@ namespace AMMS.Application.Services
         {
             public machine Machine { get; init; } = null!;
             public List<DateTime> LaneAvailableAt { get; init; } = new();
+        }
+        private async Task<DateTime> ResolveQueueAnchorAsync(
+    PlanningContext ctx,
+    DateTime proposedAnchor,
+    CancellationToken ct)
+        {
+            if (!_opt.enforce_fifo_by_order_date)
+                return proposedAnchor;
+
+            if (!ctx.OrderId.HasValue || ctx.OrderId.Value <= 0)
+                return proposedAnchor;
+
+            var currentOrderId = ctx.OrderId.Value;
+            var currentOrderDate = DateTime.SpecifyKind(ctx.QueueDateTime, DateTimeKind.Unspecified);
+
+            var olderQueueTails = await (
+                from pr in _db.productions.AsNoTracking()
+                join o in _db.orders.AsNoTracking() on pr.order_id equals o.order_id
+                where pr.order_id != null
+                      && o.order_id != currentOrderId
+                      && (
+                            o.order_date < currentOrderDate ||
+                            (o.order_date == currentOrderDate && o.order_id < currentOrderId)
+                         )
+                let lastTaskEnd = _db.tasks.AsNoTracking()
+                    .Where(t => t.prod_id == pr.prod_id)
+                    .Select(t => (DateTime?)t.planned_end_time ?? t.end_time)
+                    .OrderByDescending(x => x)
+                    .FirstOrDefault()
+                select new
+                {
+                    queue_tail = lastTaskEnd
+                                 ?? pr.planned_start_date
+                                 ?? pr.actual_start_date
+                                 ?? pr.created_at
+                }
+            ).ToListAsync(ct);
+
+            var maxOlderTail = olderQueueTails
+                .Where(x => x.queue_tail.HasValue)
+                .Select(x => x.queue_tail!.Value)
+                .DefaultIfEmpty(DateTime.MinValue)
+                .Max();
+
+            if (maxOlderTail == DateTime.MinValue)
+                return proposedAnchor;
+
+            var gapMinutes = Math.Max(0, _opt.order_gap_minutes);
+            var fifoAnchor = _cal.NormalizeStart(maxOlderTail.AddMinutes(gapMinutes));
+
+            return fifoAnchor > proposedAnchor ? fifoAnchor : proposedAnchor;
         }
 
         private sealed class StagePlanDraft

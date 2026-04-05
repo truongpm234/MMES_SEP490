@@ -28,6 +28,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task<List<int>> GetTopActiveEstimateIdsByRequestIdAsync(int requestId, int take = 2, CancellationToken ct = default);
         Task<CostSummaryByRequestDto?> GetCostSummaryByRequestIdAsync(int requestId, CancellationToken ct = default);
         Task<cost_estimate?> GetFirstActiveTrackingByRequestIdAsync(int requestId, CancellationToken ct = default);
+        Task<ContractCheckEstimateInfoDto?> GetContractCheckEstimateInfoAsync(int requestId, int? acceptedEstimateId, CancellationToken ct = default);
     }
 }
 

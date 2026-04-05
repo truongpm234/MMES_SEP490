@@ -11,6 +11,7 @@ namespace AMMS.Shared.DTOs.Requests
         public string? customer_email { get; set; }
         public DateTime? delivery_date { get; set; }
         public string? delivery_date_change_reason { get; set; }
+        public bool? is_check_contract { get; set; }
         public string? product_name { get; set; }
         public int? quantity { get; set; }
         public string? description { get; set; }
@@ -95,5 +96,6 @@ namespace AMMS.Shared.DTOs.Requests
         public int? wave_sheets_used { get; set; }
         public string? paper_alternative { get; set; }
         public string? wave_alternative { get; set; }
+        public string? contract_check_note { get; set; }
     }
 }

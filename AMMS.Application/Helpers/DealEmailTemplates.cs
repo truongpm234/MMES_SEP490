@@ -351,5 +351,107 @@ namespace AMMS.Application.Helpers
 
             return q.created_at.AddDays(7);
         }
+
+        public static string RequestResignContractUploadEmail(
+    order_request req,
+    cost_estimate? est,
+    string uploadUrl,
+    string customMessage)
+        {
+            var customerName = string.IsNullOrWhiteSpace(req.customer_name)
+                ? "Quý khách"
+                : Safe(req.customer_name);
+
+            var productName = Safe(req.product_name);
+            var phone = Safe(req.customer_phone);
+            var email = Safe(req.customer_email);
+            var address = Safe(req.detail_address);
+            var deliveryDate = req.delivery_date.HasValue
+                ? req.delivery_date.Value.ToString("dd/MM/yyyy")
+                : "N/A";
+
+            var contractUrl = est != null && !string.IsNullOrWhiteSpace(est.consultant_contract_path)
+                ? $@"
+<tr>
+  <td style='padding:8px 0;width:36%;font-size:12px;color:#64748b;vertical-align:top;'>Hợp đồng tham chiếu</td>
+  <td style='padding:8px 0;font-size:12px;color:#2563eb;font-weight:700;word-break:break-all;line-height:1.6;'>
+    {Safe(est.consultant_contract_path)}
+  </td>
+</tr>"
+                : "";
+
+            var safeUploadUrl = Safe(uploadUrl);
+            var safeMessage = Safe(customMessage);
+
+            return $@"
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1'>
+</head>
+<body style='margin:0;background:#f8fafc;padding:30px 0;font-family:{EmailFontFamily};'>
+  <div style='max-width:720px;margin:0 auto;padding:0 12px;'>
+    
+    <div style='background:linear-gradient(135deg,#dc2626 0%,#ea580c 100%);padding:28px 24px;border-radius:18px 18px 0 0;text-align:center;color:#fff;box-shadow:0 10px 30px rgba(15,23,42,0.12);'>
+      <div style='font-size:12px;font-weight:900;letter-spacing:1.2px;text-transform:uppercase;opacity:0.95;'>MES CONTRACT REVIEW</div>
+      <div style='margin-top:10px;font-size:24px;font-weight:900;line-height:1.35;'>Yêu cầu tải lên lại hợp đồng</div>
+      <div style='margin-top:8px;font-size:13px;opacity:0.92;'>Request AM{req.order_request_id:D6}</div>
+    </div>
+
+    <div style='background:#ffffff;padding:26px 24px 22px;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 18px 18px;box-shadow:0 12px 30px rgba(15,23,42,0.06);'>
+      <p style='margin:0 0 14px 0;font-size:14px;color:#334155;line-height:1.7;'>
+        Chào <b>{customerName}</b>,
+      </p>
+
+      <p style='margin:0 0 14px 0;font-size:14px;color:#334155;line-height:1.7;'>
+        Sau khi kiểm tra hợp đồng của đơn hàng <b>AM{req.order_request_id:D6}</b>, chúng tôi nhận thấy tài liệu hiện tại cần được điều chỉnh / ký lại để đúng quy trình xử lý.
+      </p>
+
+      <div style='background:#fff7ed;border:1px solid #fdba74;border-radius:14px;padding:16px 18px;margin:18px 0;'>
+        <div style='font-size:13px;font-weight:900;color:#c2410c;text-transform:uppercase;margin-bottom:8px;'>Nội dung cần khách hàng thực hiện</div>
+        <div style='font-size:13px;color:#7c2d12;line-height:1.7;'>
+          {safeMessage}
+        </div>
+      </div>
+
+      <div style='background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:18px;margin:18px 0;'>
+        <div style='font-size:13px;font-weight:900;color:#1d4ed8;text-transform:uppercase;margin-bottom:10px;'>Link tải lên lại hợp đồng</div>
+        <p style='margin:0 0 12px 0;font-size:13px;color:#334155;line-height:1.7;'>
+          Vui lòng copy đường dẫn bên dưới và mở bằng trình duyệt để tải lên bản hợp đồng mới:
+        </p>
+        <div style='background:#ffffff;border:2px dashed #93c5fd;border-radius:10px;padding:14px 16px;font-size:14px;font-weight:800;color:#2563eb;word-break:break-all;line-height:1.7;user-select:all;-webkit-user-select:all;'>
+          {safeUploadUrl}
+        </div>
+      </div>
+
+      <div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;padding:16px 18px;margin:18px 0;box-shadow:0 6px 18px rgba(15,23,42,0.04);'>
+        <div style='font-size:13px;font-weight:900;color:#0f172a;text-transform:uppercase;margin-bottom:10px;'>Thông tin đơn hàng</div>
+        <table width='100%' cellpadding='0' cellspacing='0' style='border-collapse:collapse;'>
+          <tr><td style='padding:8px 0;width:36%;font-size:12px;color:#64748b;'>Mã request</td><td style='padding:8px 0;font-size:12px;color:#0f172a;font-weight:700;'>AM{req.order_request_id:D6}</td></tr>
+          <tr><td style='padding:8px 0;font-size:12px;color:#64748b;'>Khách hàng</td><td style='padding:8px 0;font-size:12px;color:#0f172a;font-weight:700;'>{customerName}</td></tr>
+          <tr><td style='padding:8px 0;font-size:12px;color:#64748b;'>Số điện thoại</td><td style='padding:8px 0;font-size:12px;color:#0f172a;font-weight:700;'>{phone}</td></tr>
+          <tr><td style='padding:8px 0;font-size:12px;color:#64748b;'>Email</td><td style='padding:8px 0;font-size:12px;color:#0f172a;font-weight:700;'>{email}</td></tr>
+          <tr><td style='padding:8px 0;font-size:12px;color:#64748b;'>Sản phẩm</td><td style='padding:8px 0;font-size:12px;color:#0f172a;font-weight:700;'>{productName}</td></tr>
+          <tr><td style='padding:8px 0;font-size:12px;color:#64748b;'>Ngày giao</td><td style='padding:8px 0;font-size:12px;color:#0f172a;font-weight:700;'>{deliveryDate}</td></tr>
+          <tr><td style='padding:8px 0;font-size:12px;color:#64748b;'>Địa chỉ</td><td style='padding:8px 0;font-size:12px;color:#0f172a;font-weight:700;'>{address}</td></tr>
+          {contractUrl}
+        </table>
+      </div>
+
+      <div style='margin-top:18px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:14px 16px;'>
+        <div style='font-size:12px;color:#475569;line-height:1.7;'>
+          Sau khi tải lên lại hợp đồng, hệ thống sẽ chuyển sang bước kiểm tra lại để tiếp tục xử lý bố cục và sản xuất.
+        </div>
+      </div>
+    </div>
+
+    <div style='margin-top:14px;background:linear-gradient(180deg,#edf2f7 0%,#e2e8f0 100%);padding:15px;text-align:center;font-size:12px;color:#64748b;border-radius:12px;'>
+      Email này được gửi tự động từ hệ thống MES.
+    </div>
+  </div>
+</body>
+</html>";
+        }
     }
 }

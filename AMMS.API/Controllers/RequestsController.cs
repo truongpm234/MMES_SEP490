@@ -1152,8 +1152,8 @@ namespace AMMS.API.Controllers
         }
         [HttpPut("designer-confirm-layout")]
         public async Task<IActionResult> DesignerConfirmLayout(
-    [FromBody] ConfirmLayoutRequestDto dto,
-    CancellationToken ct)
+[FromBody] ConfirmLayoutRequestDto dto,
+CancellationToken ct)
         {
             try
             {
@@ -1168,6 +1168,7 @@ namespace AMMS.API.Controllers
                     await using var tx = await _db.Database.BeginTransactionAsync(ct);
 
                     var req = await _service.GetRequestForUpdateAsync(dto.request_id, ct);
+
                     if (req == null)
                         throw new InvalidOperationException("Order request not found");
 
@@ -1177,36 +1178,35 @@ namespace AMMS.API.Controllers
                     if (!string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase))
                         throw new InvalidOperationException("Only paid/accepted requests can be layout-confirmed");
 
+                    if (req.is_check_contract != true)
+                        throw new InvalidOperationException("Manager has not approved contract yet. is_check_contract must be true before layout confirmation.");
+
                     orderId = req.order_id.Value;
 
                     var ord = await _db.orders.FirstOrDefaultAsync(x => x.order_id == orderId, ct);
                     if (ord == null)
                         throw new InvalidOperationException("Order not found");
 
-                    if (!ord.layout_confirmed)
+                    ord.layout_confirmed = true;
+
+                    if (string.IsNullOrWhiteSpace(ord.status) ||
+                        string.Equals(ord.status, "LayoutPending", StringComparison.OrdinalIgnoreCase))                     
                     {
-                        ord.layout_confirmed = true;
-
-                        if (string.IsNullOrWhiteSpace(ord.status) ||
-                            string.Equals(ord.status, "LayoutPending", StringComparison.OrdinalIgnoreCase))
-                        {
-                            ord.status = "Scheduled";
-                        }
-
-                        await _db.SaveChangesAsync(ct);
+                        ord.status = "Scheduled";
                     }
 
+                    await _db.SaveChangesAsync(ct);
                     await tx.CommitAsync(ct);
                 });
 
-                await EnsureProductionAndTasksCreatedAsync(orderId, ct);
+                _service.QueueRelease(orderId);
 
-                return Ok(new
+                return Accepted(new
                 {
                     ok = true,
                     request_id = dto.request_id,
                     order_id = orderId,
-                    message = "Designer confirmed layout. Production flow released successfully."
+                    message = "Designer confirmed layout. Production release started in background."
                 });
             }
             catch (Exception ex)
@@ -1219,64 +1219,94 @@ namespace AMMS.API.Controllers
             }
         }
 
-        private async Task EnsureProductionAndTasksCreatedAsync(int orderId, CancellationToken ct)
+
+        [HttpPut("contract-check-status")]
+        public async Task<IActionResult> UpdateContractCheckStatus([FromBody] UpdateContractCheckStatusDto dto, CancellationToken ct)
         {
-            var req = await _db.order_requests
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.order_id == orderId, ct);
-
-            if (req == null)
-                throw new InvalidOperationException("Order request not found for this order");
-
-            var ord = await _db.orders
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.order_id == orderId, ct);
-
-            if (ord == null)
-                throw new InvalidOperationException("Order not found");
-
-            if (!ord.layout_confirmed)
-                throw new InvalidOperationException("Layout has not been confirmed yet");
-
-            var prod = await _db.productions
-                .AsNoTracking()
-                .Where(p => p.order_id == orderId && p.end_date == null)
-                .OrderByDescending(p => p.prod_id)
-                .FirstOrDefaultAsync(ct);
-
-            var hasTasks = prod != null &&
-                           await _db.tasks.AsNoTracking().AnyAsync(t => t.prod_id == prod.prod_id, ct);
-
-            if (prod != null && hasTasks)
-                return;
-
-            var productTypeId = await _db.product_types
-                .Where(x => x.code == req.product_type)
-                .Select(x => x.product_type_id)
-                .FirstOrDefaultAsync(ct);
-
-            if (productTypeId <= 0)
-                throw new InvalidOperationException("product_type invalid (cannot map product_type_id)");
-
-            var item = await _db.order_items
-                .AsNoTracking()
-                .Where(x => x.order_id == orderId)
-                .OrderBy(x => x.item_id)
-                .FirstOrDefaultAsync(ct);
-
-            await _schedulingService.ScheduleOrderAsync(
-                orderId: orderId,
-                productTypeId: productTypeId,
-                productionProcessCsv: item?.production_process,
-                managerId: 3
-            );
-
-            var trackedOrder = await _db.orders.FirstOrDefaultAsync(x => x.order_id == orderId, ct);
-            if (trackedOrder != null &&
-                string.Equals(trackedOrder.status, "LayoutPending", StringComparison.OrdinalIgnoreCase))
+            try
             {
-                trackedOrder.status = "Scheduled";
-                await _db.SaveChangesAsync(ct);
+                if (dto == null)
+                    return BadRequest(new { message = "Request body is required" });
+
+                if (dto.request_id <= 0)
+                    return BadRequest(new { message = "request_id is required" });
+
+                if (!dto.is_check_contract.HasValue)
+                    return BadRequest(new { message = "is_check_contract is required" });
+
+                await _service.UpdateContractCheckStatusAsync(dto, ct);
+
+                return Ok(new
+                {
+                    ok = true,
+                    request_id = dto.request_id,
+                    is_check_contract = dto.is_check_contract,
+                    contract_check_note = dto.note,
+                    message = dto.is_check_contract.Value
+                        ? "Contract checked successfully. Consultant can confirm layout."
+                        : "Contract has issues. Consultant must ask customer to review and sign again."
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "An unexpected error occurred",
+                    detail = ex.Message
+                });
+            }
+        }
+
+        [HttpPost("email-request-resign-contract")]
+        public async Task<IActionResult> RequestCustomerResignContract(
+    [FromBody] RequestResignContractEmailDto dto,
+    CancellationToken ct)
+        {
+            try
+            {
+                if (dto == null || dto.request_id <= 0)
+                    return BadRequest(new { message = "request_id is required" });
+
+                var req = await _service.GetByIdAsync(dto.request_id);
+                if (req == null)
+                    return NotFound(new { message = "Order request not found" });
+
+                if (req.is_check_contract != false)
+                {
+                    return BadRequest(new
+                    {
+                        message = "Only request with is_check_contract = false can send re-sign contract email"
+                    });
+                }
+
+                await _dealService.SendRequestResignContractEmailAsync(dto.request_id, dto.custom_message, ct);
+
+                return Ok(new
+                {
+                    ok = true,
+                    request_id = dto.request_id,
+                    message = "Re-sign contract email sent successfully"
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Send re-sign contract email failed",
+                    detail = ex.Message
+                });
             }
         }
 
