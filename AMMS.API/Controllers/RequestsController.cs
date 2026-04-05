@@ -1168,6 +1168,7 @@ CancellationToken ct)
                     await using var tx = await _db.Database.BeginTransactionAsync(ct);
 
                     var req = await _service.GetRequestForUpdateAsync(dto.request_id, ct);
+
                     if (req == null)
                         throw new InvalidOperationException("Order request not found");
 
@@ -1176,6 +1177,9 @@ CancellationToken ct)
 
                     if (!string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase))
                         throw new InvalidOperationException("Only paid/accepted requests can be layout-confirmed");
+
+                    if (req.is_check_contract != true)
+                        throw new InvalidOperationException("Manager has not approved contract yet. is_check_contract must be true before layout confirmation.");
 
                     orderId = req.order_id.Value;
 
@@ -1211,6 +1215,98 @@ CancellationToken ct)
                 {
                     ok = false,
                     message = ex.Message
+                });
+            }
+        }
+
+
+        [HttpPut("contract-check-status")]
+        public async Task<IActionResult> UpdateContractCheckStatus(
+    [FromBody] UpdateContractCheckStatusDto dto,
+    CancellationToken ct)
+        {
+            try
+            {
+                if (dto == null)
+                    return BadRequest(new { message = "Request body is required" });
+
+                if (dto.request_id <= 0)
+                    return BadRequest(new { message = "request_id is required" });
+
+                if (!dto.is_check_contract.HasValue)
+                    return BadRequest(new { message = "is_check_contract is required" });
+
+                await _service.UpdateContractCheckStatusAsync(dto, ct);
+
+                return Ok(new
+                {
+                    ok = true,
+                    request_id = dto.request_id,
+                    is_check_contract = dto.is_check_contract,
+                    message = dto.is_check_contract.Value
+                        ? "Contract checked successfully. Consultant can confirm layout."
+                        : "Contract has issues. Consultant must ask customer to review and sign again."
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "An unexpected error occurred",
+                    detail = ex.Message
+                });
+            }
+        }
+
+        [HttpPost("email-request-resign-contract")]
+        public async Task<IActionResult> RequestCustomerResignContract(
+    [FromBody] RequestResignContractEmailDto dto,
+    CancellationToken ct)
+        {
+            try
+            {
+                if (dto == null || dto.request_id <= 0)
+                    return BadRequest(new { message = "request_id is required" });
+
+                var req = await _service.GetByIdAsync(dto.request_id);
+                if (req == null)
+                    return NotFound(new { message = "Order request not found" });
+
+                if (req.is_check_contract != false)
+                {
+                    return BadRequest(new
+                    {
+                        message = "Only request with is_check_contract = false can send re-sign contract email"
+                    });
+                }
+
+                await _dealService.SendRequestResignContractEmailAsync(dto.request_id, dto.custom_message, ct);
+
+                return Ok(new
+                {
+                    ok = true,
+                    request_id = dto.request_id,
+                    message = "Re-sign contract email sent successfully"
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Send re-sign contract email failed",
+                    detail = ex.Message
                 });
             }
         }

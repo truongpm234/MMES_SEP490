@@ -382,6 +382,13 @@ namespace AMMS.Application.Services
             estimate.customer_signed_contract_path = pdfUrl;
             await _estimateRepo.SaveChangesAsync();
 
+            var request = await _requestRepository.GetByIdAsync(requestId);
+            if (request != null)
+            {
+                request.is_check_contract = null;
+                await _requestRepository.SaveChangesAsync();
+            }
+
             return new UploadCustomerSignedContractResponse
             {
                 request_id = requestId,
