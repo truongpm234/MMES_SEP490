@@ -1,23 +1,18 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace AMMS.Shared.DTOs.Socket
+﻿namespace AMMS.Shared.DTOs.Socket
 {
     public static class RealtimeGroups
     {
         public const string RequestsAll = "requests:all";
-        public static string RequestsByRole(string role) => $"requests:role:{role}";
+        public static string ByRole(string role) => $"requests:role:{role}";
         public static string Request(int requestId) => $"request:{requestId}";
     }
 
     public record RequestChangedEvent(
+        int? order_id,
         int request_id,
         string? old_status,
         string? new_status,
-        string action,          
+        string action,
         DateTime changed_at,
         string? changed_by
     );
