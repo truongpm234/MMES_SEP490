@@ -9,7 +9,7 @@ namespace AMMS.Application.Helpers
         {
             if (est == null) throw new ArgumentNullException(nameof(est));
 
-            return NormalizeMoneyToInt(est.deposit_amount);
+            return NormalizeMoneyToInt(est.deposit_amount) / 100;
         }
 
         public static int GetRemainingAmount(cost_estimate est)
@@ -19,7 +19,7 @@ namespace AMMS.Application.Helpers
             var finalTotal = NormalizeMoneyToInt(est.final_total_cost);
             var deposit = NormalizeMoneyToInt(est.deposit_amount);
 
-            var remaining = finalTotal - deposit;
+            var remaining = (finalTotal - deposit) / 100;
             return remaining > 0 ? remaining : 0;
         }
 
