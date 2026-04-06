@@ -1,11 +1,11 @@
-﻿using AMMS.Application.Helpers;
-using AMMS.Application.Interfaces;
+﻿using AMMS.Application.Interfaces;
+using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Enums;
 using AMMS.Shared.DTOs.Productions;
-using AMMS.Shared.DTOs.Socket;
 using AMMS.Shared.Helpers;
+using Microsoft.EntityFrameworkCore;
 
 namespace AMMS.Application.Services
 {
@@ -13,9 +13,11 @@ namespace AMMS.Application.Services
     {
         private readonly IProductionRepository _repo;
         private readonly IRealtimePublisher _hub;
+        private readonly AppDbContext _db;
 
-        public ProductionService(IProductionRepository repo, IRealtimePublisher hub)
+        public ProductionService(IProductionRepository repo, IRealtimePublisher hub, AppDbContext db)
         {
+            _db = db;
             _repo = repo;
             _hub = hub;
         }
@@ -77,8 +79,8 @@ namespace AMMS.Application.Services
 
         public async Task<int?> StartProductionAndPromoteFirstTaskAsync(int orderId, CancellationToken ct = default)
         {
-            var evt = new RequestChangedEvent(orderId, "Scheduled", "InProcessing", "Start", AppTime.NowVnUnspecified(), "production-manager");
-            await _hub.PublishRequestChangedAsync(evt);
+            var res = await _db.order_requests.FirstOrDefaultAsync(o => o.order_id == orderId);
+            //Khánh sửa signalr
             return await _repo.StartProductionByOrderIdAndPromoteFirstTaskAsync(orderId, AppTime.NowVnUnspecified(), ct);
         }
 

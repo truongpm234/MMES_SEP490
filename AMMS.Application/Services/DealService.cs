@@ -186,14 +186,8 @@ namespace AMMS.Application.Services
                     }
                 }
 
-                await _rt.PublishRequestChangedAsync(new(
-                    request_id: req.order_request_id,
-                    old_status: "Verified",
-                    new_status: "Waiting",
-                    action: "sent_deal_email",
-                    changed_at: AppTime.NowVnUnspecified(),
-                    changed_by: null
-                ));
+                //Khánh sửa signalr
+                await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("waiting", new { message = $"Yêu cầu #{req.order_request_id} đang chờ khách hàng xác nhận thanh toán cọc", id = req.order_request_id });
             }
             catch
             {
@@ -215,6 +209,8 @@ namespace AMMS.Application.Services
                 estimateId: est.estimate_id,
                 quoteId: req.quote_id,
                 ct: CancellationToken.None);
+            await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("deposited", new { message = $"Yêu cầu {req.order_request_id} - {req.order_id} đã được đặt cọc" });
+            await _hub.Clients.Group(RealtimeGroups.ByRole("production manager")).SendAsync("scheduled", new { message = $"#{req.order_id} đã được lên lịch sản xuất", id = req.order_id });
 
             return dto.check_out_url ?? "";
         }
@@ -244,8 +240,7 @@ namespace AMMS.Application.Services
 
             var safeReason = System.Net.WebUtility.HtmlEncode(reason ?? "");
 
-            RequestChangedEvent evt = new RequestChangedEvent(orderRequestId, "", req.process_status, "customer_rejected", DateTime.Now, "Customer");
-            await _rt.PublishRequestChangedAsync(evt);
+            //Khánh sửa signalr
 
             await SendConsultantStatusEmailAsync(req, est, $"KHACH TU CHOI (LY DO: {safeReason})");
         }
@@ -961,14 +956,7 @@ namespace AMMS.Application.Services
                 $"[MES] Yêu cầu tải lên lại hợp đồng - Request AM{req.order_request_id:D6}",
                 html));
 
-            await _rt.PublishRequestChangedAsync(new RequestChangedEvent(
-                request_id: req.order_request_id,
-                old_status: req.process_status ?? "",
-                new_status: req.process_status ?? "",
-                action: "request_reupload_contract_email_sent",
-                changed_at: AppTime.NowVnUnspecified(),
-                changed_by: "Consultant"
-            ));
+            //khánh sửa signalr
         }
     }
 }

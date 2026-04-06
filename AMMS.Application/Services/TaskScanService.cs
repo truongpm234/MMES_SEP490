@@ -1,10 +1,13 @@
 ﻿using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
+using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Productions;
+using AMMS.Shared.DTOs.Socket;
 using AMMS.Shared.Helpers;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 
 namespace AMMS.Application.Services
 {
@@ -19,8 +22,10 @@ namespace AMMS.Application.Services
         private readonly IHubContext<RealtimeHub> _hub;
         private readonly IRequestRepository _orderRequestRepo;
         private readonly IOrderRepository _orderRepo;
+        private readonly AppDbContext _db;
 
         public TaskScanService(
+            AppDbContext db,
             ITaskQrTokenService tokenSvc,
             ITaskRepository taskRepo,
             ITaskLogRepository logRepo,
@@ -113,6 +118,25 @@ namespace AMMS.Application.Services
                 await _taskRepo.SaveChangesAsync(innerCt);
 
                 bool promotedNext = await _taskRepo.PromoteNextTaskToReadyAsync(t.task_id, now, innerCt);
+                task? nextTask = null;
+
+                if (promotedNext)
+                {
+                    nextTask = await _db.tasks
+                        .Include(x => x.process)
+                        .Where(x => x.prod_id == t.prod_id
+                            && x.status == "Ready"
+                            && x.task_id != t.task_id)
+                        .OrderBy(x => x.seq_num)
+                        .ThenBy(x => x.task_id)
+                        .FirstOrDefaultAsync(innerCt);
+                    if (nextTask != null)
+                    {
+                        await _hub.Clients.Group(RealtimeGroups.ByRole(nextTask.name)).SendAsync("nextTask", new { message = $"Công đoạn {nextTask.name} được bắt đầu" });
+                    }
+
+                }
+
                 await _taskRepo.SaveChangesAsync(innerCt);
 
                 if (t.prod_id.HasValue)
@@ -148,7 +172,8 @@ namespace AMMS.Application.Services
 
                     await _taskRepo.SaveChangesAsync(innerCt);
                 }
-
+                await _hub.Clients
+                .Group(RealtimeGroups.ByRole("production manager")).SendAsync("finishedTask", new { message = $"Hoàn thành công đoạn" });
                 return new ScanTaskResult
                 {
                     task_id = t.task_id,
@@ -167,27 +192,14 @@ namespace AMMS.Application.Services
             {
             }
 
-            await _hub.Clients
-                .Group($"prod-{result.prod_id}")
-                .SendAsync("ProdUpdated", new
-                {
-                    prodId = result.prod_id,
-                    taskId = result.task_id,
-                    status = "Finished",
-                    promoted_next = result.message.Contains("Flow released."),
-                    flow_gate = "UPDATED"
-                }, ct);
+
 
             if (result.prod_id.HasValue)
             {
                 var prod = await _prodRepo.GetByIdForUpdateAsync(result.prod_id.Value, ct);
                 if (prod?.order_id != null)
                 {
-                    await _hub.Clients.All.SendAsync("OrderUpdated", new
-                    {
-                        orderId = prod.order_id,
-                        status = prod.status
-                    }, ct);
+                    await _hub.Clients.All.SendAsync("finishedProduction", new { message = $"Đơn hàng {prod.order_id} đã được sản xuất xong" });
                 }
             }
 

@@ -5,8 +5,10 @@ using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Requests;
+using AMMS.Shared.DTOs.Socket;
 using AMMS.Shared.DTOs.User;
 using AMMS.Shared.Helpers;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -22,6 +24,7 @@ namespace AMMS.Application.Services
         private readonly IMaterialRepository _materialRepo;
         private readonly IBomRepository _bomRepo;
         private readonly IRealtimePublisher _rt;
+        private readonly IHubContext<RealtimeHub> _hub;
         private readonly IAccessService _currentUser;
         private readonly IUserRepository _userRepo;
         private readonly ICloudinaryFileStorageService _cloudinaryStorage;
@@ -39,6 +42,7 @@ namespace AMMS.Application.Services
             IMaterialRepository materialRepo,
             IBomRepository bomRepo,
             IRealtimePublisher rt,
+            IHubContext<RealtimeHub> hub,
             AppDbContext db,
             IAccessService currentUser,
             IUserRepository userRepo,
@@ -57,6 +61,7 @@ namespace AMMS.Application.Services
             _bomRepo = bomRepo;
             _db = db;
             _rt = rt;
+            _hub = hub;
             _currentUser = currentUser;
             _userRepo = userRepo;
             _cloudinaryStorage = cloudinaryStorage;
@@ -115,13 +120,8 @@ namespace AMMS.Application.Services
             await _requestRepo.AddAsync(entity);
             await _requestRepo.SaveChangesAsync();
 
-            await _rt.PublishRequestChangedAsync(new(
-                request_id: entity.order_request_id,
-                old_status: null,
-                new_status: entity.process_status,
-                action: "created",
-                changed_at: now,
-                changed_by: null));
+            //khánh sửa signalr
+            await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("pending", new { message = $"Có yêu cầu #{entity.order_request_id} mới được tạo", id = entity.order_request_id });
 
             return new CreateRequestResponse
             {
@@ -155,14 +155,8 @@ namespace AMMS.Application.Services
             await _requestRepo.AddAsync(entity);
             await _requestRepo.SaveChangesAsync();
 
-            await _rt.PublishRequestChangedAsync(new(
-                request_id: entity.order_request_id,
-                old_status: null,
-                new_status: entity.process_status,
-                action: "created",
-                changed_at: now,
-                changed_by: null));
-
+            //Khánh sửa signalr
+            await _hub.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("consultantCreateRequest", new { message = $"Có yêu cầu {entity.order_request_id} cần duyệt", id = entity.order_request_id });
             return new CreateRequestResponse
             {
                 order_request_id = entity.order_request_id,
@@ -518,11 +512,12 @@ namespace AMMS.Application.Services
 
             req.is_check_contract = null;
             req.contract_check_note = null;
-
+            //Khánh sửa signalr
             if (st == "Verified")
             {
                 req.verified_at = now;
                 req.quote_expires_at = now.AddDays(7);
+                await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("verified", new { message = $"Yêu cầu #{req.order_request_id} đã được duyệt", id = req.order_request_id });
             }
             else
             {
@@ -534,18 +529,12 @@ namespace AMMS.Application.Services
             {
                 req.accepted_estimate_id = null;
                 await _estimateRepo.DeactivateAllByRequestIdAsync(dto.request_id, ct);
+                await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("declined", new { message = $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa", id = req.order_request_id });
             }
 
             await _requestRepo.SaveChangesAsync();
 
-            await _rt.PublishRequestChangedAsync(new(
-                request_id: req.order_request_id,
-                old_status: oldStatus,
-                new_status: req.process_status,
-                action: (st == "Verified") ? "manager_verified" : "manager_declined",
-                changed_at: now,
-                changed_by: null
-            ));
+
         }
 
         public async Task SubmitEstimateForApprovalAsync(SubmitForApprovalRequestDto input)
@@ -598,20 +587,9 @@ namespace AMMS.Application.Services
 
             await _requestRepo.SaveChangesAsync();
 
-            await _rt.PublishRequestNoteChangedAsync(new(
-                request_id: req.order_request_id,
-                consultant_note: req.consultant_note,
-                changed_at: AppTime.NowVnUnspecified()
-            ));
-
-            await _rt.PublishRequestChangedAsync(new(
-                request_id: req.order_request_id,
-                old_status: oldStatus,
-                new_status: req.process_status,
-                action: "submitted_for_approval",
-                changed_at: AppTime.NowVnUnspecified(),
-                changed_by: null
-            ));
+            //Khánh sửa signalr
+            await _hub.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("processing", new { message = $"Có yêu cầu #{req.order_request_id} cần duyệt" });
+            //Khánh sửa signalr
         }
 
         public async Task<RequestWithTwoEstimatesDto?> GetCompareQuotesAsync(int requestId, CancellationToken ct = default)
@@ -793,6 +771,7 @@ namespace AMMS.Application.Services
             await _estimateRepo.SaveChangesAsync();
 
             await _rt.PublishRequestChangedAsync(new(
+                order_id: clonedRequest.order_id,
                 request_id: clonedRequest.order_request_id,
                 old_status: null,
                 new_status: clonedRequest.process_status,
@@ -1027,7 +1006,7 @@ namespace AMMS.Application.Services
                 "KEO_BOI");
             var laminationMaterial = await ResolveMaterialByCodesAsync(
                 "MANG_CAN",
-                "LAMINATION");           
+                "LAMINATION");
 
             var bomLines = new List<bom>();
 
@@ -1154,6 +1133,7 @@ namespace AMMS.Application.Services
                         .FirstOrDefaultAsync(x => x.order_request_id == requestId);
 
                     await scopedRt.PublishRequestChangedAsync(new(
+                        order_id: req.order_id,
                         request_id: requestId,
                         old_status: req?.process_status,
                         new_status: req?.process_status,
@@ -1509,6 +1489,7 @@ namespace AMMS.Application.Services
             var now = AppTime.NowVnUnspecified();
 
             await _rt.PublishRequestChangedAsync(new(
+                order_id: req.order_id,
                 request_id: req.order_request_id,
                 old_status: req.process_status,
                 new_status: req.process_status,

@@ -24,10 +24,10 @@ namespace AMMS.Application.Services
             await _hub.Clients.Group(RealtimeGroups.RequestsAll)
                 .SendAsync("request.changed", evt, ct);
 
-            await _hub.Clients.Group(RealtimeGroups.RequestsByRole("manager"))
+            await _hub.Clients.Group(RealtimeGroups.ByRole("manager"))
                 .SendAsync("request.changed", evt, ct);
 
-            await _hub.Clients.Group(RealtimeGroups.RequestsByRole("consultant"))
+            await _hub.Clients.Group(RealtimeGroups.ByRole("consultant"))
                 .SendAsync("request.changed", evt, ct);
 
             await _hub.Clients.Group(RealtimeGroups.Request(evt.request_id))
