@@ -15,9 +15,13 @@ namespace AMMS.API.Controllers
         }
 
         [HttpGet("get-noti-by-role-id")]
-        public async Task<IActionResult> GetNotiByRoleId(int id)
+        public async Task<IActionResult> GetNotiByRoleId(int id, int? user_id)
         {
-            return Ok(_notiService.GetNotiByRoleId(id));
+            if (user_id != null)
+            {
+                return Ok(await _notiService.GetConsultantNotiByUserId(id, user_id));
+            }
+            return Ok(await _notiService.GetNotiByRoleId(id));
         }
     }
 }

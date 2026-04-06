@@ -17,6 +17,7 @@ namespace AMMS.Application.Services
 {
     public class RequestService : IRequestService
     {
+        private readonly NotificationService _notificationService;
         private readonly IRequestRepository _requestRepo;
         private readonly IOrderRepository _orderRepo;
         private readonly AppDbContext _db;
@@ -36,6 +37,7 @@ namespace AMMS.Application.Services
         private readonly ILogger<RequestService> _logger;
 
         public RequestService(
+            NotificationService notificationService,
             IRequestRepository requestRepo,
             IOrderRepository orderRepo,
             ICostEstimateRepository estimateRepo,
@@ -54,6 +56,7 @@ namespace AMMS.Application.Services
             IServiceScopeFactory serviceScopeFactory,
             ILogger<RequestService> logger)
         {
+            _notificationService = notificationService;
             _requestRepo = requestRepo;
             _orderRepo = orderRepo;
             _estimateRepo = estimateRepo;
@@ -120,8 +123,10 @@ namespace AMMS.Application.Services
             await _requestRepo.AddAsync(entity);
             await _requestRepo.SaveChangesAsync();
 
+            await _notificationService.CreateNotfi(2, $"Có yêu cầu #{entity.order_request_id} mới được tạo", entity.assigned_consultant);
+
             //khánh sửa signalr
-            await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("pending", new { message = $"Có yêu cầu #{entity.order_request_id} mới được tạo", id = entity.order_request_id });
+            await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("pending", new { message = $"Có yêu cầu #{entity.order_request_id} mới được tạo", user_id = entity.assigned_consultant });
 
             return new CreateRequestResponse
             {
@@ -155,6 +160,7 @@ namespace AMMS.Application.Services
             await _requestRepo.AddAsync(entity);
             await _requestRepo.SaveChangesAsync();
 
+            await _notificationService.CreateNotfi(3, $"Có yêu cầu {entity.order_request_id} cần duyệt", null);
             //Khánh sửa signalr
             await _hub.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("consultantCreateRequest", new { message = $"Có yêu cầu {entity.order_request_id} cần duyệt", id = entity.order_request_id });
             return new CreateRequestResponse
@@ -517,7 +523,8 @@ namespace AMMS.Application.Services
             {
                 req.verified_at = now;
                 req.quote_expires_at = now.AddDays(7);
-                await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("verified", new { message = $"Yêu cầu #{req.order_request_id} đã được duyệt", id = req.order_request_id });
+                await _notificationService.CreateNotfi(2, $"Yêu cầu #{req.order_request_id} đã được duyệt", req.assigned_consultant);
+                await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("verified", new { message = $"Yêu cầu #{req.order_request_id} đã được duyệt", user_id = req.assigned_consultant });
             }
             else
             {
@@ -529,7 +536,8 @@ namespace AMMS.Application.Services
             {
                 req.accepted_estimate_id = null;
                 await _estimateRepo.DeactivateAllByRequestIdAsync(dto.request_id, ct);
-                await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("declined", new { message = $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa", id = req.order_request_id });
+                await _notificationService.CreateNotfi(2, $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa", req.assigned_consultant);
+                await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("declined", new { message = $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa", user_id = req.assigned_consultant });
             }
 
             await _requestRepo.SaveChangesAsync();
