@@ -700,7 +700,9 @@ namespace AMMS.Application.Services
             var allowRemainingPayment =
                 string.Equals(prodStatus, "Finished", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(prodStatus, "PendingPaid", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(prodStatus, "Paid", StringComparison.OrdinalIgnoreCase);
+                string.Equals(prodStatus, "Paid", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(prodStatus, "Scheduled", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(prodStatus, "Delivery", StringComparison.OrdinalIgnoreCase);
 
             if (!allowRemainingPayment)
             {

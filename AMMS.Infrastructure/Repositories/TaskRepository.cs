@@ -232,7 +232,7 @@ namespace AMMS.Infrastructure.Repositories
 
         public async Task<TaskQtyPolicyDto?> GetQtyPolicyAsync(int taskId, CancellationToken ct = default)
         {
-            const int TokenQtyMax = 0xFFFF; // 65535
+            const int TokenQtyMax = 0xFFFF;
 
             var taskRow = await _db.tasks
                 .AsNoTracking()
@@ -372,93 +372,40 @@ namespace AMMS.Infrastructure.Repositories
             var numberOfPlates = SafePositive(req?.number_of_plates ?? 0, 1);
 
             if (sheetsRequired <= 0)
-            {
                 sheetsRequired = Math.Max(1, (int)Math.Ceiling(orderQty / (decimal)nUp));
-            }
 
             if (sheetsTotal <= 0)
-            {
                 sheetsTotal = sheetsRequired + sheetsWaste;
-            }
 
             if (sheetsTotal <= 0)
-            {
                 sheetsTotal = sheetsRequired;
-            }
 
-            var happyCaseQty = Math.Max(orderQty, SafeMul(sheetsRequired, nUp));
-            var maxProductQty = Math.Max(happyCaseQty, SafeMul(Math.Max(sheetsTotal, 1), nUp));
-            var clampedMaxProductQty = Math.Min(maxProductQty, TokenQtyMax);
-            var sheetProductCap = Math.Min(SafeMul(Math.Max(sheetsTotal, 1), nUp), TokenQtyMax);
+            if (sheetsTotal <= 0)
+                sheetsTotal = 1;
 
-            var routeCodes = route.Select(x => Norm(x.process_code)).ToList();
-            var cutIndex = routeCodes.FindIndex(x => x == "CAT");
+            var routeCodes = route
+                .Select(x => (string?)x.process_code)
+                .ToList();
 
-            if (IsRalo(pcode))
-            {
-                var plateQty = Math.Max(1, numberOfPlates);
-                plateQty = Math.Min(plateQty, TokenQtyMax);
-
-                return new TaskQtyPolicyDto
-                {
-                    task_id = taskId,
-                    process_code = pcode,
-                    process_name = pname,
-                    qty_unit = "bản",
-
-                    min_allowed = plateQty,
-                    max_allowed = plateQty,
-                    suggested_qty = plateQty,
-
-                    order_qty = orderQty,
-                    sheets_required = sheetsRequired,
-                    sheets_waste = sheetsWaste,
-                    sheets_total = sheetsTotal,
-                    n_up = nUp,
-                    number_of_plates = numberOfPlates,
-
-                    happy_case_qty = plateQty,
-                    stage_index = currentIndex,
-                    stage_count = route.Count
-                };
-            }
-
-            if (pcode == "CAT")
-            {
-                return new TaskQtyPolicyDto
-                {
-                    task_id = taskId,
-                    process_code = pcode,
-                    process_name = pname,
-                    qty_unit = "sp",
-
-                    min_allowed = 1,
-                    max_allowed = sheetProductCap,
-                    suggested_qty = sheetProductCap,
-
-                    order_qty = orderQty,
-                    sheets_required = sheetsRequired,
-                    sheets_waste = sheetsWaste,
-                    sheets_total = sheetsTotal,
-                    n_up = nUp,
-                    number_of_plates = numberOfPlates,
-
-                    happy_case_qty = sheetProductCap,
-                    stage_index = currentIndex,
-                    stage_count = route.Count
-                };
-            }
+            var qtyProfile = StageQuantityHelper.BuildPolicy(
+                currentCode: pcode,
+                currentStageIndex: currentIndex,
+                routeProcessCodes: routeCodes,
+                sheetsTotal: sheetsTotal,
+                nUp: nUp,
+                numberOfPlates: numberOfPlates,
+                tokenQtyMax: TokenQtyMax);
 
             return new TaskQtyPolicyDto
             {
                 task_id = taskId,
                 process_code = pcode,
                 process_name = pname,
-                qty_unit = "sp",
+                qty_unit = qtyProfile.QtyUnit,
 
-                min_allowed = 1,
-                max_allowed = sheetProductCap,
-                suggested_qty = sheetProductCap,
+                min_allowed = qtyProfile.MinAllowed,
+                max_allowed = qtyProfile.MaxAllowed,
+                suggested_qty = qtyProfile.SuggestedQty,
 
                 order_qty = orderQty,
                 sheets_required = sheetsRequired,
@@ -467,7 +414,7 @@ namespace AMMS.Infrastructure.Repositories
                 n_up = nUp,
                 number_of_plates = numberOfPlates,
 
-                happy_case_qty = sheetProductCap,
+                happy_case_qty = qtyProfile.SuggestedQty,
                 stage_index = currentIndex,
                 stage_count = route.Count
             };
@@ -521,16 +468,11 @@ namespace AMMS.Infrastructure.Repositories
             m.busy_quantity += 1;
         }
 
-        private static int SafeInt(int v, int fallback = 1) => v > 0 ? v : fallback;
-
         private static string Norm(string? code)
     => (code ?? "").Trim().ToUpperInvariant();
 
         private static bool IsRalo(string? code)
             => Norm(code) is "RALO" or "RA_LO";
-
-        private static bool IsSheetBasedStage(string? code)
-            => Norm(code) is "IN" or "PHU" or "CAN" or "BOI";
 
         private static int SafePositive(int value, int fallback = 1)
             => value > 0 ? value : fallback;
@@ -545,52 +487,6 @@ namespace AMMS.Infrastructure.Repositories
             {
                 return int.MaxValue;
             }
-        }
-
-        private static int Clamp(int value, int min, int max)
-        {
-            if (value < min) return min;
-            if (value > max) return max;
-            return value;
-        }
-
-        private static int ComputeProgressiveSuggestedQty(
-            int maxQty,
-            int finalSuggestedQty,
-            int position,
-            int count)
-        {
-            if (count <= 1)
-                return finalSuggestedQty;
-
-            if (position <= 0)
-                return maxQty;
-
-            if (position >= count - 1)
-                return finalSuggestedQty;
-
-            var extra = maxQty - finalSuggestedQty;
-            if (extra <= 0)
-                return finalSuggestedQty;
-
-            var reduction = (int)Math.Ceiling(extra * (position / (decimal)(count - 1)));
-            var value = maxQty - reduction;
-
-            return value < finalSuggestedQty ? finalSuggestedQty : value;
-        }
-
-        private static List<int> BuildProductStageIndexes(IReadOnlyList<string> routeCodes, int cutIndex)
-        {
-            if (cutIndex >= 0 && cutIndex + 1 < routeCodes.Count)
-            {
-                return Enumerable.Range(cutIndex + 1, routeCodes.Count - (cutIndex + 1)).ToList();
-            }
-
-            return routeCodes
-                .Select((code, index) => new { code, index })
-                .Where(x => x.code is "BE" or "DUT" or "DAN")
-                .Select(x => x.index)
-                .ToList();
         }
 
         private static HashSet<string> ParseSelectedProcessCodes(string? csv)
