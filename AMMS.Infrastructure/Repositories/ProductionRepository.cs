@@ -2,6 +2,7 @@
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Common;
+using AMMS.Shared.DTOs.Exceptions;
 using AMMS.Shared.DTOs.Productions;
 using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
@@ -752,6 +753,10 @@ namespace AMMS.Infrastructure.Repositories
 
                 if (prod == null)
                     return (int?)null;
+
+                var bomIssues = await GetBomMissingMaterialMappingsAsync(orderId, ct);
+                if (bomIssues.Count > 0)
+                    throw new BomValidationException(bomIssues);
 
                 await ConsumeMaterialsOnProductionStartAsync(prod, now, ct);
 
@@ -1673,6 +1678,29 @@ namespace AMMS.Infrastructure.Repositories
                     purchase_id = null
                 }, ct);
             }
+        }
+
+        private async Task<List<BomMissingMaterialItem>> GetBomMissingMaterialMappingsAsync(
+    int orderId,
+    CancellationToken ct = default)
+        {
+            return await (
+                from oi in _db.order_items.AsNoTracking()
+                join b in _db.boms.AsNoTracking() on oi.item_id equals b.order_item_id
+                where oi.order_id == orderId
+                      && (!b.material_id.HasValue || b.material_id.Value <= 0)
+                orderby oi.item_id, b.bom_id
+                select new BomMissingMaterialItem
+                {
+                    bom_id = b.bom_id,
+                    order_item_id = oi.item_id,
+                    source_estimate_id = b.source_estimate_id,
+                    material_code = b.material_code,
+                    material_name = b.material_name,
+                    unit = b.unit,
+                    qty_total = b.qty_total ?? 0m
+                }
+            ).ToListAsync(ct);
         }
 
         public async Task<production?> GetLatestByOrderIdAsync(int orderId, CancellationToken ct = default)
