@@ -753,6 +753,8 @@ namespace AMMS.Infrastructure.Repositories
                 if (prod == null)
                     return (int?)null;
 
+                await ConsumeMaterialsOnProductionStartAsync(prod, now, ct);
+
                 prod.status = "InProcessing";
                 prod.actual_start_date ??= now;
 
@@ -1543,6 +1545,133 @@ namespace AMMS.Infrastructure.Repositories
 
                 s.lane_no = bestLane + 1;
                 laneAvailableAt[bestLane] = actualEnd;
+            }
+        }
+
+        private async Task ConsumeMaterialsOnProductionStartAsync(
+    production prod,
+    DateTime now,
+    CancellationToken ct = default)
+        {
+            if (!prod.order_id.HasValue || prod.order_id.Value <= 0)
+                throw new InvalidOperationException("Production has no order_id");
+
+            var orderId = prod.order_id.Value;
+            var refDoc = $"PROD-START-{prod.prod_id}";
+
+            // Chống trừ lặp nếu API start bị gọi lại
+            var alreadyConsumed = await _db.stock_moves
+                .AsNoTracking()
+                .AnyAsync(x => x.type == "OUT" && x.ref_doc == refDoc, ct);
+
+            if (alreadyConsumed)
+                return;
+
+            var bomLines = await (
+                from oi in _db.order_items.AsNoTracking()
+                join b in _db.boms.AsNoTracking() on oi.item_id equals b.order_item_id
+                where oi.order_id == orderId
+                select new
+                {
+                    oi.item_id,
+                    order_qty = oi.quantity,
+                    b.material_id,
+                    b.material_code,
+                    b.material_name,
+                    b.unit,
+                    b.qty_total,
+                    b.qty_per_product,
+                    b.wastage_percent
+                }
+            ).ToListAsync(ct);
+
+            if (bomLines.Count == 0)
+                throw new InvalidOperationException("No BOM found for this order. Cannot consume materials.");
+
+            if (bomLines.Any(x => !x.material_id.HasValue || x.material_id.Value <= 0))
+                throw new InvalidOperationException("Some BOM lines do not map to a valid material_id.");
+
+            var requiredByMaterial = bomLines
+                .GroupBy(x => x.material_id!.Value)
+                .Select(g =>
+                {
+                    decimal requiredQty = 0m;
+
+                    foreach (var line in g)
+                    {
+                        decimal lineQty;
+
+                        if (line.qty_total > 0m)
+                        {
+                            lineQty = (decimal)line.qty_total;
+                        }
+                        else
+                        {
+                            var orderQty = line.order_qty <= 0 ? 1 : line.order_qty;
+                            var qtyPerProduct = line.qty_per_product ?? 0m;
+                            var wastageFactor = 1m + ((line.wastage_percent ?? 0m) / 100m);
+
+                            lineQty = orderQty * qtyPerProduct * wastageFactor;
+                        }
+
+                        if (lineQty < 0m) lineQty = 0m;
+                        requiredQty += lineQty;
+                    }
+
+                    var first = g.First();
+
+                    return new
+                    {
+                        MaterialId = g.Key,
+                        MaterialCode = first.material_code,
+                        MaterialName = first.material_name,
+                        Unit = first.unit,
+                        RequiredQty = Math.Round(requiredQty, 4)
+                    };
+                })
+                .ToList();
+
+            var materialIds = requiredByMaterial
+                .Select(x => x.MaterialId)
+                .Distinct()
+                .ToList();
+
+            var materials = await _db.materials
+                .Where(x => materialIds.Contains(x.material_id))
+                .ToDictionaryAsync(x => x.material_id, ct);
+
+            foreach (var req in requiredByMaterial)
+            {
+                if (!materials.TryGetValue(req.MaterialId, out var mat))
+                    throw new InvalidOperationException(
+                        $"Material not found. material_id={req.MaterialId}, code={req.MaterialCode}");
+
+                var stockQty = mat.stock_qty ?? 0m;
+
+                if (stockQty < req.RequiredQty)
+                {
+                    throw new InvalidOperationException(
+                        $"Insufficient stock for material '{mat.name}' ({mat.code}). " +
+                        $"Available={stockQty}, Required={req.RequiredQty}");
+                }
+            }
+
+            foreach (var req in requiredByMaterial)
+            {
+                var mat = materials[req.MaterialId];
+                mat.stock_qty = (mat.stock_qty ?? 0m) - req.RequiredQty;
+
+                await _db.stock_moves.AddAsync(new stock_move
+                {
+                    material_id = req.MaterialId,
+                    type = "OUT",
+                    qty = req.RequiredQty,
+                    ref_doc = refDoc,
+                    user_id = prod.manager_id,
+                    move_date = now,
+                    note = $"Consume material when production starts. prod_id={prod.prod_id}, order_id={orderId}",
+                    purchase_id = null
+                }, ct);
             }
         }
 

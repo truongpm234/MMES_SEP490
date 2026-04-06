@@ -119,7 +119,7 @@ namespace AMMS.Application.Helpers
           </tr>
           <tr>
             <td style='padding:6px 0;font-size:13px;color:#64748b;'>Trạng thái sản xuất</td>
-            <td style='padding:6px 0;font-size:13px;color:#0f172a;font-weight:700;'>{Safe(prod?.status ?? "Finished")}</td>
+            <td style='padding:6px 0;font-size:13px;color:#0f172a;font-weight:700;'>Đã hoàn thành</td>
           </tr>
         </table>
       </div>

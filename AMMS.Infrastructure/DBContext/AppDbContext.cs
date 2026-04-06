@@ -353,6 +353,9 @@ public partial class AppDbContext : DbContext
                 .WithMany(p => p.stock_moves)
                 .HasForeignKey(d => d.purchase_id)
                 .HasConstraintName("stock_moves_purchase_id_fkey");
+            entity.HasIndex(e => new { e.type, e.ref_doc })
+                .IsUnique()
+                .HasDatabaseName("ux_stock_moves_type_ref_doc");
         });
 
         modelBuilder.Entity<supplier>(entity =>

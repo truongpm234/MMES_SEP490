@@ -940,8 +940,8 @@ namespace AMMS.Application.Services
 
             var est = await ResolveAcceptedEstimateAsync(req, ct);
 
-            var feBase = (_config["Deal:BaseUrlFe"] ?? "https://sep490-fe.vercel.app").TrimEnd('/');
-            var uploadUrl = $"{feBase}/upload/{requestId}";
+            var feBase = _config["Deal:BaseUrlFe"] ?? "https://sep490-fe.vercel.app";
+            var uploadUrl = $"{feBase}/upload-contract/{requestId}";
 
             var normalizedMessage = string.IsNullOrWhiteSpace(customMessage)
                 ? "Hợp đồng hiện tại có một số thông tin chưa chính xác hoặc chưa đủ điều kiện xác nhận. Vui lòng xem lại và tải lên bản hợp đồng đã chỉnh sửa / ký lại để hệ thống tiếp tục xử lý."

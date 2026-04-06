@@ -1213,7 +1213,7 @@ namespace AMMS.API.Controllers
                     ok = true,
                     request_id = dto.request_id,
                     order_id = orderId,
-                    message = "Designer confirmed layout. Production release started in background."
+                    message = "Designer confirmed layout. Production release started."
                 });
             }
             catch (Exception ex)
