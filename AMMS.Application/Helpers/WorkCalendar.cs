@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using AMMS.Infrastructure.Configurations;
 using Microsoft.Extensions.Options;
 
@@ -12,11 +10,27 @@ namespace AMMS.Application.Helpers
     {
         private readonly SchedulingOptions _opt;
         private readonly HashSet<DateOnly> _holidaySet;
+        private readonly int _shiftStartHour;
+        private readonly int _shiftEndHour;
+        private readonly bool _workOnSunday;
 
         public WorkCalendar(IOptions<SchedulingOptions> opt)
         {
-            _opt = opt.Value;
-            _holidaySet = _opt.holidays
+            _opt = opt.Value ?? new SchedulingOptions();
+
+            _shiftStartHour = _opt.shift_start_hour > 0
+                ? _opt.shift_start_hour
+                : 8;
+
+            var fallbackEndHour = _shiftStartHour + (_opt.shift_hours_per_day > 0 ? _opt.shift_hours_per_day : 9);
+
+            _shiftEndHour = _opt.shift_end_hour > _shiftStartHour
+                ? _opt.shift_end_hour
+                : fallbackEndHour;
+
+            _workOnSunday = _opt.work_on_sunday;
+
+            _holidaySet = (_opt.holidays ?? new List<string>())
                 .Select(s => DateOnly.TryParse(s, out var d) ? d : default)
                 .Where(d => d != default)
                 .ToHashSet();
@@ -26,9 +40,25 @@ namespace AMMS.Application.Helpers
 
         public bool IsWorkingDay(DateOnly d)
         {
-            if (d.DayOfWeek == DayOfWeek.Sunday) return false;
-            if (IsHoliday(d)) return false;
+            if (!_workOnSunday && d.DayOfWeek == DayOfWeek.Sunday)
+                return false;
+
+            if (IsHoliday(d))
+                return false;
+
             return true;
+        }
+
+        private DateTime GetShiftStart(DateOnly d)
+            => new DateTime(d.Year, d.Month, d.Day, _shiftStartHour, 0, 0, DateTimeKind.Unspecified);
+
+        private DateTime GetShiftEnd(DateOnly d)
+            => new DateTime(d.Year, d.Month, d.Day, _shiftEndHour, 0, 0, DateTimeKind.Unspecified);
+
+        private DateTime NextDayShiftStart(DateTime dt)
+        {
+            var nextDate = DateOnly.FromDateTime(dt.Date).AddDays(1);
+            return GetShiftStart(nextDate);
         }
 
         public DateTime NormalizeStart(DateTime dt)
@@ -38,17 +68,24 @@ namespace AMMS.Application.Helpers
             while (true)
             {
                 var d = DateOnly.FromDateTime(dt);
+
                 if (!IsWorkingDay(d))
                 {
                     dt = NextDayShiftStart(dt);
                     continue;
                 }
 
-                var shiftStart = new DateTime(dt.Year, dt.Month, dt.Day, _opt.shift_start_hour, 0, 0, DateTimeKind.Unspecified);
-                var shiftEnd = shiftStart.AddHours(_opt.shift_hours_per_day);
+                var shiftStart = GetShiftStart(d);
+                var shiftEnd = GetShiftEnd(d);
 
-                if (dt < shiftStart) return shiftStart;
-                if (dt >= shiftEnd) { dt = NextDayShiftStart(dt); continue; }
+                if (dt < shiftStart)
+                    return shiftStart;
+
+                if (dt >= shiftEnd)
+                {
+                    dt = NextDayShiftStart(dt);
+                    continue;
+                }
 
                 return dt;
             }
@@ -56,43 +93,35 @@ namespace AMMS.Application.Helpers
 
         public DateTime AddWorkingHours(DateTime start, double hours)
         {
-            if (hours <= 0) return start;
-
             var cur = NormalizeStart(start);
+
+            if (hours <= 0)
+                return cur;
+
             var remaining = TimeSpan.FromHours(hours);
 
             while (remaining > TimeSpan.Zero)
             {
-                var shiftStart = new DateTime(cur.Year, cur.Month, cur.Day, _opt.shift_start_hour, 0, 0, DateTimeKind.Unspecified);
-                var shiftEnd = shiftStart.AddHours(_opt.shift_hours_per_day);
+                var d = DateOnly.FromDateTime(cur);
+                var shiftEnd = GetShiftEnd(d);
 
                 var available = shiftEnd - cur;
+
                 if (available <= TimeSpan.Zero)
                 {
-                    cur = NextDayShiftStart(cur);
-                    cur = NormalizeStart(cur);
+                    cur = NormalizeStart(NextDayShiftStart(cur));
                     continue;
                 }
 
-                var take = remaining <= available ? remaining : available;
-                cur = cur.Add(take);
-                remaining -= take;
+                if (remaining <= available)
+                    return cur.Add(remaining);
 
-                if (remaining > TimeSpan.Zero)
-                {
-                    cur = NextDayShiftStart(cur);
-                    cur = NormalizeStart(cur);
-                }
+                remaining -= available;
+
+                cur = NormalizeStart(NextDayShiftStart(cur));
             }
 
             return cur;
         }
-
-        private DateTime NextDayShiftStart(DateTime dt)
-        {
-            var next = dt.Date.AddDays(1);
-            return new DateTime(next.Year, next.Month, next.Day, _opt.shift_start_hour, 0, 0, DateTimeKind.Unspecified);
-        }
     }
 }
-

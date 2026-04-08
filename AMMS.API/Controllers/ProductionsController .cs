@@ -1,11 +1,12 @@
-﻿using System.Security.Claims;
-using AMMS.Application.Helpers;
+﻿using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
+using AMMS.Shared.DTOs.Exceptions;
 using AMMS.Shared.DTOs.Orders;
 using AMMS.Shared.DTOs.Productions;
 using AMMS.Shared.Helpers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace AMMS.API.Controllers
 {
@@ -126,17 +127,46 @@ namespace AMMS.API.Controllers
         [HttpPost("start/{orderId:int}")]
         public async Task<IActionResult> StartProduction(int orderId, CancellationToken ct)
         {
-            var prodId = await _service.StartProductionAndPromoteFirstTaskAsync(orderId, ct);
-
-            if (!prodId.HasValue)
-                return NotFound(new { message = "Production not found for this orderId" });
-
-            return Ok(new
+            try
             {
-                message = "Production started successfully",
-                prod_id = prodId.Value,
-                first_task_status = "Ready"
-            });
+                var prodId = await _service.StartProductionAndPromoteFirstTaskAsync(orderId, ct);
+
+                if (!prodId.HasValue)
+                    return NotFound(new { message = "Production not found for this orderId" });
+
+                return Ok(new
+                {
+                    message = "Production started successfully",
+                    prod_id = prodId.Value,
+                    first_task_status = "Ready"
+                });
+            }
+            catch (BomValidationException ex)
+            {
+                return BadRequest(new
+                {
+                    message = "Không thể bắt đầu sản xuất vì BOM còn dòng chưa map với id cùa nvl.",
+                    order_id = orderId,
+                    missing_bom_lines = ex.Items
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new
+                {
+                    message = ex.Message,
+                    order_id = orderId
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Start production failed",
+                    detail = ex.Message,
+                    order_id = orderId
+                });
+            }
         }
 
         [HttpPut("delivery/{orderId:int}")]

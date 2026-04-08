@@ -25,10 +25,17 @@ namespace AMMS.Infrastructure.Configurations
         public int DeliveryCutoffHour { get; set; } = 17;
         public int AnchorSearchStepMinutes { get; set; } = 15;
         public int UrgentLeadFloorMinutes { get; set; } = 0;
+
         public int shift_start_hour { get; set; } = 8;
-        public int shift_hours_per_day { get; set; } = 12;
-        public int order_gap_minutes { get; set; } = 45;
+        public int shift_hours_per_day { get; set; } = 9;
+
+        public int shift_end_hour { get; set; } = 17;
+
+        public int order_gap_minutes { get; set; } = 30;
         public bool enforce_fifo_by_order_date { get; set; } = true;
+
+        // true = làm cả chủ nhật, false = nghỉ chủ nhật
+        public bool work_on_sunday { get; set; } = false;
 
         public List<string> holidays { get; set; } = new();
     }

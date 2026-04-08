@@ -1002,41 +1002,52 @@ namespace AMMS.Application.Services
             var qty = (decimal)(newItem.quantity <= 0 ? 1 : newItem.quantity);
 
             var inkMaterial = await ResolveMaterialByCodesAsync("INK");
+
             var coatingMaterial = await ResolveMaterialByCodesAsync(
-                est.coating_type,
-                "COATING",
-                "KEO_PHU");
-            var mountingGlueMaterial = await ResolveMaterialByCodesAsync(
-                "MOUNTING_GLUE",
-                "KEO_BOI");
+    est.coating_type,
+    NormalizeMaterialAlias(est.coating_type),
+    "KEO_PHU_NUOC",
+    "KEO_PHU_DAU");
+
             var laminationMaterial = await ResolveMaterialByCodesAsync(
+                "MANG_12MIC",
                 "MANG_CAN",
                 "LAMINATION");
+
+            var mountingGlueMaterial = await ResolveMaterialByCodesAsync(
+                "KEO_BOI",
+                "MOUNTING_GLUE");
 
             var bomLines = new List<bom>();
 
             void AddBomLine(
-                material? materialEntity,
-                string fallbackCode,
-                string fallbackName,
-                string unit,
-                decimal qtyTotal)
+    material? materialEntity,
+    string fallbackCode,
+    string fallbackName,
+    string unit,
+    decimal qtyTotal)
             {
                 if (qtyTotal <= 0) return;
 
-                var code = !string.IsNullOrWhiteSpace(materialEntity?.code)
-                    ? materialEntity!.code
+                if (materialEntity == null)
+                {
+                    throw new InvalidOperationException(
+                        $"Không map được vật tư BOM. code={fallbackCode}, name={fallbackName}, qty={qtyTotal}");
+                }
+
+                var code = !string.IsNullOrWhiteSpace(materialEntity.code)
+                    ? materialEntity.code
                     : fallbackCode;
 
-                var name = !string.IsNullOrWhiteSpace(materialEntity?.name)
-                    ? materialEntity!.name
+                var name = !string.IsNullOrWhiteSpace(materialEntity.name)
+                    ? materialEntity.name
                     : fallbackName;
 
                 bomLines.Add(CreateBomLine(
                     orderItemId: newItem.item_id,
                     estimateId: est.estimate_id,
                     orderQty: qty,
-                    materialId: materialEntity?.material_id,
+                    materialId: materialEntity.material_id,
                     materialCode: Trunc20(code),
                     materialName: name,
                     unit: unit,
@@ -1294,13 +1305,15 @@ namespace AMMS.Application.Services
 
         private async Task<material?> ResolveMaterialByCodesAsync(params string?[] codes)
         {
-            foreach (var raw in codes)
-            {
-                var code = (raw ?? "").Trim();
-                if (string.IsNullOrWhiteSpace(code))
-                    continue;
+            var normalizedCodes = codes
+                .Select(NormalizeMaterialAlias)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-                var material = await _materialRepo.GetByCodeAsync(code);
+            foreach (var code in normalizedCodes)
+            {
+                var material = await _materialRepo.GetByCodeAsync(code!);
                 if (material != null)
                     return material;
             }
@@ -1502,6 +1515,30 @@ namespace AMMS.Application.Services
             {
                 QueueConvertToOrder(req.order_request_id);
             }
+        }
+
+        private static string? NormalizeMaterialAlias(string? code)
+        {
+            var c = (code ?? "").Trim().ToUpperInvariant();
+
+            if (string.IsNullOrWhiteSpace(c))
+                return null;
+
+            return c switch
+            {
+                "KEO_NUOC" => "KEO_PHU_NUOC",
+                "KEO PHU NUOC" => "KEO_PHU_NUOC",
+                "KEO PHỦ NƯỚC" => "KEO_PHU_NUOC",
+                "KEO_PHU_NUOC" => "KEO_PHU_NUOC",
+                "KEO DẦU" => "KEO_PHU_DAU",
+                "KEO_DAU" => "KEO_PHU_DAU",
+                "KEO_PHU_DAU" => "KEO_PHU_DAU",
+                "MANG_CAN" => "MANG_12MIC",
+                "CAN_MANG" => "MANG_12MIC",
+                "LAMINATION" => "MANG_12MIC",
+                "MANG_12MIC" => "MANG_12MIC",
+                _ => c
+            };
         }
     }
 }

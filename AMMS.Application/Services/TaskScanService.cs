@@ -48,6 +48,7 @@ namespace AMMS.Application.Services
             _hub = hub;
             _orderRequestRepo = orderRequestRepo;
             _orderRepo = orderRepo;
+            _db = db;
         }
 
         public async Task<ScanTaskResult> ScanFinishAsync(ScanTaskRequest req, CancellationToken ct = default)

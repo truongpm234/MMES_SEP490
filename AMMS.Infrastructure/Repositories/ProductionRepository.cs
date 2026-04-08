@@ -2,6 +2,7 @@
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Common;
+using AMMS.Shared.DTOs.Exceptions;
 using AMMS.Shared.DTOs.Productions;
 using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
@@ -753,6 +754,12 @@ namespace AMMS.Infrastructure.Repositories
                 if (prod == null)
                     return (int?)null;
 
+                var bomIssues = await GetBomMissingMaterialMappingsAsync(orderId, ct);
+                if (bomIssues.Count > 0)
+                    throw new BomValidationException(bomIssues);
+
+                await ConsumeMaterialsOnProductionStartAsync(prod, now, ct);
+
                 prod.status = "InProcessing";
                 prod.actual_start_date ??= now;
 
@@ -910,22 +917,32 @@ namespace AMMS.Infrastructure.Repositories
             sheetsTotal = Math.Max(sheetsTotal, Math.Max(sheetsRequired + sheetsWaste, 1));
             nUp = Math.Max(nUp, 1);
 
-            var cutInputSheetsEstimate = sheetsTotal;
-            var cutOutputEstimate = sheetsTotal * nUp;
-            var defaultEstimatedProductQty = cutOutputEstimate;
-
-            var stageActualQty = ProductionSHelper.ToActualQty(qtyGood);
-
-            var prevEstimatedQty = prevOutput?.EstimatedQuantity ?? defaultEstimatedProductQty;
-            var prevActualQty = prevOutput?.ActualQuantity;
-
             var resolvedPaperCode = string.IsNullOrWhiteSpace(paperCode) ? "PAPER" : paperCode.Trim();
             var resolvedPaperName = string.IsNullOrWhiteSpace(paperName) ? "Giấy in" : paperName.Trim();
 
+            var qtyMode = StageQuantityHelper.ResolveStageQtyMode(
+                code,
+                currentStageIndex,
+                routeProcessCodes);
+
+            var stageOutputUnit = ResolveStageOutputUnit(qtyMode);
+            var stageEstimatedQty = ResolveStageEstimatedOutputQty(
+                qtyMode,
+                prevOutput,
+                sheetsTotal,
+                nUp,
+                numberOfPlates);
+
+            var stageActualQty = ResolveStageActualOutputQty(
+                qtyMode,
+                prevOutput,
+                qtyGood,
+                sheetsTotal,
+                nUp,
+                numberOfPlates);
+
             if (code == "RALO")
             {
-                var plateQty = Math.Max(numberOfPlates ?? 0, 1);
-
                 inputs.Add(ProductionSHelper.BuildStageMaterial(
                     name: "Cuộn kẽm",
                     code: "PLATE_INPUT",
@@ -933,29 +950,17 @@ namespace AMMS.Infrastructure.Repositories
                     actualQty: null,
                     unit: "cuộn"));
 
-                var outputEstimatedQty = plateQty;
-                var outputActualQty = stageActualQty.HasValue
-                    ? Math.Min(stageActualQty.Value, outputEstimatedQty)
-                    : (decimal?)null;
-
                 var output = ProductionSHelper.BuildStageMaterial(
                     name: "Bản kẽm",
                     code: "RALO",
-                    estimatedQty: outputEstimatedQty,
-                    actualQty: outputActualQty,
+                    estimatedQty: stageEstimatedQty,
+                    actualQty: stageActualQty,
                     unit: "bản");
 
                 return (
                     inputs,
                     output,
-                    new StageOutputRef
-                    {
-                        Name = output.name ?? "",
-                        Code = output.code,
-                        Unit = output.unit,
-                        EstimatedQuantity = outputEstimatedQty,
-                        ActualQuantity = outputActualQty
-                    });
+                    BuildNextOutputRef(output, stageEstimatedQty, stageActualQty));
             }
 
             if (code == "CAT")
@@ -967,41 +972,31 @@ namespace AMMS.Infrastructure.Repositories
                     actualQty: null,
                     unit: "tờ"));
 
-                var outputEstimatedQty = sheetsTotal;
-                var outputActualQty = stageActualQty.HasValue
-                    ? Math.Min(stageActualQty.Value, outputEstimatedQty)
-                    : (decimal?)null;
-
                 var output = ProductionSHelper.BuildStageMaterial(
                     name: "Tờ in khổ máy",
                     code: "PRESS_SHEET",
-                    estimatedQty: outputEstimatedQty,
-                    actualQty: outputActualQty,
+                    estimatedQty: stageEstimatedQty,
+                    actualQty: stageActualQty,
                     unit: "tờ");
 
                 return (
                     inputs,
                     output,
-                    new StageOutputRef
-                    {
-                        Name = output.name ?? "",
-                        Code = output.code,
-                        Unit = output.unit,
-                        EstimatedQuantity = outputEstimatedQty,
-                        ActualQuantity = outputActualQty
-                    });
+                    BuildNextOutputRef(output, stageEstimatedQty, stageActualQty));
             }
 
-            // input chính luôn lấy từ output công đoạn trước
             var mainInputName = prevOutput?.Name ?? $"Bán thành phẩm trước {processName}";
             var mainInputCode = prevOutput?.Code ?? "PREV";
-            var mainInputUnit = prevOutput?.Unit ?? "sp";
+            var mainInputUnit = prevOutput?.Unit ?? "tờ";
+            var mainInputEstimatedQty = prevOutput?.EstimatedQuantity
+                ?? StageQuantityHelper.GetSheetCap(sheetsTotal);
+            var mainInputActualQty = prevOutput?.ActualQuantity;
 
             inputs.Add(ProductionSHelper.BuildStageMaterial(
                 name: mainInputName,
                 code: mainInputCode,
-                estimatedQty: prevEstimatedQty,
-                actualQty: prevActualQty,
+                estimatedQty: mainInputEstimatedQty,
+                actualQty: mainInputActualQty,
                 unit: mainInputUnit));
 
             if (code == "IN")
@@ -1026,30 +1021,17 @@ namespace AMMS.Infrastructure.Repositories
                         unit: "bản"));
                 }
 
-                var outputEstimatedQty = ProductionSHelper.CapEstimatedByPreviousOutput(
-                    prevOutput,
-                    ProductionSHelper.ResolveEstimatedOutputQty(code, detail, prevEstimatedQty));
-
-                var outputActualQty = ProductionSHelper.CapActualByPreviousOutput(prevOutput, stageActualQty);
-
                 var output = ProductionSHelper.BuildStageMaterial(
                     name: "Bán thành phẩm in",
                     code: "IN",
-                    estimatedQty: outputEstimatedQty,
-                    actualQty: outputActualQty,
-                    unit: "tờ");
+                    estimatedQty: stageEstimatedQty,
+                    actualQty: stageActualQty,
+                    unit: stageOutputUnit);
 
                 return (
                     inputs,
                     output,
-                    new StageOutputRef
-                    {
-                        Name = output.name ?? "",
-                        Code = output.code,
-                        Unit = output.unit,
-                        EstimatedQuantity = outputEstimatedQty,
-                        ActualQuantity = outputActualQty
-                    });
+                    BuildNextOutputRef(output, stageEstimatedQty, stageActualQty));
             }
 
             if (code == "PHU")
@@ -1063,30 +1045,17 @@ namespace AMMS.Infrastructure.Repositories
                     actualQty: null,
                     unit: "kg"));
 
-                var outputEstimatedQty = ProductionSHelper.CapEstimatedByPreviousOutput(
-                    prevOutput,
-                    ProductionSHelper.ResolveEstimatedOutputQty(code, detail, prevEstimatedQty));
-
-                var outputActualQty = ProductionSHelper.CapActualByPreviousOutput(prevOutput, stageActualQty);
-
                 var output = ProductionSHelper.BuildStageMaterial(
                     name: "Bán thành phẩm phủ",
                     code: "PHU",
-                    estimatedQty: outputEstimatedQty,
-                    actualQty: outputActualQty,
-                    unit: "tờ");
+                    estimatedQty: stageEstimatedQty,
+                    actualQty: stageActualQty,
+                    unit: stageOutputUnit);
 
                 return (
                     inputs,
                     output,
-                    new StageOutputRef
-                    {
-                        Name = output.name ?? "",
-                        Code = output.code,
-                        Unit = output.unit,
-                        EstimatedQuantity = outputEstimatedQty,
-                        ActualQuantity = outputActualQty
-                    });
+                    BuildNextOutputRef(output, stageEstimatedQty, stageActualQty));
             }
 
             if (code == "CAN")
@@ -1098,30 +1067,17 @@ namespace AMMS.Infrastructure.Repositories
                     actualQty: null,
                     unit: "kg"));
 
-                var outputEstimatedQty = ProductionSHelper.CapEstimatedByPreviousOutput(
-                    prevOutput,
-                    ProductionSHelper.ResolveEstimatedOutputQty(code, detail, prevEstimatedQty));
-
-                var outputActualQty = ProductionSHelper.CapActualByPreviousOutput(prevOutput, stageActualQty);
-
                 var output = ProductionSHelper.BuildStageMaterial(
                     name: "Bán thành phẩm đã cán",
                     code: "CAN",
-                    estimatedQty: outputEstimatedQty,
-                    actualQty: outputActualQty,
-                    unit: "tờ");
+                    estimatedQty: stageEstimatedQty,
+                    actualQty: stageActualQty,
+                    unit: stageOutputUnit);
 
                 return (
                     inputs,
                     output,
-                    new StageOutputRef
-                    {
-                        Name = output.name ?? "",
-                        Code = output.code,
-                        Unit = output.unit,
-                        EstimatedQuantity = outputEstimatedQty,
-                        ActualQuantity = outputActualQty
-                    });
+                    BuildNextOutputRef(output, stageEstimatedQty, stageActualQty));
             }
 
             if (code == "BOI")
@@ -1140,143 +1096,173 @@ namespace AMMS.Infrastructure.Repositories
                     actualQty: null,
                     unit: "kg"));
 
-                var outputEstimatedQty = ProductionSHelper.CapEstimatedByPreviousOutput(
-                    prevOutput,
-                    ProductionSHelper.ResolveEstimatedOutputQty(code, detail, prevEstimatedQty));
-
-                var outputActualQty = ProductionSHelper.CapActualByPreviousOutput(prevOutput, stageActualQty);
-
                 var output = ProductionSHelper.BuildStageMaterial(
                     name: "Bán thành phẩm đã bồi",
                     code: "BOI",
-                    estimatedQty: outputEstimatedQty,
-                    actualQty: outputActualQty,
-                    unit: "tờ");
+                    estimatedQty: stageEstimatedQty,
+                    actualQty: stageActualQty,
+                    unit: stageOutputUnit);
 
                 return (
                     inputs,
                     output,
-                    new StageOutputRef
-                    {
-                        Name = output.name ?? "",
-                        Code = output.code,
-                        Unit = output.unit,
-                        EstimatedQuantity = outputEstimatedQty,
-                        ActualQuantity = outputActualQty
-                    });
+                    BuildNextOutputRef(output, stageEstimatedQty, stageActualQty));
             }
 
             if (code == "BE")
             {
-                var outputEstimatedQty = ProductionSHelper.CapEstimatedByPreviousOutput(
-                    prevOutput,
-                    ProductionSHelper.ResolveEstimatedOutputQty(code, detail, prevEstimatedQty));
-
-                var outputActualQty = ProductionSHelper.CapActualByPreviousOutput(prevOutput, stageActualQty);
-
                 var output = ProductionSHelper.BuildStageMaterial(
                     name: "Bán thành phẩm đã bế",
                     code: "BE",
-                    estimatedQty: outputEstimatedQty,
-                    actualQty: outputActualQty,
-                    unit: "tờ");
+                    estimatedQty: stageEstimatedQty,
+                    actualQty: stageActualQty,
+                    unit: stageOutputUnit);
 
                 return (
                     inputs,
                     output,
-                    new StageOutputRef
-                    {
-                        Name = output.name ?? "",
-                        Code = output.code,
-                        Unit = output.unit,
-                        EstimatedQuantity = outputEstimatedQty,
-                        ActualQuantity = outputActualQty
-                    });
+                    BuildNextOutputRef(output, stageEstimatedQty, stageActualQty));
             }
 
             if (code == "DUT")
             {
-                var outputEstimatedQty = ProductionSHelper.CapEstimatedByPreviousOutput(
-                    prevOutput,
-                    ProductionSHelper.ResolveEstimatedOutputQty(code, detail, prevEstimatedQty));
-
-                var outputActualQty = ProductionSHelper.CapActualByPreviousOutput(prevOutput, stageActualQty);
-
                 var output = ProductionSHelper.BuildStageMaterial(
-                    name: "Bán thành phẩm đã dứt",
+                    name: $"Bán thành phẩm đã dứt {productName}",
                     code: "DUT",
-                    estimatedQty: outputEstimatedQty,
-                    actualQty: outputActualQty,
-                    unit: "tờ");
+                    estimatedQty: stageEstimatedQty,
+                    actualQty: stageActualQty,
+                    unit: "sp");
 
                 return (
                     inputs,
                     output,
-                    new StageOutputRef
-                    {
-                        Name = output.name ?? "",
-                        Code = output.code,
-                        Unit = output.unit,
-                        EstimatedQuantity = outputEstimatedQty,
-                        ActualQuantity = outputActualQty
-                    });
+                    BuildNextOutputRef(output, stageEstimatedQty, stageActualQty));
             }
 
             if (code == "DAN")
             {
-                var outputEstimatedQty = ProductionSHelper.CapEstimatedByPreviousOutput(
-                    prevOutput,
-                    ProductionSHelper.ResolveEstimatedOutputQty(code, detail, prevEstimatedQty));
-
-                var outputActualQty = ProductionSHelper.CapActualByPreviousOutput(prevOutput, stageActualQty);
-
                 var output = ProductionSHelper.BuildStageMaterial(
                     name: $"Thành phẩm hoàn chỉnh {productName}",
                     code: "DAN",
-                    estimatedQty: outputEstimatedQty,
-                    actualQty: outputActualQty,
-                    unit: "tờ");
+                    estimatedQty: stageEstimatedQty,
+                    actualQty: stageActualQty,
+                    unit: "sp");
 
                 return (
                     inputs,
                     output,
-                    new StageOutputRef
-                    {
-                        Name = output.name ?? "",
-                        Code = output.code,
-                        Unit = output.unit,
-                        EstimatedQuantity = outputEstimatedQty,
-                        ActualQuantity = outputActualQty
-                    });
+                    BuildNextOutputRef(output, stageEstimatedQty, stageActualQty));
             }
 
-            // fallback
+            var fallbackOutput = ProductionSHelper.BuildStageMaterial(
+                name: $"Bán thành phẩm sau {processName}",
+                code: processCode,
+                estimatedQty: stageEstimatedQty,
+                actualQty: stageActualQty,
+                unit: stageOutputUnit);
+
+            return (
+                inputs,
+                fallbackOutput,
+                BuildNextOutputRef(fallbackOutput, stageEstimatedQty, stageActualQty));
+        }
+
+        private static string ResolveStageOutputUnit(StageQtyMode mode)
+        {
+            return mode switch
             {
-                var outputEstimatedQty = ProductionSHelper.CapEstimatedByPreviousOutput(
-                    prevOutput,
-                    ProductionSHelper.ResolveEstimatedOutputQty(code, detail, prevEstimatedQty));
+                StageQtyMode.Plate => "bản",
+                StageQtyMode.Product => "sp",
+                _ => "tờ"
+            };
+        }
 
-                var outputActualQty = ProductionSHelper.CapActualByPreviousOutput(prevOutput, stageActualQty);
+        private static decimal ResolveStageEstimatedOutputQty(
+            StageQtyMode mode,
+            StageOutputRef? prevOutput,
+            int sheetsTotal,
+            int nUp,
+            int? numberOfPlates)
+        {
+            decimal cap = mode switch
+            {
+                StageQtyMode.Plate => StageQuantityHelper.GetPlateCap(numberOfPlates ?? 1),
+                StageQtyMode.Product => StageQuantityHelper.GetProductCap(sheetsTotal, nUp),
+                _ => StageQuantityHelper.GetSheetCap(sheetsTotal)
+            };
 
-                var output = ProductionSHelper.BuildStageMaterial(
-                    name: $"Bán thành phẩm sau {processName}",
-                    code: processCode,
-                    estimatedQty: outputEstimatedQty,
-                    actualQty: outputActualQty,
-                    unit: "tờ");
+            if (prevOutput == null)
+                return cap;
 
-                return (
-                    inputs,
-                    output,
-                    new StageOutputRef
-                    {
-                        Name = output.name ?? "",
-                        Code = output.code,
-                        Unit = output.unit,
-                        EstimatedQuantity = outputEstimatedQty,
-                        ActualQuantity = outputActualQty
-                    });
-            }
+            if (mode == StageQtyMode.Plate && IsSameUnit(prevOutput.Unit, "bản"))
+                return Math.Min(cap, prevOutput.EstimatedQuantity);
+
+            if (mode == StageQtyMode.Sheet && IsSameUnit(prevOutput.Unit, "tờ"))
+                return Math.Min(cap, prevOutput.EstimatedQuantity);
+
+            if (mode == StageQtyMode.Product && IsSameUnit(prevOutput.Unit, "sp"))
+                return Math.Min(cap, prevOutput.EstimatedQuantity);
+
+            return cap;
+        }
+
+        private static decimal? ResolveStageActualOutputQty(
+            StageQtyMode mode,
+            StageOutputRef? prevOutput,
+            int qtyGood,
+            int sheetsTotal,
+            int nUp,
+            int? numberOfPlates)
+        {
+            var actual = ProductionSHelper.ToActualQty(qtyGood);
+            if (!actual.HasValue)
+                return null;
+
+            decimal cap = mode switch
+            {
+                StageQtyMode.Plate => StageQuantityHelper.GetPlateCap(numberOfPlates ?? 1),
+                StageQtyMode.Product => StageQuantityHelper.GetProductCap(sheetsTotal, nUp),
+                _ => StageQuantityHelper.GetSheetCap(sheetsTotal)
+            };
+
+            var result = Math.Min(actual.Value, cap);
+
+            if (prevOutput == null || !prevOutput.ActualQuantity.HasValue)
+                return result;
+
+            if (mode == StageQtyMode.Plate && IsSameUnit(prevOutput.Unit, "bản"))
+                return Math.Min(result, prevOutput.ActualQuantity.Value);
+
+            if (mode == StageQtyMode.Sheet && IsSameUnit(prevOutput.Unit, "tờ"))
+                return Math.Min(result, prevOutput.ActualQuantity.Value);
+
+            if (mode == StageQtyMode.Product && IsSameUnit(prevOutput.Unit, "sp"))
+                return Math.Min(result, prevOutput.ActualQuantity.Value);
+
+            return result;
+        }
+
+        private static bool IsSameUnit(string? source, string target)
+        {
+            return string.Equals(
+                (source ?? "").Trim(),
+                target,
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static StageOutputRef BuildNextOutputRef(
+            StageMaterialDto output,
+            decimal estimatedQty,
+            decimal? actualQty)
+        {
+            return new StageOutputRef
+            {
+                Name = output.name ?? "",
+                Code = output.code,
+                Unit = output.unit,
+                EstimatedQuantity = estimatedQty,
+                ActualQuantity = actualQty
+            };
         }
 
         private static List<TaskLogDto> LogsByTaskId(List<TaskLogDto> all, int taskId)
@@ -1544,6 +1530,156 @@ namespace AMMS.Infrastructure.Repositories
                 s.lane_no = bestLane + 1;
                 laneAvailableAt[bestLane] = actualEnd;
             }
+        }
+
+        private async Task ConsumeMaterialsOnProductionStartAsync(
+    production prod,
+    DateTime now,
+    CancellationToken ct = default)
+        {
+            if (!prod.order_id.HasValue || prod.order_id.Value <= 0)
+                throw new InvalidOperationException("Production has no order_id");
+
+            var orderId = prod.order_id.Value;
+            var refDoc = $"PROD-START-{prod.prod_id}";
+
+            // Chống trừ lặp nếu API start bị gọi lại
+            var alreadyConsumed = await _db.stock_moves
+                .AsNoTracking()
+                .AnyAsync(x => x.type == "OUT" && x.ref_doc == refDoc, ct);
+
+            if (alreadyConsumed)
+                return;
+
+            var bomLines = await (
+                from oi in _db.order_items.AsNoTracking()
+                join b in _db.boms.AsNoTracking() on oi.item_id equals b.order_item_id
+                where oi.order_id == orderId
+                select new
+                {
+                    oi.item_id,
+                    order_qty = oi.quantity,
+                    b.material_id,
+                    b.material_code,
+                    b.material_name,
+                    b.unit,
+                    b.qty_total,
+                    b.qty_per_product,
+                    b.wastage_percent
+                }
+            ).ToListAsync(ct);
+
+            if (bomLines.Count == 0)
+                throw new InvalidOperationException("No BOM found for this order. Cannot consume materials.");
+
+            if (bomLines.Any(x => !x.material_id.HasValue || x.material_id.Value <= 0))
+                throw new InvalidOperationException("Some BOM lines do not map to a valid material_id.");
+
+            var requiredByMaterial = bomLines
+                .GroupBy(x => x.material_id!.Value)
+                .Select(g =>
+                {
+                    decimal requiredQty = 0m;
+
+                    foreach (var line in g)
+                    {
+                        decimal lineQty;
+
+                        if (line.qty_total > 0m)
+                        {
+                            lineQty = (decimal)line.qty_total;
+                        }
+                        else
+                        {
+                            var orderQty = line.order_qty <= 0 ? 1 : line.order_qty;
+                            var qtyPerProduct = line.qty_per_product ?? 0m;
+                            var wastageFactor = 1m + ((line.wastage_percent ?? 0m) / 100m);
+
+                            lineQty = orderQty * qtyPerProduct * wastageFactor;
+                        }
+
+                        if (lineQty < 0m) lineQty = 0m;
+                        requiredQty += lineQty;
+                    }
+
+                    var first = g.First();
+
+                    return new
+                    {
+                        MaterialId = g.Key,
+                        MaterialCode = first.material_code,
+                        MaterialName = first.material_name,
+                        Unit = first.unit,
+                        RequiredQty = Math.Round(requiredQty, 4)
+                    };
+                })
+                .ToList();
+
+            var materialIds = requiredByMaterial
+                .Select(x => x.MaterialId)
+                .Distinct()
+                .ToList();
+
+            var materials = await _db.materials
+                .Where(x => materialIds.Contains(x.material_id))
+                .ToDictionaryAsync(x => x.material_id, ct);
+
+            foreach (var req in requiredByMaterial)
+            {
+                if (!materials.TryGetValue(req.MaterialId, out var mat))
+                    throw new InvalidOperationException(
+                        $"Material not found. material_id={req.MaterialId}, code={req.MaterialCode}");
+
+                var stockQty = mat.stock_qty ?? 0m;
+
+                if (stockQty < req.RequiredQty)
+                {
+                    throw new InvalidOperationException(
+                        $"Insufficient stock for material '{mat.name}' ({mat.code}). " +
+                        $"Available={stockQty}, Required={req.RequiredQty}");
+                }
+            }
+
+            foreach (var req in requiredByMaterial)
+            {
+                var mat = materials[req.MaterialId];
+                mat.stock_qty = (mat.stock_qty ?? 0m) - req.RequiredQty;
+
+                await _db.stock_moves.AddAsync(new stock_move
+                {
+                    material_id = req.MaterialId,
+                    type = "OUT",
+                    qty = req.RequiredQty,
+                    ref_doc = refDoc,
+                    user_id = prod.manager_id,
+                    move_date = now,
+                    note = $"Consume material when production starts. prod_id={prod.prod_id}, order_id={orderId}",
+                    purchase_id = null
+                }, ct);
+            }
+        }
+
+        private async Task<List<BomMissingMaterialItem>> GetBomMissingMaterialMappingsAsync(
+    int orderId,
+    CancellationToken ct = default)
+        {
+            return await (
+                from oi in _db.order_items.AsNoTracking()
+                join b in _db.boms.AsNoTracking() on oi.item_id equals b.order_item_id
+                where oi.order_id == orderId
+                      && (!b.material_id.HasValue || b.material_id.Value <= 0)
+                orderby oi.item_id, b.bom_id
+                select new BomMissingMaterialItem
+                {
+                    bom_id = b.bom_id,
+                    order_item_id = oi.item_id,
+                    source_estimate_id = b.source_estimate_id,
+                    material_code = b.material_code,
+                    material_name = b.material_name,
+                    unit = b.unit,
+                    qty_total = b.qty_total ?? 0m
+                }
+            ).ToListAsync(ct);
         }
 
         public async Task<production?> GetLatestByOrderIdAsync(int orderId, CancellationToken ct = default)

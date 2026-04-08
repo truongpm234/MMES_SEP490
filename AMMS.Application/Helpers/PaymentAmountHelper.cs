@@ -9,24 +9,17 @@ namespace AMMS.Application.Helpers
         {
             if (est == null) throw new ArgumentNullException(nameof(est));
 
-            return (int)Math.Round(
-                est.deposit_amount,
-                0,
-                MidpointRounding.AwayFromZero)/100;
+            return NormalizeMoneyToInt(est.deposit_amount) / 100;
         }
 
         public static int GetRemainingAmount(cost_estimate est)
         {
             if (est == null) throw new ArgumentNullException(nameof(est));
 
-            var finalTotal = (int)Math.Round(
-                est.final_total_cost,
-                0,
-                MidpointRounding.AwayFromZero);
+            var finalTotal = NormalizeMoneyToInt(est.final_total_cost);
+            var deposit = NormalizeMoneyToInt(est.deposit_amount);
 
-            var deposit = GetDepositAmount(est);
-
-            var remaining = (finalTotal - deposit)/100;
+            var remaining = (finalTotal - deposit) / 100;
             return remaining > 0 ? remaining : 0;
         }
 
@@ -46,6 +39,18 @@ namespace AMMS.Application.Helpers
                     : 100;
 
             return Math.Max(1, actualAmount / divider);
+        }
+
+        private static int NormalizeMoneyToInt(object? value)
+        {
+            if (value == null)
+                return 0;
+
+            var amount = Convert.ToDecimal(value);
+            if (amount <= 0m)
+                return 0;
+
+            return Convert.ToInt32(Math.Round(amount, 0, MidpointRounding.AwayFromZero));
         }
     }
 }
