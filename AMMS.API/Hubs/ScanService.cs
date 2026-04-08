@@ -74,53 +74,58 @@ namespace AMMS.API
 
             var percent = totalTasks == 0 ? 0 : (int)Math.Round(finishedTasks * 100.0 / totalTasks);
 
-            await _hub.Clients.Group($"prod:{prodId}")
-                .SendAsync("tasklog.created", new TaskLogCreatedEvent(
-                    task_id: taskId,
-                    prod_id: prodId,
-                    action_type: actionType,
-                    qty_good: qtyGood,
-                    log_time: now
-                ), ct);
 
-            await _hub.Clients.Group($"prod:{prodId}")
-                .SendAsync("task.updated", new TaskUpdatedEvent(
-                    task_id: taskId,
-                    prod_id: prodId,
-                    status: task.status,
-                    start_time: task.start_time,
-                    end_time: task.end_time
-                ), ct);
+            await _hub.Clients.Group(RealtimeGroups.ByRole("staff")).SendAsync("scan-task", new { message = $"công đoạn {task.name} vừa được hoàn thành" });
+            await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
 
-            await _hub.Clients.Group($"prod:{prodId}")
-                .SendAsync("production.progress", new ProductionProgressEvent(
-                    prod_id: prodId,
-                    order_id: (int)orderId,
-                    total_tasks: totalTasks,
-                    finished_tasks: finishedTasks,
-                    percent: percent
-                ), ct);
 
-            if (orderId > 0)
-            {
-                await _hub.Clients.Group($"order:{orderId}")
-                    .SendAsync("production.progress", new ProductionProgressEvent(
-                        prod_id: prodId,
-                        order_id: (int)orderId,
-                        total_tasks: totalTasks,
-                        finished_tasks: finishedTasks,
-                        percent: percent
-                    ), ct);
+            //await _hub.Clients.Group($"prod:{prodId}")
+            //    .SendAsync("tasklog.created", new TaskLogCreatedEvent(
+            //        task_id: taskId,
+            //        prod_id: prodId,
+            //        action_type: actionType,
+            //        qty_good: qtyGood,
+            //        log_time: now
+            //    ), ct);
 
-                await _hub.Clients.Group($"order:{orderId}")
-                    .SendAsync("task.updated", new TaskUpdatedEvent(
-                        task_id: taskId,
-                        prod_id: prodId,
-                        status: task.status,
-                        start_time: task.start_time,
-                        end_time: task.end_time
-                    ), ct);
-            }
+            //await _hub.Clients.Group($"prod:{prodId}")
+            //    .SendAsync("task.updated", new TaskUpdatedEvent(
+            //        task_id: taskId,
+            //        prod_id: prodId,
+            //        status: task.status,
+            //        start_time: task.start_time,
+            //        end_time: task.end_time
+            //    ), ct);
+
+            //await _hub.Clients.Group($"prod:{prodId}")
+            //    .SendAsync("production.progress", new ProductionProgressEvent(
+            //        prod_id: prodId,
+            //        order_id: (int)orderId,
+            //        total_tasks: totalTasks,
+            //        finished_tasks: finishedTasks,
+            //        percent: percent
+            //    ), ct);
+
+            //if (orderId > 0)
+            //{
+            //    await _hub.Clients.Group($"order:{orderId}")
+            //        .SendAsync("production.progress", new ProductionProgressEvent(
+            //            prod_id: prodId,
+            //            order_id: (int)orderId,
+            //            total_tasks: totalTasks,
+            //            finished_tasks: finishedTasks,
+            //            percent: percent
+            //        ), ct);
+
+            //    await _hub.Clients.Group($"order:{orderId}")
+            //        .SendAsync("task.updated", new TaskUpdatedEvent(
+            //            task_id: taskId,
+            //            prod_id: prodId,
+            //            status: task.status,
+            //            start_time: task.start_time,
+            //            end_time: task.end_time
+            //        ), ct);
+            //}
         }
     }
 }

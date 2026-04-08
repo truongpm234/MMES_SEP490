@@ -1,0 +1,162 @@
+﻿{
+   "CodeGenerationMode": 4,
+   "ContextClassName": "AppDbContext",
+   "ContextNamespace": null,
+   "FilterSchemas": false,
+   "IncludeConnectionString": false,
+   "IrregularWords": null,
+   "MinimumProductVersion": "2.6.1378",
+   "ModelNamespace": null,
+   "OutputContextPath": null,
+   "OutputPath": "Entities",
+   "PluralRules": null,
+   "PreserveCasingWithRegex": true,
+   "ProjectRootNamespace": "AMMS.Infrastructure",
+   "Schemas": null,
+   "SelectedHandlebarsLanguage": 2,
+   "SelectedToBeGenerated": 1,
+   "SingularRules": null,
+   "T4TemplatePath": null,
+   "Tables": [
+      {
+         "Name": "AMMS_DB.boms",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.cost_estimate",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.cost_estimate_process",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.deliveries",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.estimate_config",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.machines",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.materials",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.missing_materials",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.notifications",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.order_items",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.order_request",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.orders",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.payments",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.product_template",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.product_type_process",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.product_types",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.productions",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.products",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.purchase_items",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.purchases",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.quotes",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.roles",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.stock_moves",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.supplier_materials",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.suppliers",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.task_logs",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.tasks",
+         "ObjectType": 0
+      },
+      {
+         "Name": "AMMS_DB.users",
+         "ObjectType": 0
+      }
+   ],
+   "UiHint": null,
+   "UncountableWords": null,
+   "UseAsyncStoredProcedureCalls": true,
+   "UseBoolPropertiesWithoutDefaultSql": false,
+   "UseDatabaseNames": false,
+   "UseDatabaseNamesForRoutines": true,
+   "UseDateOnlyTimeOnly": true,
+   "UseDbContextSplitting": false,
+   "UseDecimalDataAnnotationForSprocResult": true,
+   "UseFluentApiOnly": true,
+   "UseHandleBars": false,
+   "UseHierarchyId": false,
+   "UseInflector": true,
+   "UseInternalAccessModifiersForSprocsAndFunctions": false,
+   "UseLegacyPluralizer": false,
+   "UseManyToManyEntity": false,
+   "UseNoDefaultConstructor": false,
+   "UseNoNavigations": false,
+   "UseNoObjectFilter": false,
+   "UseNodaTime": false,
+   "UseNullableReferences": false,
+   "UsePrefixNavigationNaming": false,
+   "UseSchemaFolders": false,
+   "UseSchemaNamespaces": false,
+   "UseSpatial": false,
+   "UseT4": false,
+   "UseT4Split": false,
+   "UseTypedTvpParameters": true
+}

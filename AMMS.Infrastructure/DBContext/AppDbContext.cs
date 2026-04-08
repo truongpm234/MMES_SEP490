@@ -2,9 +2,6 @@
 using AMMS.Infrastructure.Entities.AMMS.Infrastructure.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
-using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
 
 namespace AMMS.Infrastructure.DBContext;
 
@@ -68,6 +65,7 @@ public partial class AppDbContext : DbContext
     public virtual DbSet<product_template> product_templates { get; set; } = null!;
 
     public virtual DbSet<missing_material> missing_materials { get; set; } = null!;
+    public virtual DbSet<notification> notifications { get; set; } = null!;
 
     public virtual DbSet<estimate_config> estimate_config { get; set; } = null!;
 
@@ -279,7 +277,7 @@ public partial class AppDbContext : DbContext
 
             entity.HasOne(d => d.created_byNavigation)
                   .WithMany(u => u.purchases)
-                  .HasForeignKey(d => d.created_by)     
+                  .HasForeignKey(d => d.created_by)
                   .HasConstraintName("purchases_created_by_fkey");
 
             entity.HasOne(d => d.supplier).WithMany(p => p.purchases)
@@ -380,7 +378,7 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.name).HasMaxLength(100);
             entity.Property(e => e.status)
                 .HasMaxLength(20)
-                .HasDefaultValueSql("'Unassigned'::character varying");        
+                .HasDefaultValueSql("'Unassigned'::character varying");
             entity.HasOne(d => d.process).WithMany(p => p.tasks)
                 .HasForeignKey(d => d.process_id)
                 .HasConstraintName("tasks_process_id_fkey");
@@ -598,6 +596,9 @@ public partial class AppDbContext : DbContext
 
             entity.Property(e => e.RoleId)
                   .HasColumnName("role_id");
+
+            entity.Property(e => e.OrderRequestId)
+                  .HasColumnName("order_request_id");
 
             entity.Property(e => e.Time)
                   .HasColumnName("time")

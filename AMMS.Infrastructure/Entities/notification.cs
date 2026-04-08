@@ -1,14 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace AMMS.Infrastructure.Entities
+﻿namespace AMMS.Infrastructure.Entities
 {
     public class notification
     {
         public int Id { get; set; }
+        public int? OrderRequestId { get; set; }
 
         public string Content { get; set; } = null!;
 
