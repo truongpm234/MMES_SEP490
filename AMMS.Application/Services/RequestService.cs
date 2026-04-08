@@ -113,15 +113,18 @@ namespace AMMS.Application.Services
                 estimate_finish_date = now.AddDays(7),
                 assigned_consultant = assignedConsultant.user_id,
                 assigned_at = now,
-                is_check_contract = null,
-                contract_check_note = null,
+                actual_consultant_user_id = null
             };
 
             await _requestRepo.AddAsync(entity);
             await _requestRepo.SaveChangesAsync();
 
-            //khánh sửa signalr
-            await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("pending", new { message = $"Có yêu cầu #{entity.order_request_id} mới được tạo", id = entity.order_request_id });
+            await _hub.Clients.Group(RealtimeGroups.ByRole("consultant"))
+                .SendAsync("pending", new
+                {
+                    message = $"Có yêu cầu #{entity.order_request_id} mới được tạo",
+                    id = entity.order_request_id
+                });
 
             return new CreateRequestResponse
             {
@@ -146,17 +149,21 @@ namespace AMMS.Application.Services
                 detail_address = req.detail_address,
                 order_request_date = now,
                 process_status = "Pending",
-                is_check_contract = null,
                 assigned_consultant = assignedConsultant.user_id,
                 assigned_at = now,
-                contract_check_note = null,
+                actual_consultant_user_id = GetActualConsultantUserId()
             };
 
             await _requestRepo.AddAsync(entity);
             await _requestRepo.SaveChangesAsync();
 
-            //Khánh sửa signalr
-            await _hub.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("consultantCreateRequest", new { message = $"Có yêu cầu {entity.order_request_id} cần duyệt", id = entity.order_request_id });
+            await _hub.Clients.Group(RealtimeGroups.ByRole("manager"))
+                .SendAsync("consultantCreateRequest", new
+                {
+                    message = $"Có yêu cầu {entity.order_request_id} cần duyệt",
+                    id = entity.order_request_id
+                });
+
             return new CreateRequestResponse
             {
                 order_request_id = entity.order_request_id,
@@ -194,6 +201,7 @@ namespace AMMS.Application.Services
             entity.design_file_path = req.design_file_path ?? entity.design_file_path;
             entity.detail_address = req.detail_address ?? entity.detail_address;
             entity.delivery_date = ToDeliveryDate(req.delivery_date);
+
             if (req.delivery_date.HasValue)
             {
                 entity.delivery_date = newDeliveryDate;
@@ -206,6 +214,7 @@ namespace AMMS.Application.Services
                         : req.delivery_date_change_reason.Trim();
                 }
             }
+
             entity.product_type = req.product_type ?? entity.product_type;
             entity.number_of_plates = req.number_of_plates ?? entity.number_of_plates;
             entity.product_length_mm = req.product_length_mm ?? entity.product_length_mm;
@@ -219,9 +228,7 @@ namespace AMMS.Application.Services
             entity.is_send_design = req.is_send_design ?? entity.is_send_design;
 
             if (ce != null && !string.IsNullOrWhiteSpace(req.production_processes))
-            {
                 ce.production_processes = req.production_processes.Trim();
-            }
 
             if (ce != null)
             {
@@ -252,8 +259,8 @@ namespace AMMS.Application.Services
             entity.verified_at = null;
             entity.quote_expires_at = null;
             entity.accepted_estimate_id = null;
-            entity.is_check_contract = null;
-            entity.contract_check_note = null;
+
+            StampActualConsultant(entity);
 
             await _requestRepo.UpdateAsync(entity);
             await _requestRepo.SaveChangesAsync();
@@ -270,13 +277,18 @@ namespace AMMS.Application.Services
         public async Task CancelAsync(int id, string? reason, CancellationToken ct = default)
         {
             await _currentUser.EnsureCanAccessAssignedRequestAsync(id, ct);
+
             var entity = await _requestRepo.GetByIdAsync(id);
             if (entity == null) return;
 
             if (entity.order_id != null)
                 throw new InvalidOperationException("This request is already linked to an order, cannot cancel.");
+
             entity.reason = reason;
-            await _requestRepo.CancelAsync(id, ct);
+            entity.process_status = "Cancel";
+            StampActualConsultant(entity);
+
+            await _requestRepo.UpdateAsync(entity);
             await _requestRepo.SaveChangesAsync();
         }
 
@@ -432,10 +444,8 @@ namespace AMMS.Application.Services
                 print_length_mm = dto.print_length_mm,
                 order_request_date = now,
                 process_status = "Pending",
-                is_check_contract = null,
                 assigned_consultant = assignedConsultant.user_id,
                 assigned_at = now,
-                contract_check_note = null,
             };
 
             await _requestRepo.AddAsync(entity);
@@ -485,8 +495,6 @@ namespace AMMS.Application.Services
             var req = await _requestRepo.GetByIdAsync(dto.request_id);
             if (req == null) throw new InvalidOperationException("Order request not found");
 
-            var oldStatus = req.process_status;
-
             var st = (dto.status ?? "").Trim();
 
             st = st.Equals("verified", StringComparison.OrdinalIgnoreCase) ? "Verified" :
@@ -510,14 +518,17 @@ namespace AMMS.Application.Services
             if (dto.note != null)
                 req.note = dto.note;
 
-            req.is_check_contract = null;
-            req.contract_check_note = null;
-            //Khánh sửa signalr
             if (st == "Verified")
             {
                 req.verified_at = now;
                 req.quote_expires_at = now.AddDays(7);
-                await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("verified", new { message = $"Yêu cầu #{req.order_request_id} đã được duyệt", id = req.order_request_id });
+
+                await _hub.Clients.Group(RealtimeGroups.ByRole("consultant"))
+                    .SendAsync("verified", new
+                    {
+                        message = $"Yêu cầu #{req.order_request_id} đã được duyệt",
+                        id = req.order_request_id
+                    });
             }
             else
             {
@@ -529,12 +540,16 @@ namespace AMMS.Application.Services
             {
                 req.accepted_estimate_id = null;
                 await _estimateRepo.DeactivateAllByRequestIdAsync(dto.request_id, ct);
-                await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("declined", new { message = $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa", id = req.order_request_id });
+
+                await _hub.Clients.Group(RealtimeGroups.ByRole("consultant"))
+                    .SendAsync("declined", new
+                    {
+                        message = $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa",
+                        id = req.order_request_id
+                    });
             }
 
             await _requestRepo.SaveChangesAsync();
-
-
         }
 
         public async Task SubmitEstimateForApprovalAsync(SubmitForApprovalRequestDto input)
@@ -546,8 +561,6 @@ namespace AMMS.Application.Services
             var req = await _requestRepo.GetByIdAsync(input.request_id);
             if (req == null)
                 throw new InvalidOperationException("Order request not found");
-
-            var oldStatus = req.process_status;
 
             var st = (req.process_status ?? "").Trim();
             if (st.Equals("Accepted", StringComparison.OrdinalIgnoreCase) ||
@@ -582,14 +595,13 @@ namespace AMMS.Application.Services
             req.verified_at = null;
             req.quote_expires_at = null;
             req.accepted_estimate_id = null;
-            req.is_check_contract = null;
-            req.contract_check_note = null;
+
+            StampActualConsultant(req);
 
             await _requestRepo.SaveChangesAsync();
 
-            //Khánh sửa signalr
-            await _hub.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("processing", new { message = $"Có yêu cầu #{req.order_request_id} cần duyệt" });
-            //Khánh sửa signalr
+            await _hub.Clients.Group(RealtimeGroups.ByRole("manager"))
+                .SendAsync("processing", new { message = $"Có yêu cầu #{req.order_request_id} cần duyệt" });
         }
 
         public async Task<RequestWithTwoEstimatesDto?> GetCompareQuotesAsync(int requestId, CancellationToken ct = default)
@@ -653,8 +665,7 @@ namespace AMMS.Application.Services
                 consultant_note = source.consultant_note,
                 assigned_consultant = clonedAssignedConsultantId,
                 assigned_at = clonedAssignedConsultantId.HasValue ? now : null,
-                is_check_contract = null,
-                contract_check_note = null,
+                actual_consultant_user_id = GetActualConsultantUserId()
             };
 
             await _requestRepo.AddAsync(clonedRequest);
@@ -806,6 +817,8 @@ namespace AMMS.Application.Services
                 ? null
                 : message.Trim();
 
+            StampActualConsultant(req);
+
             await _requestRepo.SaveChangesAsync();
         }
 
@@ -851,17 +864,7 @@ namespace AMMS.Application.Services
                     RequestId = requestId
                 };
             }
-
-            if (req.is_check_contract != true)
-            {
-                return new ConvertRequestToOrderResponse
-                {
-                    Success = false,
-                    Message = "Contract has not been approved by manager yet",
-                    RequestId = requestId
-                };
-            }
-
+           
             if (req.quote_id == null)
             {
                 return new ConvertRequestToOrderResponse
@@ -931,7 +934,8 @@ namespace AMMS.Application.Services
                 total_amount = est.final_total_cost,
                 is_enough = null,
                 is_buy = false,
-                layout_confirmed = false
+                layout_confirmed = false,
+                is_production_ready = false
             };
 
             await _orderRepo.AddOrderAsync(newOrder);
@@ -1116,52 +1120,7 @@ namespace AMMS.Application.Services
                 OrderCode = newOrder.code
             };
         }
-
-        private void QueueConvertToOrder(int requestId)
-        {
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    using var scope = _scopeFactory.CreateScope();
-
-                    var scopedRequestService = scope.ServiceProvider.GetRequiredService<IRequestService>();
-                    var scopedRt = scope.ServiceProvider.GetRequiredService<IRealtimePublisher>();
-                    var scopedDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-                    var result = await scopedRequestService.ConvertToOrderAsync(requestId);
-
-                    if (!result.Success)
-                    {
-                        _logger.LogWarning(
-                            "Background convert-to-order skipped/failed. RequestId={RequestId}, Message={Message}",
-                            requestId, result.Message);
-                        return;
-                    }
-
-                    var req = await scopedDb.order_requests
-                        .AsNoTracking()
-                        .FirstOrDefaultAsync(x => x.order_request_id == requestId);
-
-                    await scopedRt.PublishRequestChangedAsync(new(
-                        order_id: req.order_id,
-                        request_id: requestId,
-                        old_status: req?.process_status,
-                        new_status: req?.process_status,
-                        action: "order_created_after_contract_approved",
-                        changed_at: AppTime.NowVnUnspecified(),
-                        changed_by: "System"
-                    ));
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex,
-                        "Background convert-to-order failed. RequestId={RequestId}",
-                        requestId);
-                }
-            });
-        }
-
+       
         public Task<ConvertRequestToOrderResponse> ConvertToOrderInCurrentTransactionAsync(int requestId)
         {
             return ConvertToOrderInternalAsync(requestId);
@@ -1297,6 +1256,7 @@ namespace AMMS.Application.Services
                 publicId);
 
             request.print_ready_file = url;
+            StampActualConsultant(request);
 
             await _requestRepo.SaveChangesAsync();
 
@@ -1452,70 +1412,7 @@ namespace AMMS.Application.Services
             }
         }
 
-        public async Task UpdateContractCheckStatusAsync(UpdateContractCheckStatusDto dto, CancellationToken ct = default)
-        {
-            if (dto.request_id <= 0)
-                throw new ArgumentException("request_id is required");
-
-            if (!dto.is_check_contract.HasValue)
-                throw new ArgumentException("is_check_contract is required");
-
-            var req = await _requestRepo.GetByIdAsync(dto.request_id);
-            if (req == null)
-                throw new InvalidOperationException("Order request not found");
-
-            if (!string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(req.process_status, "Paid", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException("Only Accepted/Paid request can review contract");
-            }
-
-            var estimateInfo = await _estimateRepo.GetContractCheckEstimateInfoAsync(
-                dto.request_id,
-                req.accepted_estimate_id,
-                ct);
-
-            if (estimateInfo == null)
-                throw new InvalidOperationException("No estimate found for this request");
-
-            if (string.IsNullOrWhiteSpace(estimateInfo.consultant_contract_path))
-                throw new InvalidOperationException("Consultant contract has not been uploaded/generated");
-
-            if (string.IsNullOrWhiteSpace(estimateInfo.customer_signed_contract_path))
-                throw new InvalidOperationException("Customer signed contract has not been uploaded");
-
-            var shouldQueueConvert =
-                dto.is_check_contract.Value &&
-                !req.order_id.HasValue;
-
-            req.is_check_contract = dto.is_check_contract.Value;
-
-            if (dto.note != null)
-            {
-                req.contract_check_note = string.IsNullOrWhiteSpace(dto.note)
-                    ? null
-                    : dto.note.Trim();
-            }
-
-            await _requestRepo.SaveChangesAsync();
-
-            var now = AppTime.NowVnUnspecified();
-
-            await _rt.PublishRequestChangedAsync(new(
-                order_id: req.order_id,
-                request_id: req.order_request_id,
-                old_status: req.process_status,
-                new_status: req.process_status,
-                action: dto.is_check_contract.Value ? "contract_checked_ok" : "contract_need_resign",
-                changed_at: now,
-                changed_by: null
-            ));
-
-            if (shouldQueueConvert)
-            {
-                QueueConvertToOrder(req.order_request_id);
-            }
-        }
+        
 
         private static string? NormalizeMaterialAlias(string? code)
         {
@@ -1539,6 +1436,20 @@ namespace AMMS.Application.Services
                 "MANG_12MIC" => "MANG_12MIC",
                 _ => c
             };
+        }
+
+        private int? GetActualConsultantUserId()
+        {
+            return _currentUser.IsConsultant && _currentUser.UserId.HasValue
+                ? _currentUser.UserId.Value
+                : null;
+        }
+
+        private void StampActualConsultant(order_request req)
+        {
+            var userId = GetActualConsultantUserId();
+            if (userId.HasValue)
+                req.actual_consultant_user_id = userId.Value;
         }
     }
 }

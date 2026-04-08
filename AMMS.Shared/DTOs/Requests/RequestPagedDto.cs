@@ -6,6 +6,7 @@ namespace AMMS.Shared.DTOs.Requests
     {
         // ===== order_request =====
         public int order_request_id { get; set; }
+        public int? actual_consultant_user_id { get; set; }
         public string customer_name { get; set; } = "";
         public string customer_phone { get; set; } = "";
         public string? customer_email { get; set; }

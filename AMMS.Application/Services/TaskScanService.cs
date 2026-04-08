@@ -48,7 +48,10 @@ namespace AMMS.Application.Services
             _db = db;
         }
 
-        public async Task<ScanTaskResult> ScanFinishAsync(ScanTaskRequest req, CancellationToken ct = default)
+        public async Task<ScanTaskResult> ScanFinishAsync(
+    ScanTaskRequest req,
+    int? scannedByUserId,
+    CancellationToken ct = default)
         {
             if (!_tokenSvc.TryValidate(req.token, out var taskId, out var qtyGood, out var reason))
                 throw new ArgumentException(reason);
@@ -112,7 +115,8 @@ namespace AMMS.Application.Services
                     scanned_code = req.token,
                     action_type = "Finished",
                     qty_good = qtyGood,
-                    log_time = now
+                    log_time = now,
+                    scanned_by_user_id = scannedByUserId
                 };
 
                 await _logRepo.AddAsync(log);
@@ -131,19 +135,18 @@ namespace AMMS.Application.Services
                         .OrderBy(x => x.seq_num)
                         .ThenBy(x => x.task_id)
                         .FirstOrDefaultAsync(innerCt);
+
                     if (nextTask != null)
                     {
-                        await _hub.Clients.Group(RealtimeGroups.ByRole(nextTask.name)).SendAsync("nextTask", new { message = $"Công đoạn {nextTask.name} được bắt đầu" });
+                        await _hub.Clients.Group(RealtimeGroups.ByRole(nextTask.name))
+                            .SendAsync("nextTask", new { message = $"Công đoạn {nextTask.name} được bắt đầu" });
                     }
-
                 }
 
                 await _taskRepo.SaveChangesAsync(innerCt);
 
                 if (t.prod_id.HasValue)
-                {
                     await _prodRepo.TryCloseProductionIfCompletedAsync(t.prod_id.Value, now, innerCt);
-                }
 
                 production? prod = null;
                 order? ord = null;
@@ -173,8 +176,11 @@ namespace AMMS.Application.Services
 
                     await _taskRepo.SaveChangesAsync(innerCt);
                 }
+
                 await _hub.Clients
-                .Group(RealtimeGroups.ByRole("production manager")).SendAsync("finishedTask", new { message = $"Hoàn thành công đoạn" });
+                    .Group(RealtimeGroups.ByRole("production manager"))
+                    .SendAsync("finishedTask", new { message = $"Hoàn thành công đoạn" });
+
                 return new ScanTaskResult
                 {
                     task_id = t.task_id,
@@ -193,14 +199,13 @@ namespace AMMS.Application.Services
             {
             }
 
-
-
             if (result.prod_id.HasValue)
             {
                 var prod = await _prodRepo.GetByIdForUpdateAsync(result.prod_id.Value, ct);
                 if (prod?.order_id != null)
                 {
-                    await _hub.Clients.All.SendAsync("finishedProduction", new { message = $"Đơn hàng {prod.order_id} đã được sản xuất xong" });
+                    await _hub.Clients.All.SendAsync("finishedProduction",
+                        new { message = $"Đơn hàng {prod.order_id} đã được sản xuất xong" });
                 }
             }
 

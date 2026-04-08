@@ -20,6 +20,7 @@ namespace AMMS.Shared.DTOs.Requests
         public bool? is_check_contract { get; set; }
         public string product_name { get; set; } = "";
         public int quantity { get; set; }
+        public int? actual_consultant_user_id { get; set; }
         public string? description { get; set; }
         public string? detail_address { get; set; }
         public string? product_type { get; set; }

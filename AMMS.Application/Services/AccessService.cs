@@ -1,5 +1,6 @@
 ﻿using AMMS.Application.Interfaces;
 using AMMS.Infrastructure.Interfaces;
+using DocumentFormat.OpenXml.ExtendedProperties;
 using Microsoft.AspNetCore.Http;
 using System;
 using System.Collections.Generic;
@@ -55,22 +56,15 @@ namespace AMMS.Application.Services
 
         public Task<int?> GetConsultantScopeUserIdAsync(CancellationToken ct = default)
         {
-            if (!IsAuthenticated || !IsConsultant || !UserId.HasValue)
-                return Task.FromResult<int?>(null);
-
-            return Task.FromResult<int?>(UserId.Value);
+            return Task.FromResult<int?>(null);
         }
 
         public async Task EnsureCanAccessAssignedRequestAsync(int requestId, CancellationToken ct = default)
         {
-            if (!IsAuthenticated || !IsConsultant || !UserId.HasValue)
+            if (IsConsultant)
                 return;
 
-            var allowed = await _requestRepository.CanConsultantAccessRequestAsync(
-                requestId, UserId.Value, ct);
-
-            if (!allowed)
-                throw new UnauthorizedAccessException("Bạn không được phân công xử lý yêu cầu này.");
+            throw new UnauthorizedAccessException("Bạn không có quyền truy cập request này.");
         }
     }
 }

@@ -17,5 +17,6 @@ namespace AMMS.Shared.DTOs.Productions
         public DateTime? log_time { get; set; }
         public string? scanner_id { get; set; }
         public string? scanned_code { get; set; }
+        public int? scanned_by_user_id { get; set; }
     }
 }

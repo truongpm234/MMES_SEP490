@@ -14,6 +14,7 @@
         public bool? is_send_design { get; set; }
         public string consultant_note { get; set; } = "";
         public string product_name { get; set; } = "";
+        public int? actual_consultant_user_id { get; set; }
         public int quantity { get; set; }
         public string process_status { get; set; } = "";
         public DateTime? request_date { get; set; }

@@ -116,8 +116,7 @@ namespace AMMS.Infrastructure.Repositories
                 preliminary_estimated_price = request.preliminary_estimated_price,
                 consultant_contract_path = estimate?.consultant_contract_path,
                 customer_signed_contract_path = estimate?.customer_signed_contract_path,
-                is_check_contract = request.is_check_contract,
-                contract_check_note = request.contract_check_note,
+                actual_consultant_user_id = request.actual_consultant_user_id,
             };
         }
 
@@ -276,8 +275,7 @@ namespace AMMS.Infrastructure.Repositories
                     wave_sheets_used = ce != null ? ce.wave_sheets_used : null,
                     paper_alternative = ce != null ? ce.paper_alternative : null,
                     wave_alternative = ce != null ? ce.wave_alternative : null,
-                    is_check_contract = r.is_check_contract,
-                    contract_check_note = r.contract_check_note,
+
                 }
             )
             .Skip(skip)
@@ -306,6 +304,7 @@ namespace AMMS.Infrastructure.Repositories
                 select new RequestPagedDto
                 {
                     order_request_id = r.order_request_id,
+                    actual_consultant_user_id = r.actual_consultant_user_id,
                     customer_name = r.customer_name ?? "",
                     customer_phone = r.customer_phone ?? "",
                     customer_email = r.customer_email,
@@ -392,8 +391,6 @@ namespace AMMS.Infrastructure.Repositories
                     wave_sheets_used = ce != null ? ce.wave_sheets_used : null,
                     paper_alternative = ce != null ? ce.paper_alternative : null,
                     wave_alternative = ce != null ? ce.wave_alternative : null,
-                    is_check_contract = r.is_check_contract,
-                    contract_check_note = r.contract_check_note,
                 }
             ).FirstOrDefaultAsync();
         }
@@ -967,8 +964,7 @@ namespace AMMS.Infrastructure.Repositories
                 quote_expires_at = request.quote_expires_at,
                 message_to_customer = SafeText(request.message_to_customer),
                 printer_ready_file_path = SafeText(request.print_ready_file),
-                is_check_contract = request.is_check_contract,
-                contract_check_note = SafeText(request.contract_check_note),
+                actual_consultant_user_id = request.assigned_consultant,
                 cost_estimate = estimates.Select(ce =>
                 {
                     var discountAmount = ce.discount_amount < 0m ? 0m : ce.discount_amount;
@@ -1056,6 +1052,7 @@ namespace AMMS.Infrastructure.Repositories
                 .Select(r => new RequestWithTwoEstimatesDto
                 {
                     order_request_id = r.order_request_id,
+                    actual_consultant_user_id = r.actual_consultant_user_id,
                     print_ready_file = r.print_ready_file,
                     customer_name = r.customer_name ?? "",
                     customer_phone = r.customer_phone ?? "",
@@ -1079,8 +1076,6 @@ namespace AMMS.Infrastructure.Repositories
                     print_length_mm = r.print_length_mm,
                     is_send_design = r.is_send_design,
                     message_to_customer = r.message_to_customer,
-                    is_check_contract = r.is_check_contract,
-                    contract_check_note = r.contract_check_note,
                 })
                 .FirstOrDefaultAsync(ct);
 

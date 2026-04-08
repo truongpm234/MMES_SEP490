@@ -102,6 +102,7 @@
         public int default_production_days { get; set; }
         public int rush_threshold_days { get; set; }
         public decimal vat_percent { get; set; }
+        public decimal min_start_wait_hours { get; set; } = 6;
         public Dictionary<int, decimal> rush_percent_by_days_early { get; set; } = new();
     }
 

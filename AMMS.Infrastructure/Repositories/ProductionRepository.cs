@@ -513,7 +513,8 @@ namespace AMMS.Infrastructure.Repositories
                     action_type = l.action_type,
                     qty_good = l.qty_good ?? 0,
                     log_time = l.log_time,
-                    scanned_code = l.scanned_code
+                    scanned_code = l.scanned_code,
+                    scanned_by_user_id = l.scanned_by_user_id
                 })
                 .ToListAsync(ct);
 

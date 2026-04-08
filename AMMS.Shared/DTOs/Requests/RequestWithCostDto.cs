@@ -24,6 +24,7 @@ namespace AMMS.Shared.DTOs.Requests
         public string? process_status { get; set; }
         public string? product_type { get; set; }
         public int? number_of_plates { get; set; }
+        public int? actual_consultant_user_id { get; set; }
         public string? production_processes { get; set; }
         public string? alternative_material_reason { get; set; }
         public string? coating_type { get; set; }

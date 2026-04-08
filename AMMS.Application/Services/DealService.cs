@@ -922,43 +922,6 @@ namespace AMMS.Application.Services
             }
 
             throw new InvalidOperationException("Cannot allocate remaining-payment orderCode.");
-        }
-
-        public async Task SendRequestResignContractEmailAsync(int requestId, string? customMessage, CancellationToken ct = default)
-        {
-            var req = await _requestRepo.GetByIdAsync(requestId)
-                ?? throw new InvalidOperationException("Order request not found");
-
-            if (req.is_check_contract != false)
-                throw new InvalidOperationException("Only request with is_check_contract = false can send re-upload contract email.");
-
-            if (string.IsNullOrWhiteSpace(req.customer_email))
-                throw new InvalidOperationException("Customer email missing");
-
-            var est = await ResolveAcceptedEstimateAsync(req, ct);
-
-            var feBase = _config["Deal:BaseUrlFe"] ?? "https://sep490-fe.vercel.app";
-            var uploadUrl = $"{feBase}/upload-contract/{requestId}";
-
-            var normalizedMessage = string.IsNullOrWhiteSpace(customMessage)
-                ? "Hợp đồng hiện tại có một số thông tin chưa chính xác hoặc chưa đủ điều kiện xác nhận. Vui lòng xem lại và tải lên bản hợp đồng đã chỉnh sửa / ký lại để hệ thống tiếp tục xử lý."
-                : customMessage.Trim();
-
-            req.message_to_customer = normalizedMessage;
-            await _requestRepo.SaveChangesAsync();
-
-            var html = DealEmailTemplates.RequestResignContractUploadEmail(
-                req,
-                est,
-                uploadUrl,
-                normalizedMessage);
-
-            await _emailQueue.QueueAsync(new EmailQueueItem(
-                req.customer_email!,
-                $"[MES] Yêu cầu tải lên lại hợp đồng - Request AM{req.order_request_id:D6}",
-                html));
-
-            //khánh sửa signalr
-        }
+        }       
     }
 }

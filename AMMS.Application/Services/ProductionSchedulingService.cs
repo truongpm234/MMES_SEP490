@@ -37,6 +37,18 @@ namespace AMMS.Application.Services
             _logger = logger;
             _opt = opt.Value ?? new SchedulingOptions();
         }
+        private async Task<int> GetMinStartWaitMinutesAsync(CancellationToken ct = default)
+        {
+            var hours = await _db.estimate_config
+                .AsNoTracking()
+                .Where(x => x.config_group == "planning" && x.config_key == "min_start_wait_hours")
+                .OrderByDescending(x => x.updated_at)
+                .Select(x => (decimal?)x.value_num)
+                .FirstOrDefaultAsync(ct);
+
+            var resolvedHours = (hours.HasValue && hours.Value > 0m) ? hours.Value : 6m;
+            return (int)Math.Ceiling(resolvedHours * 60m);
+        }
 
         public async Task<int> ScheduleOrderAsync(int orderId, int productTypeId, string? productionProcessCsv, int? managerId = 3)
         {
@@ -562,10 +574,14 @@ namespace AMMS.Application.Services
             var normalizedCsv = ProductionProcessSelectionHelper.BuildCsv(steps, x => x.process_code);
             var normalizedNow = _cal.NormalizeStart(now);
 
-            // neo thời gian sớm nhất theo logic nội bộ hiện có
-            var baseAnchor = EstimateInitialPlanningAnchor(ctx, normalizedNow, steps.Count);
+            var minStartWaitMinutes = await GetMinStartWaitMinutesAsync(ct);
 
-            // neo FIFO: đơn cũ phải xếp trước đơn mới
+            var baseAnchor = EstimateInitialPlanningAnchor(
+                ctx,
+                normalizedNow,
+                steps.Count,
+                minStartWaitMinutes);
+
             var fifoAnchor = await ResolveQueueAnchorAsync(ctx, baseAnchor, ct);
 
             var plan = await BuildStagePlansFromAnchorAsync(
@@ -869,7 +885,8 @@ namespace AMMS.Application.Services
         private DateTime EstimateInitialPlanningAnchor(
     PlanningContext ctx,
     DateTime scheduledAt,
-    int stageCount)
+    int stageCount,
+    int minStartWaitMinutes)
         {
             var leadMinutes = Math.Max(_opt.MinimumPlanningLeadMinutes, _opt.InitialLeadMinutes);
 
@@ -893,33 +910,9 @@ namespace AMMS.Application.Services
             if (selected.Contains("CAN") || selected.Contains("BOI"))
                 leadMinutes += 10;
 
+            leadMinutes = Math.Max(leadMinutes, minStartWaitMinutes);
+
             return _cal.NormalizeStart(scheduledAt.AddMinutes(leadMinutes));
-        }
-
-        private DateTime EstimatePreferredAnchorByDueDate(
-            PlanningContext ctx,
-            PlanBuildResult currentPlan,
-            DateTime earliestAnchor)
-        {
-            if (!ctx.DesiredDeliveryDate.HasValue || currentPlan.Stages.Count == 0)
-                return earliestAnchor;
-
-            var desiredFinish = ctx.DesiredDeliveryDate.Value;
-            if (desiredFinish.TimeOfDay == TimeSpan.Zero)
-                desiredFinish = desiredFinish.Date.AddHours(17);
-
-            var planStart = currentPlan.Stages.Min(x => x.PlannedStart);
-            var planEnd = currentPlan.Stages.Max(x => x.PlannedEnd);
-            var totalSpan = planEnd - planStart;
-
-            var latestAnchor = desiredFinish
-                .AddHours(-_opt.DueDateSafetyHours)
-                .Subtract(totalSpan);
-
-            if (latestAnchor <= earliestAnchor)
-                return earliestAnchor;
-
-            return _cal.NormalizeStart(latestAnchor);
         }
 
         private async Task<PlanBuildResult> BuildStagePlansFromAnchorAsync(

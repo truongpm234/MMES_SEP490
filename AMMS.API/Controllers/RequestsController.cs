@@ -745,12 +745,7 @@ namespace AMMS.API.Controllers
                 var wasAccepted = string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase);
 
                 if (!wasAccepted)
-                {
                     req.process_status = "Accepted";
-
-                    req.is_check_contract = null;
-                    req.contract_check_note = null;
-                }
 
                 await _db.cost_estimates
                     .Where(x => x.order_request_id == orderRequestId)
@@ -764,6 +759,17 @@ namespace AMMS.API.Controllers
                         .ExecuteUpdateAsync(setters => setters
                             .SetProperty(x => x.status,
                                 x => x.quote_id == resolvedQuoteId ? "Accepted" : "Rejected"), ct);
+                }
+
+                // BỎ contract gate -> convert order ngay sau khi cọc thành công nếu chưa có order
+                if (!req.order_id.HasValue)
+                {
+                    var convert = await _service.ConvertToOrderInCurrentTransactionAsync(orderRequestId);
+                    if (!convert.Success || !convert.OrderId.HasValue)
+                    {
+                        await tx.RollbackAsync(ct);
+                        return (false, convert.Message ?? "Convert to order failed");
+                    }
                 }
 
                 if (req.order_id.HasValue)
@@ -796,7 +802,7 @@ namespace AMMS.API.Controllers
                 {
                 }
 
-                return (true, "Deposit payment recorded successfully. Request is Accepted and waiting for contract approval.");
+                return (true, "Deposit payment recorded successfully. Request is Accepted.");
             });
         }
 
@@ -1154,9 +1160,6 @@ namespace AMMS.API.Controllers
                 if (current == null)
                     return NotFound(new { message = "Order request not found" });
 
-                if (current.is_check_contract != true)
-                    return BadRequest(new { message = "Manager has not approved contract yet. is_check_contract must be true before layout confirmation." });
-
                 if (!current.order_id.HasValue)
                 {
                     var convert = await _service.ConvertToOrderAsync(dto.request_id);
@@ -1186,9 +1189,6 @@ namespace AMMS.API.Controllers
 
                     if (!string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase))
                         throw new InvalidOperationException("Only paid/accepted requests can be layout-confirmed");
-
-                    if (req.is_check_contract != true)
-                        throw new InvalidOperationException("Manager has not approved contract yet. is_check_contract must be true before layout confirmation.");
 
                     orderId = req.order_id.Value;
 
@@ -1227,106 +1227,6 @@ namespace AMMS.API.Controllers
                 });
             }
         }                         
-
-        [HttpPut("contract-check-status")]
-        public async Task<IActionResult> UpdateContractCheckStatus([FromBody] UpdateContractCheckStatusDto dto, CancellationToken ct)
-        {
-            try
-            {
-                if (dto == null)
-                    return BadRequest(new { message = "Request body is required" });
-
-                if (dto.request_id <= 0)
-                    return BadRequest(new { message = "request_id is required" });
-
-                if (!dto.is_check_contract.HasValue)
-                    return BadRequest(new { message = "is_check_contract is required" });
-
-                await _service.UpdateContractCheckStatusAsync(dto, ct);
-
-                if (dto.is_check_contract.Value)
-                {
-                    return Accepted(new
-                    {
-                        ok = true,
-                        request_id = dto.request_id,
-                        is_check_contract = dto.is_check_contract,
-                        contract_check_note = dto.note,
-                        message = "Contract checked successfully. Order creation has been started in background."
-                    });
-                }
-
-                return Ok(new
-                {
-                    ok = true,
-                    request_id = dto.request_id,
-                    is_check_contract = dto.is_check_contract,
-                    contract_check_note = dto.note,
-                    message = "Contract has issues. Consultant must ask customer to review and sign again."
-                });
-            }
-            catch (ArgumentException ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(StatusCodes.Status500InternalServerError, new
-                {
-                    message = "An unexpected error occurred",
-                    detail = ex.Message
-                });
-            }
-        }
-
-        [HttpPost("email-request-resign-contract")]
-        public async Task<IActionResult> RequestCustomerResignContract(
-    [FromBody] RequestResignContractEmailDto dto,
-    CancellationToken ct)
-        {
-            try
-            {
-                if (dto == null || dto.request_id <= 0)
-                    return BadRequest(new { message = "request_id is required" });
-
-                var req = await _service.GetByIdAsync(dto.request_id);
-                if (req == null)
-                    return NotFound(new { message = "Order request not found" });
-
-                if (req.is_check_contract != false)
-                {
-                    return BadRequest(new
-                    {
-                        message = "Only request with is_check_contract = false can send re-sign contract email"
-                    });
-                }
-
-                await _dealService.SendRequestResignContractEmailAsync(dto.request_id, dto.custom_message, ct);
-
-                return Ok(new
-                {
-                    ok = true,
-                    request_id = dto.request_id,
-                    message = "Re-sign contract email sent successfully"
-                });
-            }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(StatusCodes.Status500InternalServerError, new
-                {
-                    message = "Send re-sign contract email failed",
-                    detail = ex.Message
-                });
-            }
-        }
 
         [HttpPost("upload-print-ready-file/{requestId:int}")]
         [Consumes("multipart/form-data")]

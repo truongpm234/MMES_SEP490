@@ -17,6 +17,8 @@ public partial class task_log
 
     public int? qty_good { get; set; }
 
+    public int? scanned_by_user_id { get; set; }
+
     public DateTime? log_time { get; set; }
 
     [ForeignKey(nameof(task_id))]

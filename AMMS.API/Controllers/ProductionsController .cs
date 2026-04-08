@@ -41,6 +41,21 @@ namespace AMMS.API.Controllers
 
             return null;
         }
+        private bool IsGeneralManager()
+        {
+            var roleName =
+                User.FindFirst("role_name")?.Value ??
+                User.FindFirst(ClaimTypes.Role)?.Value;
+
+            if (string.Equals(roleName, "general manager", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var roleIdValue =
+                User.FindFirst("roleid")?.Value ??
+                User.FindFirst("role_id")?.Value;
+
+            return int.TryParse(roleIdValue, out var roleId) && roleId == 18;
+        }
 
         [HttpPost("schedule")]
         public async Task<IActionResult> Schedule([FromBody] ScheduleRequest req)
@@ -122,6 +137,38 @@ namespace AMMS.API.Controllers
             var res = await _orderMaterialService.GetMaterialsByOrderIdAsync(orderId, ct);
             if (res == null) return NotFound();
             return Ok(res);
+        }
+
+        [Authorize]
+        [HttpGet("start-ready/{orderId:int}")]
+        public async Task<IActionResult> GetProductionReady(int orderId, CancellationToken ct)
+        {
+            var result = await _service.GetProductionReadyAsync(orderId, ct);
+            if (result == null)
+                return NotFound(new { message = "Order not found" });
+
+            return Ok(result);
+        }
+
+        [Authorize]
+        [HttpPut("start-ready/{orderId:int}")]
+        public async Task<IActionResult> SetProductionReady(int orderId, [FromBody] ConfirmProductionReadyRequest req, CancellationToken ct)
+        {
+            if (!IsGeneralManager())
+                return Forbid();
+
+            var ok = await _service.SetProductionReadyAsync(orderId, req.is_production_ready, ct);
+            if (!ok)
+                return NotFound(new { message = "Order not found" });
+
+            return Ok(new
+            {
+                order_id = orderId,
+                is_production_ready = req.is_production_ready,
+                message = req.is_production_ready
+                    ? "General manager confirmed production readiness."
+                    : "Production readiness confirmation has been removed."
+            });
         }
 
         [HttpPost("start/{orderId:int}")]
