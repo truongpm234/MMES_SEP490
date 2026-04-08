@@ -13,6 +13,7 @@ namespace AMMS.Application.Services
 {
     public class TaskScanService : ITaskScanService
     {
+        private readonly NotificationService _noti;
         private readonly ITaskQrTokenService _tokenSvc;
         private readonly ITaskRepository _taskRepo;
         private readonly ITaskLogRepository _logRepo;
@@ -25,6 +26,7 @@ namespace AMMS.Application.Services
         private readonly AppDbContext _db;
 
         public TaskScanService(
+            NotificationService noti,
             AppDbContext db,
             ITaskQrTokenService tokenSvc,
             ITaskRepository taskRepo,
@@ -36,6 +38,7 @@ namespace AMMS.Application.Services
             IRequestRepository orderRequestRepo,
             IOrderRepository orderRepo)
         {
+            _noti = noti;
             _tokenSvc = tokenSvc;
             _taskRepo = taskRepo;
             _logRepo = logRepo;
@@ -174,6 +177,7 @@ namespace AMMS.Application.Services
                 }
                 await _hub.Clients
                 .Group(RealtimeGroups.ByRole("production manager")).SendAsync("finishedTask", new { message = $"Hoàn thành công đoạn" });
+                await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
                 return new ScanTaskResult
                 {
                     task_id = t.task_id,

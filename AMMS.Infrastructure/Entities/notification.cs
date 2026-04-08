@@ -3,6 +3,7 @@
     public class notification
     {
         public int Id { get; set; }
+        public int? OrderRequestId { get; set; }
 
         public string Content { get; set; } = null!;
 

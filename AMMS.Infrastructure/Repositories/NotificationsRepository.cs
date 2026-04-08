@@ -24,10 +24,11 @@ namespace AMMS.Infrastructure.Repositories
             return res;
         }
 
-        public async Task<string> CreateNoti(int role_id, string content, int? user_id)
+        public async Task<string> CreateNoti(int role_id, string content, int? user_id, int order_request_id)
         {
             var res = new notification();
             res.RoleId = role_id;
+            res.OrderRequestId = order_request_id;
             res.Content = content;
             res.UserId = user_id;
             res.Time = DateTime.UtcNow;
@@ -38,15 +39,28 @@ namespace AMMS.Infrastructure.Repositories
             return "Success";
         }
 
-        public async Task<string> UpdateNoti(int id)
+        public async Task<string> UpdateNotiManagerApprove(int requestId)
+        {
+            var res = await _db.notifications.FirstOrDefaultAsync(n => n.OrderRequestId == requestId && n.RoleId == 2);
+            if (res != null)
+            {
+                res.IsCheck = true;
+                res.Status = "";
+                return "is read";
+            }
+            return "Failed";
+        }
+
+        public async Task<bool> FindAsync(int id)
         {
             var res = await _db.notifications.FirstOrDefaultAsync(n => n.Id == id);
             if (res != null)
             {
                 res.IsCheck = true;
-                return "is read";
+                await _db.SaveChangesAsync();
+                return true;
             }
-            return "Failed";
+            return false;
         }
     }
 }

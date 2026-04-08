@@ -594,6 +594,9 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.RoleId)
                   .HasColumnName("role_id");
 
+            entity.Property(e => e.OrderRequestId)
+                  .HasColumnName("order_request_id");
+
             entity.Property(e => e.Time)
                   .HasColumnName("time")
                   .HasColumnType("timestamptz")

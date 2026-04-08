@@ -123,7 +123,7 @@ namespace AMMS.Application.Services
             await _requestRepo.AddAsync(entity);
             await _requestRepo.SaveChangesAsync();
 
-            await _notificationService.CreateNotfi(2, $"Có yêu cầu #{entity.order_request_id} mới được tạo", entity.assigned_consultant);
+            await _notificationService.CreateNotfi(2, $"Có yêu cầu #{entity.order_request_id} mới được tạo", entity.assigned_consultant, entity.order_request_id);
 
             //khánh sửa signalr
             await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("pending", new { message = $"Có yêu cầu #{entity.order_request_id} mới được tạo", user_id = entity.assigned_consultant });
@@ -160,9 +160,11 @@ namespace AMMS.Application.Services
             await _requestRepo.AddAsync(entity);
             await _requestRepo.SaveChangesAsync();
 
-            await _notificationService.CreateNotfi(3, $"Có yêu cầu {entity.order_request_id} cần duyệt", null);
+            await _notificationService.CreateNotfi(3, $"Có yêu cầu {entity.order_request_id} cần duyệt", null, entity.order_request_id);
             //Khánh sửa signalr
             await _hub.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("consultantCreateRequest", new { message = $"Có yêu cầu {entity.order_request_id} cần duyệt", id = entity.order_request_id });
+
+            await _notificationService.CreateNotfi(3, $"Có yêu cầu {entity.order_request_id} vừa được tạo", null, entity.order_request_id);
             return new CreateRequestResponse
             {
                 order_request_id = entity.order_request_id,
@@ -523,7 +525,7 @@ namespace AMMS.Application.Services
             {
                 req.verified_at = now;
                 req.quote_expires_at = now.AddDays(7);
-                await _notificationService.CreateNotfi(2, $"Yêu cầu #{req.order_request_id} đã được duyệt", req.assigned_consultant);
+                await _notificationService.CreateNotfi(2, $"Yêu cầu #{req.order_request_id} đã được duyệt", req.assigned_consultant, req.order_request_id);
                 await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("verified", new { message = $"Yêu cầu #{req.order_request_id} đã được duyệt", user_id = req.assigned_consultant });
             }
             else
@@ -536,13 +538,11 @@ namespace AMMS.Application.Services
             {
                 req.accepted_estimate_id = null;
                 await _estimateRepo.DeactivateAllByRequestIdAsync(dto.request_id, ct);
-                await _notificationService.CreateNotfi(2, $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa", req.assigned_consultant);
+                await _notificationService.CreateNotfi(2, $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa", req.assigned_consultant, req.order_request_id);
                 await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("declined", new { message = $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa", user_id = req.assigned_consultant });
             }
-
+            await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
             await _requestRepo.SaveChangesAsync();
-
-
         }
 
         public async Task SubmitEstimateForApprovalAsync(SubmitForApprovalRequestDto input)
@@ -597,6 +597,7 @@ namespace AMMS.Application.Services
 
             //Khánh sửa signalr
             await _hub.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("processing", new { message = $"Có yêu cầu #{req.order_request_id} cần duyệt" });
+            await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
             //Khánh sửa signalr
         }
 
@@ -778,15 +779,11 @@ namespace AMMS.Application.Services
 
             await _estimateRepo.SaveChangesAsync();
 
-            await _rt.PublishRequestChangedAsync(new(
-                order_id: clonedRequest.order_id,
-                request_id: clonedRequest.order_request_id,
-                old_status: null,
-                new_status: clonedRequest.process_status,
-                action: "cloned_from_request",
-                changed_at: now,
-                changed_by: null
-            ));
+            await _hub.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("clone-request", new { message = $"Có yêu cầu {clonedRequest.order_request_id} vừa được tạo", user_id = clonedRequest.assigned_consultant });
+
+            await _notificationService.CreateNotfi(3, $"Có yêu cầu {clonedRequest.order_request_id} vừa được tạo", null, clonedRequest.order_request_id);
+
+            await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
 
             return new CloneRequestResponseDto
             {
@@ -1140,15 +1137,10 @@ namespace AMMS.Application.Services
                         .AsNoTracking()
                         .FirstOrDefaultAsync(x => x.order_request_id == requestId);
 
-                    await scopedRt.PublishRequestChangedAsync(new(
-                        order_id: req.order_id,
-                        request_id: requestId,
-                        old_status: req?.process_status,
-                        new_status: req?.process_status,
-                        action: "order_created_after_contract_approved",
-                        changed_at: AppTime.NowVnUnspecified(),
-                        changed_by: "System"
-                    ));
+                    //await _hub.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("order-create-after-contract-approved", new { message = "Đã duyệt hợp đồng xong" });
+
+                    await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
+
                 }
                 catch (Exception ex)
                 {
@@ -1495,7 +1487,7 @@ namespace AMMS.Application.Services
             await _requestRepo.SaveChangesAsync();
 
             var now = AppTime.NowVnUnspecified();
-
+            //Chưa hiểu bắn event làm gì
             await _rt.PublishRequestChangedAsync(new(
                 order_id: req.order_id,
                 request_id: req.order_request_id,
