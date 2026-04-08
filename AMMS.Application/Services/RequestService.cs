@@ -17,6 +17,7 @@ namespace AMMS.Application.Services
 {
     public class RequestService : IRequestService
     {
+        private readonly NotificationService _notificationService;
         private readonly IRequestRepository _requestRepo;
         private readonly IOrderRepository _orderRepo;
         private readonly AppDbContext _db;
@@ -36,6 +37,7 @@ namespace AMMS.Application.Services
         private readonly ILogger<RequestService> _logger;
 
         public RequestService(
+            NotificationService notificationService,
             IRequestRepository requestRepo,
             IOrderRepository orderRepo,
             ICostEstimateRepository estimateRepo,
@@ -54,6 +56,7 @@ namespace AMMS.Application.Services
             IServiceScopeFactory serviceScopeFactory,
             ILogger<RequestService> logger)
         {
+            _notificationService = notificationService;
             _requestRepo = requestRepo;
             _orderRepo = orderRepo;
             _estimateRepo = estimateRepo;
@@ -125,6 +128,10 @@ namespace AMMS.Application.Services
                     message = $"Có yêu cầu #{entity.order_request_id} mới được tạo",
                     id = entity.order_request_id
                 });
+            await _notificationService.CreateNotfi(2, $"Có yêu cầu #{entity.order_request_id} mới được tạo", entity.assigned_consultant, entity.order_request_id);
+
+            //khánh sửa signalr
+            await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("pending", new { message = $"Có yêu cầu #{entity.order_request_id} mới được tạo", user_id = entity.assigned_consultant });
 
             return new CreateRequestResponse
             {
@@ -164,6 +171,11 @@ namespace AMMS.Application.Services
                     id = entity.order_request_id
                 });
 
+            await _notificationService.CreateNotfi(3, $"Có yêu cầu {entity.order_request_id} cần duyệt", null, entity.order_request_id);
+            //Khánh sửa signalr
+            await _hub.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("consultantCreateRequest", new { message = $"Có yêu cầu {entity.order_request_id} cần duyệt", id = entity.order_request_id });
+
+            await _notificationService.CreateNotfi(3, $"Có yêu cầu {entity.order_request_id} vừa được tạo", null, entity.order_request_id);
             return new CreateRequestResponse
             {
                 order_request_id = entity.order_request_id,
@@ -529,6 +541,8 @@ namespace AMMS.Application.Services
                         message = $"Yêu cầu #{req.order_request_id} đã được duyệt",
                         id = req.order_request_id
                     });
+                await _notificationService.CreateNotfi(2, $"Yêu cầu #{req.order_request_id} đã được duyệt", req.assigned_consultant, req.order_request_id);
+                await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("verified", new { message = $"Yêu cầu #{req.order_request_id} đã được duyệt", user_id = req.assigned_consultant });
             }
             else
             {
@@ -547,8 +561,10 @@ namespace AMMS.Application.Services
                         message = $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa",
                         id = req.order_request_id
                     });
+                await _notificationService.CreateNotfi(2, $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa", req.assigned_consultant, req.order_request_id);
+                await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("declined", new { message = $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa", user_id = req.assigned_consultant });
             }
-
+            await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
             await _requestRepo.SaveChangesAsync();
         }
 
@@ -602,6 +618,10 @@ namespace AMMS.Application.Services
 
             await _hub.Clients.Group(RealtimeGroups.ByRole("manager"))
                 .SendAsync("processing", new { message = $"Có yêu cầu #{req.order_request_id} cần duyệt" });
+            //Khánh sửa signalr
+            await _hub.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("processing", new { message = $"Có yêu cầu #{req.order_request_id} cần duyệt" });
+            await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
+            //Khánh sửa signalr
         }
 
         public async Task<RequestWithTwoEstimatesDto?> GetCompareQuotesAsync(int requestId, CancellationToken ct = default)
@@ -781,15 +801,11 @@ namespace AMMS.Application.Services
 
             await _estimateRepo.SaveChangesAsync();
 
-            await _rt.PublishRequestChangedAsync(new(
-                order_id: clonedRequest.order_id,
-                request_id: clonedRequest.order_request_id,
-                old_status: null,
-                new_status: clonedRequest.process_status,
-                action: "cloned_from_request",
-                changed_at: now,
-                changed_by: null
-            ));
+            await _hub.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("clone-request", new { message = $"Có yêu cầu {clonedRequest.order_request_id} vừa được tạo", user_id = clonedRequest.assigned_consultant });
+
+            await _notificationService.CreateNotfi(3, $"Có yêu cầu {clonedRequest.order_request_id} vừa được tạo", null, clonedRequest.order_request_id);
+
+            await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
 
             return new CloneRequestResponseDto
             {
@@ -1120,7 +1136,47 @@ namespace AMMS.Application.Services
                 OrderCode = newOrder.code
             };
         }
-       
+
+        private void QueueConvertToOrder(int requestId)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+
+                    var scopedRequestService = scope.ServiceProvider.GetRequiredService<IRequestService>();
+                    var scopedRt = scope.ServiceProvider.GetRequiredService<IRealtimePublisher>();
+                    var scopedDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+                    var result = await scopedRequestService.ConvertToOrderAsync(requestId);
+
+                    if (!result.Success)
+                    {
+                        _logger.LogWarning(
+                            "Background convert-to-order skipped/failed. RequestId={RequestId}, Message={Message}",
+                            requestId, result.Message);
+                        return;
+                    }
+
+                    var req = await scopedDb.order_requests
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(x => x.order_request_id == requestId);
+
+                    //await _hub.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("order-create-after-contract-approved", new { message = "Đã duyệt hợp đồng xong" });
+
+                    await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
+
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Background convert-to-order failed. RequestId={RequestId}",
+                        requestId);
+                }
+            });
+        }
+
         public Task<ConvertRequestToOrderResponse> ConvertToOrderInCurrentTransactionAsync(int requestId)
         {
             return ConvertToOrderInternalAsync(requestId);
@@ -1413,7 +1469,6 @@ namespace AMMS.Application.Services
         }
 
         
-
         private static string? NormalizeMaterialAlias(string? code)
         {
             var c = (code ?? "").Trim().ToUpperInvariant();

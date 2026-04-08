@@ -376,7 +376,6 @@ namespace AMMS.API.Controllers
 
             // 6) Update status + gửi mail consultant
             await _dealService.RejectDealAsync(dto.order_request_id, dto.reason ?? "Customer rejected");
-            await _rt.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("createOrder", new { message = $"Yêu cầu {dto.order_request_id} đã bị từ chối" });
 
             return Ok(new { ok = true });
         }
@@ -1226,7 +1225,7 @@ namespace AMMS.API.Controllers
                     message = ex.Message
                 });
             }
-        }                         
+        }
 
         [HttpPost("upload-print-ready-file/{requestId:int}")]
         [Consumes("multipart/form-data")]
@@ -1292,6 +1291,8 @@ namespace AMMS.API.Controllers
                 else if (res?.process_status == "Paid")
                 {
                     //Khánh sửa signalr
+                    await _rt.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("paid", new { message = $"Yêu cầu {id} đã được thanh toán " });
+                    await _rt.Clients.Group(RealtimeGroups.ByRole("warehouse")).SendAsync("paid", new { message = $"Yêu cầu {id} đã được thanh toán " });
                     return Ok(new { action = "Full paid" });
                 }
             }

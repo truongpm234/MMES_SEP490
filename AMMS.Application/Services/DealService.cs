@@ -32,7 +32,9 @@ namespace AMMS.Application.Services
         private readonly IOrderRepository _orderRepo;
         private readonly IProductionRepository _prodRepo;
         private readonly IHubContext<RealtimeHub> _hub;
+        private readonly NotificationService _notificationService;
         public DealService(
+            NotificationService notificationService,
     IHubContext<RealtimeHub> hub,
     AppDbContext db,
     IRequestRepository requestRepo,
@@ -48,6 +50,7 @@ namespace AMMS.Application.Services
     IUserRepository userRepo, IOrderRepository orderRepository, IProductionRepository productionRepository)
         {
             _db = db;
+            _notificationService = notificationService;
             _requestRepo = requestRepo;
             _estimateRepo = estimateRepo;
             _config = config;
@@ -188,6 +191,7 @@ namespace AMMS.Application.Services
 
                 //Khánh sửa signalr
                 await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("waiting", new { message = $"Yêu cầu #{req.order_request_id} đang chờ khách hàng xác nhận thanh toán cọc", id = req.order_request_id });
+                await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
             }
             catch
             {
@@ -211,7 +215,7 @@ namespace AMMS.Application.Services
                 ct: CancellationToken.None);
             await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("deposited", new { message = $"Yêu cầu {req.order_request_id} - {req.order_id} đã được đặt cọc" });
             await _hub.Clients.Group(RealtimeGroups.ByRole("production manager")).SendAsync("scheduled", new { message = $"#{req.order_id} đã được lên lịch sản xuất", id = req.order_id });
-
+            await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
             return dto.check_out_url ?? "";
         }
 
@@ -241,7 +245,9 @@ namespace AMMS.Application.Services
             var safeReason = System.Net.WebUtility.HtmlEncode(reason ?? "");
 
             //Khánh sửa signalr
-
+            await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("rejected", new { message = $"yêu cầu {orderRequestId} đã bị khách hàng từ chối báo giá" });
+            await _notificationService.CreateNotfi(2, $"yêu cầu {orderRequestId} đã bị khách hàng từ chối báo giá", req.assigned_consultant, orderRequestId);
+            await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
             await SendConsultantStatusEmailAsync(req, est, $"KHACH TU CHOI (LY DO: {safeReason})");
         }
 
