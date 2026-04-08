@@ -1,11 +1,13 @@
-﻿using AMMS.Application.Interfaces;
+﻿using AMMS.Application.Helpers;
+using AMMS.Application.Interfaces;
 using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Interfaces;
-using AMMS.Infrastructure.Repositories;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Enums;
 using AMMS.Shared.DTOs.Productions;
+using AMMS.Shared.DTOs.Socket;
 using AMMS.Shared.Helpers;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace AMMS.Application.Services
@@ -16,13 +18,16 @@ namespace AMMS.Application.Services
         private readonly IRealtimePublisher _hub;
         private readonly IOrderRepository _orderRepo;
         private readonly AppDbContext _db;
-
-        public ProductionService(IProductionRepository repo, IRealtimePublisher hub, AppDbContext db, IOrderRepository oderRepository)
+        private readonly IHubContext<RealtimeHub> _rt;
+        private readonly NotificationService _notiService;
+        public ProductionService(IHubContext<RealtimeHub> rt, IProductionRepository repo, IRealtimePublisher hub, AppDbContext db, IOrderRepository oderRepository, NotificationService notiService)
         {
             _db = db;
+            _rt = rt;
             _repo = repo;
             _hub = hub;
             _orderRepo = oderRepository;
+            _notiService = notiService;
         }
         public async Task<NearestDeliveryResponse> GetNearestDeliveryAsync()
         {
@@ -162,7 +167,12 @@ namespace AMMS.Application.Services
 
             ord.is_production_ready = isProductionReady;
             await _db.SaveChangesAsync(ct);
-
+            await _rt.Clients.Group(RealtimeGroups.ByRole("production manager")).SendAsync("scheduled", new { message = $"Đơn hàng {orderId} đã được lên lịch sản xuất có thể bắt đầu sản xuất" });
+            var req = await _db.order_requests.FirstOrDefaultAsync(o => o.order_id == orderId);
+            if (req != null)
+            {
+                await _notiService.CreateNotfi(6, $"Đơn hàng {orderId} đã được lên lịch sản xuất có thể bắt đầu sản xuất", null, req.order_request_id);
+            }
             return true;
         }
 
