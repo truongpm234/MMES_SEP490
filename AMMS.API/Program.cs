@@ -390,6 +390,9 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<RealtimeHub>("/hubs/realtime");
+app.MapControllers();
+app.MapHub<RealtimeHub>("/hubs/realtime");
+
 app.MapGet("/health", (IConfiguration cfg) =>
 {
     var isHangfire = cfg.GetValue("Hangfire:RunServer", true);
@@ -399,4 +402,25 @@ app.MapGet("/health", (IConfiguration cfg) =>
         mode = isHangfire ? "hangfire" : "api"
     });
 });
+
+app.MapGet("/internal/ping", (HttpContext ctx, IConfiguration cfg) =>
+{
+    var expected = cfg["KeepAlive:Secret"];
+    var actual = ctx.Request.Headers["X-Internal-Key"].ToString();
+
+    if (string.IsNullOrWhiteSpace(expected) || actual != expected)
+    {
+        return Results.Unauthorized();
+    }
+
+    var isHangfire = cfg.GetValue("Hangfire:RunServer", true);
+
+    return Results.Ok(new
+    {
+        ok = true,
+        mode = isHangfire ? "hangfire" : "api",
+        time = DateTime.UtcNow
+    });
+});
+
 app.Run();
