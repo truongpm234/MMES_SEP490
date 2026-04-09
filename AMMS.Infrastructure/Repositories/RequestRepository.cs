@@ -28,9 +28,7 @@ namespace AMMS.Infrastructure.Repositories
 
         public async Task<RequestWithCostDto?> GetByIdWithCostAsync(int id, int? consultantUserId = null)
         {
-            var request = await ApplyConsultantScope(
-                    _db.order_requests.AsNoTracking(),
-                    consultantUserId)
+            var request = await _db.order_requests.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.order_request_id == id);
 
             if (request == null)
@@ -172,9 +170,7 @@ namespace AMMS.Infrastructure.Repositories
 
         public Task<List<RequestPagedDto>> GetPagedAsync(int skip, int takePlusOne, int? consultantUserId = null)
         {
-            var requestQuery = ApplyConsultantScope(
-                _db.order_requests.AsNoTracking(),
-                consultantUserId);
+            var requestQuery = _db.order_requests.AsNoTracking();
 
             return (
                 from r in requestQuery
@@ -285,9 +281,7 @@ namespace AMMS.Infrastructure.Repositories
 
         public async Task<RequestPagedDto?> GetByOrderIdAsync(int orderId, int? consultantUserId = null)
         {
-            var requestQuery = ApplyConsultantScope(
-                _db.order_requests.AsNoTracking(),
-                consultantUserId);
+            var requestQuery = _db.order_requests.AsNoTracking();
 
             return await (
                 from r in requestQuery
@@ -432,7 +426,7 @@ namespace AMMS.Infrastructure.Repositories
 
             var skip = (page - 1) * pageSize;
 
-            var query = ApplyConsultantScope(_db.order_requests.AsNoTracking(), consultantUserId);
+            var query = _db.order_requests.AsNoTracking();
 
             query = ascending
                 ? query.OrderBy(x => x.quantity ?? 0)
@@ -474,7 +468,7 @@ namespace AMMS.Infrastructure.Repositories
 
             var skip = (page - 1) * pageSize;
 
-            var query = ApplyConsultantScope(_db.order_requests.AsNoTracking(), consultantUserId);
+            var query = _db.order_requests.AsNoTracking();
 
             query = ascending
                 ? query.OrderBy(x => x.order_request_date == null)
@@ -518,7 +512,7 @@ namespace AMMS.Infrastructure.Repositories
 
             var skip = (page - 1) * pageSize;
 
-            var query = ApplyConsultantScope(_db.order_requests.AsNoTracking(), consultantUserId);
+            var query = _db.order_requests.AsNoTracking();
 
             query = nearestFirst
                 ? query.OrderBy(x => x.delivery_date == null).ThenBy(x => x.delivery_date)
@@ -594,7 +588,7 @@ namespace AMMS.Infrastructure.Repositories
 
             var skip = (page - 1) * pageSize;
 
-            var scopedRequests = ApplyConsultantScope(_db.order_requests.AsNoTracking(), consultantUserId);
+            var scopedRequests = _db.order_requests.AsNoTracking();
 
             var baseQuery =
                 from r in scopedRequests
@@ -656,7 +650,7 @@ namespace AMMS.Infrastructure.Repositories
             var start = date.ToDateTime(TimeOnly.MinValue);
             var end = start.AddDays(1);
 
-            var query = ApplyConsultantScope(_db.order_requests.AsNoTracking(), consultantUserId)
+            var query = _db.order_requests.AsNoTracking()
     .Where(x => x.order_request_date != null)
     .Where(x => x.order_request_date >= start && x.order_request_date < end)
     .OrderByDescending(x => x.order_request_date);
@@ -709,7 +703,7 @@ namespace AMMS.Infrastructure.Repositories
             var skip = (page - 1) * pageSize;
             var pattern = $"%{keyword}%";
 
-            var query = ApplyConsultantScope(_db.order_requests.AsNoTracking(), consultantUserId)
+            var query = _db.order_requests.AsNoTracking()
     .Where(o =>
         (o.product_name != null && EF.Functions.ILike(o.product_name, pattern)) ||
         (o.product_type != null && EF.Functions.ILike(o.product_type, pattern)) ||
@@ -821,9 +815,7 @@ namespace AMMS.Infrastructure.Repositories
 
         public Task<string?> GetDesignFilePathAsync(int orderRequestId, int? consultantUserId = null, CancellationToken ct = default)
         {
-            return ApplyConsultantScope(
-                    _db.order_requests.AsNoTracking(),
-                    consultantUserId)
+            return _db.order_requests.AsNoTracking()
                 .Where(x => x.order_request_id == orderRequestId)
                 .Select(x => x.design_file_path)
                 .FirstOrDefaultAsync(ct);
@@ -838,7 +830,7 @@ namespace AMMS.Infrastructure.Repositories
             var skip = (page - 1) * pageSize;
             phone = phone.Trim();
 
-            var query = ApplyConsultantScope(_db.order_requests.AsNoTracking(), consultantUserId)
+            var query = _db.order_requests.AsNoTracking()
     .Where(r => r.customer_phone == phone)
     .OrderByDescending(r => r.order_request_date)
     .ThenByDescending(r => r.order_request_id);
@@ -874,9 +866,7 @@ namespace AMMS.Infrastructure.Repositories
         public async Task<RequestDetailDto?> GetInformationRequestById(
     int requestId, int? consultantUserId = null, CancellationToken ct = default)
         {
-            var request = await ApplyConsultantScope(
-                    _db.order_requests.AsNoTracking(),
-                    consultantUserId)
+            var request = await _db.order_requests.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.order_request_id == requestId, ct);
 
             if (request == null)
@@ -1046,9 +1036,8 @@ namespace AMMS.Infrastructure.Repositories
 
         public async Task<RequestWithTwoEstimatesDto?> GetActiveEstimatesInProcessAsync(int requestId, int? consultantUserId = null, CancellationToken ct = default)
         {
-            var req = await ApplyConsultantScope(
-                    _db.order_requests.AsNoTracking(),
-                    consultantUserId).Where(r => r.order_request_id == requestId)
+            var req = await _db.order_requests.AsNoTracking()
+                    .Where(r => r.order_request_id == requestId)
                 .Select(r => new RequestWithTwoEstimatesDto
                 {
                     order_request_id = r.order_request_id,
@@ -1200,9 +1189,7 @@ namespace AMMS.Infrastructure.Repositories
 
         public async Task<List<cost_estimate>> GetActiveEstimatesWithProcessesByRequestIdAsync(int requestId, int? consultantUserId = null, CancellationToken ct = default)
         {
-            var allowedRequestIds = ApplyConsultantScope(
-                    _db.order_requests.AsNoTracking(),
-                    consultantUserId)
+            var allowedRequestIds = _db.order_requests.AsNoTracking()
                 .Where(x => x.order_request_id == requestId)
                 .Select(x => x.order_request_id);
 
@@ -1266,15 +1253,15 @@ namespace AMMS.Infrastructure.Repositories
     "Cancel", "Declined", "Rejected"
 };
 
-        private IQueryable<order_request> ApplyConsultantScope(
-            IQueryable<order_request> query,
-            int? consultantUserId)
-        {
-            if (!consultantUserId.HasValue)
-                return query;
+        //private IQueryable<order_request> ApplyConsultantScope(
+        //    IQueryable<order_request> query,
+        //    int? consultantUserId)
+        //{
+        //    if (!consultantUserId.HasValue)
+        //        return query;
 
-            return query.Where(x => x.assigned_consultant == consultantUserId.Value);
-        }
+        //    return query.Where(x => x.assigned_consultant == consultantUserId.Value);
+        //}
 
         public async Task<int?> GetLeastLoadedConsultantUserIdAsync(CancellationToken ct = default)
         {
