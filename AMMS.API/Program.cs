@@ -10,6 +10,7 @@ using AMMS.Infrastructure.Interfaces;
 using AMMS.Infrastructure.Repositories;
 using AMMS.Shared.DTOs.Email;
 using AMMS.Shared.DTOs.PayOS;
+using AMMS.Shared.Helpers;
 using Hangfire;
 using Hangfire.PostgreSql;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -31,8 +32,9 @@ var postgresConnStr =
 
 var hangfireConnStr =
     builder.Configuration.GetConnectionString("HangfireConnection")
-    ?? postgresConnStr; 
+    ?? postgresConnStr;
 
+var hangfireEnableDashboard = builder.Configuration.GetValue("Hangfire:EnableDashboard", false);
 var hangfireSchema = builder.Configuration["Hangfire:SchemaName"] ?? "hangfire";
 var hangfireRunServer = builder.Configuration.GetValue("Hangfire:RunServer", true);
 var hangfireWorkerCount = builder.Configuration.GetValue("Hangfire:WorkerCount", 2);
@@ -55,7 +57,7 @@ builder.Services.AddDbContext<AppDbContext>((sp, options) =>
         {
             npgsqlOptions.CommandTimeout(60);
             npgsqlOptions.EnableRetryOnFailure(
-                maxRetryCount: 2,
+                maxRetryCount: 1,
                 maxRetryDelay: TimeSpan.FromSeconds(1),
                 errorCodesToAdd: null
             );
@@ -294,7 +296,6 @@ builder.Services.AddScoped<NotificationsRepository>();
 builder.Services.AddScoped<NotificationService>();
 builder.Services.AddSingleton<IRealtimePublisher, RealtimePublisher>();
 builder.Services.AddSingleton<IEmailBackgroundQueue, EmailBackgroundQueue>();
-builder.Services.AddHostedService<EmailDispatcherHostedService>();
 builder.Services.AddScoped<AutoStartProductionJob>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IAccessService, AccessService>();
@@ -304,12 +305,22 @@ builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Logging.SetMinimumLevel(LogLevel.Information);
 
+var runEmailDispatcher = builder.Configuration.GetValue("App:RunEmailDispatcher", false);
+
+if (runEmailDispatcher)
+{
+    builder.Services.AddHostedService<EmailDispatcherHostedService>();
+}
+
 var app = builder.Build();
 
-app.UseHangfireDashboard(hangfireDashboardPath, new DashboardOptions
+if (hangfireEnableDashboard)
 {
-    Authorization = new[] { new AllowAllDashboardAuthorizationFilter() }
-});
+    app.UseHangfireDashboard(hangfireDashboardPath, new DashboardOptions
+    {
+        Authorization = new[] { new AllowAllDashboardAuthorizationFilter() }
+    });
+}
 
 var vnTz = TimeZoneInfo.FindSystemTimeZoneById("Asia/Ho_Chi_Minh");
 
@@ -423,7 +434,7 @@ app.MapGet("/internal/ping", (HttpContext ctx, IConfiguration cfg, ILogger<Progr
     {
         ok = true,
         mode = isHangfire ? "hangfire" : "api",
-        time = DateTime.UtcNow
+        time = AppTime.NowVnUnspecified()
     });
 });
 
