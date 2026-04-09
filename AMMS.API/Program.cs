@@ -24,8 +24,13 @@ using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var hangfireConnStr = builder.Configuration.GetConnectionString("HangfireConnection")
-    ?? throw new InvalidOperationException("Missing ConnectionStrings:HangfireConnection");
+var postgresConnStr =
+    builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException("Missing ConnectionStrings:DefaultConnection");
+
+var hangfireConnStr =
+    builder.Configuration.GetConnectionString("HangfireConnection")
+    ?? postgresConnStr; 
 
 var hangfireSchema = builder.Configuration["Hangfire:SchemaName"] ?? "hangfire";
 var hangfireRunServer = builder.Configuration.GetValue("Hangfire:RunServer", true);
@@ -44,14 +49,13 @@ var autoStartProductionCron = builder.Configuration["AutoStartProduction:Cron"] 
 builder.Services.AddDbContext<AppDbContext>((sp, options) =>
 {
     options.UseNpgsql(
-        builder.Configuration.GetConnectionString("DefaultConnection"),
+        postgresConnStr,
         npgsqlOptions =>
         {
             npgsqlOptions.CommandTimeout(60);
-
             npgsqlOptions.EnableRetryOnFailure(
-                maxRetryCount: 5,
-                maxRetryDelay: TimeSpan.FromSeconds(2),
+                maxRetryCount: 2,
+                maxRetryDelay: TimeSpan.FromSeconds(1),
                 errorCodesToAdd: null
             );
         });
@@ -386,5 +390,13 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<RealtimeHub>("/hubs/realtime");
-
+app.MapGet("/health", (IConfiguration cfg) =>
+{
+    var isHangfire = cfg.GetValue("Hangfire:RunServer", true);
+    return Results.Ok(new
+    {
+        ok = true,
+        mode = isHangfire ? "hangfire" : "api"
+    });
+});
 app.Run();
