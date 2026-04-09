@@ -371,8 +371,6 @@ namespace AMMS.Application.Services
         }
         public async Task<RequestDetailDto?> GetInformationRequestById(int requestId, CancellationToken ct = default)
         {
-            await _currentUser.EnsureCanAccessAssignedRequestAsync(requestId, ct);
-
             var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
             return await _requestRepo.GetInformationRequestById(requestId, consultantUserId, ct);
         }
