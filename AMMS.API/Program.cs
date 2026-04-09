@@ -20,6 +20,7 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Twilio.Types;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -403,17 +404,20 @@ app.MapGet("/health", (IConfiguration cfg) =>
     });
 });
 
-app.MapGet("/internal/ping", (HttpContext ctx, IConfiguration cfg) =>
+app.MapGet("/internal/ping", (HttpContext ctx, IConfiguration cfg, ILogger<Program> logger) =>
 {
     var expected = cfg["KeepAlive:Secret"];
     var actual = ctx.Request.Headers["X-Internal-Key"].ToString();
 
     if (string.IsNullOrWhiteSpace(expected) || actual != expected)
     {
+        logger.LogWarning("[KeepAlive] Unauthorized ping");
         return Results.Unauthorized();
     }
 
     var isHangfire = cfg.GetValue("Hangfire:RunServer", true);
+
+    logger.LogInformation("[KeepAlive] Authorized ping received at {UtcNow}", DateTime.UtcNow);
 
     return Results.Ok(new
     {
