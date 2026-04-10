@@ -1298,5 +1298,26 @@ namespace AMMS.API.Controllers
             }
             return NotFound("Not payment yet");
         }
+        [HttpPut("confirm-importing")]
+        public async Task<IActionResult> ConfirmImportProduction([FromBody] int order_id)
+        {
+            try
+            {
+                var ord = await _db.orders.FirstOrDefaultAsync(o => o.order_id == order_id);
+                var req = await _db.order_requests.FirstOrDefaultAsync(r => r.order_id == order_id);
+                if (ord != null && req != null)
+                {
+                    ord.status = "Finished";
+                    req.process_status = "Finished";
+                    await _db.SaveChangesAsync();
+                    return Ok("Success");
+                }
+            }
+            catch (Exception e)
+            {
+                return BadRequest(e);
+            }
+            return BadRequest();
+        }
     }
 }
