@@ -481,14 +481,14 @@ namespace AMMS.Infrastructure.Repositories
                 .FirstOrDefault();
 
             if (lastTask != null
-                && string.Equals(lastTask.status, "Finished", StringComparison.OrdinalIgnoreCase)
-                && lastTask.end_time != null
-                && !string.Equals(header.pr.status, "Finished", StringComparison.OrdinalIgnoreCase))
+    && string.Equals(lastTask.status, "Finished", StringComparison.OrdinalIgnoreCase)
+    && lastTask.end_time != null
+    && !string.Equals(header.pr.status, "Importing", StringComparison.OrdinalIgnoreCase))
             {
                 var prodToUpdate = new production { prod_id = prodId };
                 _db.productions.Attach(prodToUpdate);
 
-                prodToUpdate.status = "Finished";
+                prodToUpdate.status = "Importing";
                 prodToUpdate.end_date = lastTask.end_time;
 
                 if (header.pr.actual_start_date == null)
@@ -496,7 +496,7 @@ namespace AMMS.Infrastructure.Repositories
 
                 await _db.SaveChangesAsync(ct);
 
-                dto.production_status = "Finished";
+                dto.production_status = "Importing";
                 dto.end_date = lastTask.end_time;
                 dto.actual_start_date ??= lastTask.end_time;
             }
@@ -733,7 +733,7 @@ namespace AMMS.Infrastructure.Repositories
                 .Max();
 
             prod.end_date = finishedAt;
-            prod.status = "Finished";
+            prod.status = "Importing";
             if (prod.actual_start_date == null)
                 prod.actual_start_date = finishedAt;
 

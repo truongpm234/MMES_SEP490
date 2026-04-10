@@ -51,10 +51,7 @@ namespace AMMS.Application.Services
             _db = db;
         }
 
-        public async Task<ScanTaskResult> ScanFinishAsync(
-    ScanTaskRequest req,
-    int? scannedByUserId,
-    CancellationToken ct = default)
+        public async Task<ScanTaskResult> ScanFinishAsync(ScanTaskRequest req, int? scannedByUserId, CancellationToken ct = default)
         {
             if (!_tokenSvc.TryValidate(req.token, out var taskId, out var qtyGood, out var reason))
                 throw new ArgumentException(reason);
@@ -158,20 +155,20 @@ namespace AMMS.Application.Services
                     prod = await _prodRepo.GetByIdForUpdateAsync(t.prod_id.Value, innerCt);
 
                 if (prod != null
-                    && string.Equals(prod.status, "Finished", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(prod.status, "Importing", StringComparison.OrdinalIgnoreCase)
                     && prod.order_id.HasValue)
                 {
                     ord = await _orderRepo.GetByIdForUpdateAsync(prod.order_id.Value, innerCt);
 
                     if (ord != null &&
-                        !string.Equals(ord.status, "Finished", StringComparison.OrdinalIgnoreCase))
+                        !string.Equals(ord.status, "Importing", StringComparison.OrdinalIgnoreCase))
                     {
-                        ord.status = "Finished";
+                        ord.status = "Importing";
                     }
 
                     if (ord != null)
                     {
-                        await _orderRequestRepo.MarkProcessStatusFinishedByOrderAsync(
+                        await _orderRequestRepo.MarkProcessStatusImportingByOrderAsync(
                             ord.order_id,
                             ord.quote_id,
                             innerCt);

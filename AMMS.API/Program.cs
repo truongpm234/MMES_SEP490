@@ -402,8 +402,6 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<RealtimeHub>("/hubs/realtime");
-app.MapControllers();
-app.MapHub<RealtimeHub>("/hubs/realtime");
 
 app.MapGet("/health", (IConfiguration cfg) =>
 {
