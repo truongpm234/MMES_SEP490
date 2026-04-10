@@ -167,9 +167,10 @@ namespace AMMS.Infrastructure.Repositories
         {
             var req = await _db.order_requests
                 .FirstOrDefaultAsync(x => x.order_id == orderId, ct);
-
-            if (req != null)
+            var order = await _db.orders.FirstOrDefaultAsync(o => o.order_id == orderId, ct);
+            if (req != null && order != null)
             {
+                order.status = "Importing";
                 req.process_status = "Importing";
                 await _db.SaveChangesAsync(ct);
             }
@@ -972,7 +973,7 @@ namespace AMMS.Infrastructure.Repositories
                     var discountAmount = ce.discount_amount < 0m ? 0m : ce.discount_amount;
                     var vatBase = Math.Max(ce.subtotal - discountAmount, 0m);
                     var vatAmount = vatPercent <= 0m ? 0m : vatBase * vatPercent / 100m;
-                    var displayPaperCode = EstimateMaterialAlternativeHelper.ResolvePaperCode( ce.paper_alternative, ce.paper_code);
+                    var displayPaperCode = EstimateMaterialAlternativeHelper.ResolvePaperCode(ce.paper_alternative, ce.paper_code);
                     var displayPaperName = EstimateMaterialAlternativeHelper.ResolvePaperName(
                         displayPaperCode,
                         ce.paper_name,
@@ -1006,7 +1007,7 @@ namespace AMMS.Infrastructure.Repositories
                         ink_weight_kg = ce.ink_weight_kg,
                         ink_rate_per_m2 = ce.ink_rate_per_m2,
                         ink_type_names = ce.ink_type_names,
-                        
+
                         coating_glue_weight_kg = ce.coating_glue_weight_kg,
                         coating_glue_rate_per_m2 = ce.coating_glue_rate_per_m2,
 

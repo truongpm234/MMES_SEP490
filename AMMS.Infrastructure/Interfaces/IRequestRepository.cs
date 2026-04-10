@@ -12,6 +12,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task<order_request?> GetByIdAsync(int id);
         Task CancelAsync(int id, CancellationToken ct = default);
         Task MarkProcessStatusFinishedByOrderAsync(int orderId, int? quoteId, CancellationToken ct = default);
+        Task MarkProcessStatusImportingByOrderAsync(int orderId, int? quoteId, CancellationToken ct = default);
         Task<int> SaveChangesAsync();
         Task<int> CountAsync();
         Task<List<RequestPagedDto>> GetPagedAsync(int skip, int takePlusOne, int? consultantUserId = null);

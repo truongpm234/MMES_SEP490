@@ -175,9 +175,10 @@ namespace AMMS.Application.Services
                             ord.order_id,
                             ord.quote_id,
                             innerCt);
+                        await _orderRequestRepo.MarkProcessStatusImportingByOrderAsync(ord.order_id, null, ct);
                     }
 
-                    await _taskRepo.SaveChangesAsync(innerCt);
+                    //await _taskRepo.SaveChangesAsync(innerCt);
                 }
 
                 await _hub.Clients
