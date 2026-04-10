@@ -1309,10 +1309,12 @@ namespace AMMS.API.Controllers
             {
                 var ord = await _db.orders.FirstOrDefaultAsync(o => o.order_id == order_id);
                 var req = await _db.order_requests.FirstOrDefaultAsync(r => r.order_id == order_id);
-                if (ord != null && req != null)
+                var prod = await _db.productions.FirstOrDefaultAsync(p => p.order_id == order_id);
+                if (ord != null && req != null && prod != null)
                 {
                     ord.status = "Finished";
                     req.process_status = "Finished";
+                    prod.status = "Finished";
                     await _db.SaveChangesAsync();
                     await _rt.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("imported", new { message = $"Đơn hàng {order_id} đã được nhập kho, sẵn sàng giao" });
                     await _notiService.CreateNotfi(2, $"Đơn hàng {order_id} đã được nhập kho, sẵn sàng giao", req.assigned_consultant, req.order_request_id);
