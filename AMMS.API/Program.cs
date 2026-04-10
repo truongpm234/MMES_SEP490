@@ -10,6 +10,7 @@ using AMMS.Infrastructure.Interfaces;
 using AMMS.Infrastructure.Repositories;
 using AMMS.Shared.DTOs.Email;
 using AMMS.Shared.DTOs.PayOS;
+using AMMS.Shared.Helpers;
 using Hangfire;
 using Hangfire.PostgreSql;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -20,13 +21,20 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Twilio.Types;
 
 
 var builder = WebApplication.CreateBuilder(args);
 
-var hangfireConnStr = builder.Configuration.GetConnectionString("HangfireConnection")
-    ?? throw new InvalidOperationException("Missing ConnectionStrings:HangfireConnection");
+var postgresConnStr =
+    builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException("Missing ConnectionStrings:DefaultConnection");
 
+var hangfireConnStr =
+    builder.Configuration.GetConnectionString("HangfireConnection")
+    ?? postgresConnStr;
+
+var hangfireEnableDashboard = builder.Configuration.GetValue("Hangfire:EnableDashboard", false);
 var hangfireSchema = builder.Configuration["Hangfire:SchemaName"] ?? "hangfire";
 var hangfireRunServer = builder.Configuration.GetValue("Hangfire:RunServer", true);
 var hangfireWorkerCount = builder.Configuration.GetValue("Hangfire:WorkerCount", 2);
@@ -44,14 +52,13 @@ var autoStartProductionCron = builder.Configuration["AutoStartProduction:Cron"] 
 builder.Services.AddDbContext<AppDbContext>((sp, options) =>
 {
     options.UseNpgsql(
-        builder.Configuration.GetConnectionString("DefaultConnection"),
+        postgresConnStr,
         npgsqlOptions =>
         {
             npgsqlOptions.CommandTimeout(60);
-
             npgsqlOptions.EnableRetryOnFailure(
-                maxRetryCount: 5,
-                maxRetryDelay: TimeSpan.FromSeconds(2),
+                maxRetryCount: 1,
+                maxRetryDelay: TimeSpan.FromSeconds(1),
                 errorCodesToAdd: null
             );
         });
@@ -289,7 +296,6 @@ builder.Services.AddScoped<NotificationsRepository>();
 builder.Services.AddScoped<NotificationService>();
 builder.Services.AddSingleton<IRealtimePublisher, RealtimePublisher>();
 builder.Services.AddSingleton<IEmailBackgroundQueue, EmailBackgroundQueue>();
-builder.Services.AddHostedService<EmailDispatcherHostedService>();
 builder.Services.AddScoped<AutoStartProductionJob>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IAccessService, AccessService>();
@@ -299,12 +305,22 @@ builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Logging.SetMinimumLevel(LogLevel.Information);
 
+var runEmailDispatcher = builder.Configuration.GetValue("App:RunEmailDispatcher", false);
+
+if (runEmailDispatcher)
+{
+    builder.Services.AddHostedService<EmailDispatcherHostedService>();
+}
+
 var app = builder.Build();
 
-app.UseHangfireDashboard(hangfireDashboardPath, new DashboardOptions
+if (hangfireEnableDashboard)
 {
-    Authorization = new[] { new AllowAllDashboardAuthorizationFilter() }
-});
+    app.UseHangfireDashboard(hangfireDashboardPath, new DashboardOptions
+    {
+        Authorization = new[] { new AllowAllDashboardAuthorizationFilter() }
+    });
+}
 
 var vnTz = TimeZoneInfo.FindSystemTimeZoneById("Asia/Ho_Chi_Minh");
 
@@ -386,5 +402,40 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<RealtimeHub>("/hubs/realtime");
+app.MapControllers();
+app.MapHub<RealtimeHub>("/hubs/realtime");
+
+app.MapGet("/health", (IConfiguration cfg) =>
+{
+    var isHangfire = cfg.GetValue("Hangfire:RunServer", true);
+    return Results.Ok(new
+    {
+        ok = true,
+        mode = isHangfire ? "hangfire" : "api"
+    });
+});
+
+app.MapGet("/internal/ping", (HttpContext ctx, IConfiguration cfg, ILogger<Program> logger) =>
+{
+    var expected = cfg["KeepAlive:Secret"];
+    var actual = ctx.Request.Headers["X-Internal-Key"].ToString();
+
+    if (string.IsNullOrWhiteSpace(expected) || actual != expected)
+    {
+        logger.LogWarning("[KeepAlive] Unauthorized ping");
+        return Results.Unauthorized();
+    }
+
+    var isHangfire = cfg.GetValue("Hangfire:RunServer", true);
+
+    logger.LogInformation("[KeepAlive] Authorized ping received at {UtcNow}", DateTime.UtcNow);
+
+    return Results.Ok(new
+    {
+        ok = true,
+        mode = isHangfire ? "hangfire" : "api",
+        time = AppTime.NowVnUnspecified()
+    });
+});
 
 app.Run();
