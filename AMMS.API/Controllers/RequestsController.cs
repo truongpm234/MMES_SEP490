@@ -1,5 +1,6 @@
 ﻿using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
+using AMMS.Application.Services;
 using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
@@ -34,7 +35,9 @@ namespace AMMS.API.Controllers
         private readonly IPayOsService _payos;
         private readonly ILogger<RequestsController> _logger;
         private readonly IHubContext<RealtimeHub> _rt;
+        private readonly NotificationService _notiService;
         public RequestsController(
+            NotificationService notiService,
             IHubContext<RealtimeHub> rt,
             IRequestService service,
             IDealService dealService,
@@ -44,6 +47,7 @@ namespace AMMS.API.Controllers
             ISmsOtpService smsOtp,
             IConfiguration config, IPayOsService payos, ILogger<RequestsController> logger)
         {
+            _notiService = notiService;
             _rt = rt;
             _service = service;
             _dealService = dealService;
@@ -1310,6 +1314,8 @@ namespace AMMS.API.Controllers
                     ord.status = "Finished";
                     req.process_status = "Finished";
                     await _db.SaveChangesAsync();
+                    await _rt.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("imported", new { message = $"Đơn hàng {order_id} đã được nhập kho, sẵn sàng giao" });
+                    await _notiService.CreateNotfi(2, $"Đơn hàng {order_id} đã được nhập kho, sẵn sàng giao", req.assigned_consultant, req.order_request_id);
                     return Ok("Success");
                 }
             }
