@@ -38,6 +38,7 @@ namespace AMMS.API.Jobs
                       && p.planned_start_date <= now
                       && p.status == "Scheduled"
                       && o.layout_confirmed == true
+                      && o.is_production_ready == true
                 orderby p.planned_start_date, p.prod_id
                 select new
                 {
