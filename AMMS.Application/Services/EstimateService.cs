@@ -324,8 +324,6 @@ namespace AMMS.Application.Services
             if (fileStream == null) throw new ArgumentException("file is required");
             if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("fileName is required");
 
-            await _accessService.EnsureCanAccessAssignedRequestAsync(requestId, ct);
-
             var estimate = await _estimateRepo.GetTrackingByIdAsync(estimateId, ct);
             if (estimate == null || estimate.order_request_id != requestId)
                 throw new InvalidOperationException("Estimate not found");
