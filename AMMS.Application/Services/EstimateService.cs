@@ -254,8 +254,6 @@ namespace AMMS.Application.Services
 
         public async Task<QuoteEmailComparePreviewResponse> BuildPreviewAsync(int requestId, CancellationToken ct = default)
         {
-            await _accessService.EnsureCanAccessAssignedRequestAsync(requestId, ct);
-
             var res = await _quoteRepo.BuildPreviewAsync(requestId, ct);
 
             var orderReq = await _estimateRepo.GetOrderRequestTrackingAsync(requestId, ct);
