@@ -187,8 +187,6 @@ namespace AMMS.Application.Services
 
         public async Task<UpdateRequestResponse> UpdateAsync(int id, UpdateOrderRequest req)
         {
-            await _currentUser.EnsureCanAccessAssignedRequestAsync(id);
-
             var entity = await _requestRepo.GetByIdAsync(id);
             if (entity == null)
             {
@@ -288,7 +286,6 @@ namespace AMMS.Application.Services
 
         public async Task CancelAsync(int id, string? reason, CancellationToken ct = default)
         {
-            await _currentUser.EnsureCanAccessAssignedRequestAsync(id, ct);
 
             var entity = await _requestRepo.GetByIdAsync(id);
             if (entity == null) return;
@@ -466,8 +463,6 @@ namespace AMMS.Application.Services
 
         public async Task<OrderRequestDesignFileResponse?> GetDesignFileAsync(int orderRequestId, CancellationToken ct = default)
         {
-            await _currentUser.EnsureCanAccessAssignedRequestAsync(orderRequestId, ct);
-
             var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
             var path = await _requestRepo.GetDesignFilePathAsync(orderRequestId, consultantUserId, ct);
 
@@ -568,7 +563,6 @@ namespace AMMS.Application.Services
 
         public async Task SubmitEstimateForApprovalAsync(SubmitForApprovalRequestDto input)
         {
-            await _currentUser.EnsureCanAccessAssignedRequestAsync(input.request_id);
             if (input.request_id <= 0)
                 throw new ArgumentException("request_id is required");
 
@@ -626,7 +620,6 @@ namespace AMMS.Application.Services
         {
             if (requestId <= 0) return null;
 
-            await _currentUser.EnsureCanAccessAssignedRequestAsync(requestId, ct);
             var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
 
             return await _requestRepo.GetActiveEstimatesInProcessAsync(requestId, consultantUserId, ct);
@@ -634,7 +627,6 @@ namespace AMMS.Application.Services
 
         public async Task<CloneRequestResponseDto> CloneRequestAsync(int requestId, CancellationToken ct = default)
         {
-            await _currentUser.EnsureCanAccessAssignedRequestAsync(requestId, ct);
             if (requestId <= 0)
                 throw new ArgumentException("request_id is required");
 
@@ -816,7 +808,6 @@ namespace AMMS.Application.Services
 
         public async Task UpdateConsultantMessageToCustomerAsync(int requestId, string? message, CancellationToken ct = default)
         {
-            await _currentUser.EnsureCanAccessAssignedRequestAsync(requestId, ct);
             if (requestId <= 0)
                 throw new ArgumentException("request_id is required");
 
@@ -1262,8 +1253,6 @@ namespace AMMS.Application.Services
 
             if (string.IsNullOrWhiteSpace(fileName))
                 throw new ArgumentException("fileName is required");
-
-            await _accessService.EnsureCanAccessAssignedRequestAsync(requestId, ct);
 
             var request = await _requestRepo.GetByIdAsync(requestId);
             if (request == null)
