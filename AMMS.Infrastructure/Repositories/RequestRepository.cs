@@ -163,6 +163,18 @@ namespace AMMS.Infrastructure.Repositories
             }
         }
 
+        public async Task MarkProcessStatusImportingByOrderAsync(int orderId, int? quoteId, CancellationToken ct = default)
+        {
+            var req = await _db.order_requests
+                .FirstOrDefaultAsync(x => x.order_id == orderId, ct);
+
+            if (req != null)
+            {
+                req.process_status = "Importing";
+                await _db.SaveChangesAsync(ct);
+            }
+        }
+
         public Task<int> CountAsync()
         {
             return _db.order_requests.AsNoTracking().CountAsync();
