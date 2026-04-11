@@ -74,5 +74,17 @@ namespace AMMS.API.Controllers
             var result = await _service.GetPendingPurchasesAsync(page, pageSize, ct);
             return Ok(result);
         }
+
+        [HttpPut("orders/cancel")]
+        public async Task<IActionResult> CancelPurchaseOrder(
+    [FromQuery] int purchaseId,
+    CancellationToken ct)
+        {
+            if (purchaseId <= 0)
+                return BadRequest("purchaseId is required");
+
+            var result = await _service.CancelPurchaseOrderAsync(purchaseId, ct);
+            return Ok(result);
+        }
     }
 }
