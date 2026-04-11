@@ -1327,5 +1327,24 @@ namespace AMMS.API.Controllers
             }
             return BadRequest();
         }
+        [HttpPut("customer-receive")]
+        public async Task<IActionResult> ReceiveOrder(int request_id)
+        {
+            var res = await _db.order_requests.FirstOrDefaultAsync(o => o.order_request_id == request_id);
+            if (res != null)
+            {
+                var ord = await _db.orders.FirstOrDefaultAsync(o => o.order_id == res.order_id);
+                var pro = await _db.productions.FirstOrDefaultAsync(p => p.order_id == res.order_id);
+                res.process_status = "Completed";
+                if (ord != null && pro != null)
+                {
+                    ord.status = "Completed";
+                    pro.status = "Completed";
+                    await _db.SaveChangesAsync();
+                }
+                return Ok("Customer confirm recieve order");
+            }
+            return BadRequest();
+        }
     }
 }
