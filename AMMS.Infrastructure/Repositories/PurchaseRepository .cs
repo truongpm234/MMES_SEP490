@@ -466,5 +466,40 @@ namespace AMMS.Infrastructure.Repositories
                 };
             });
         }
+
+        public async Task<object> CancelPurchaseOrderAsync(int purchaseId, CancellationToken ct = default)
+        {
+            var purchase = await _db.purchases
+                .FirstOrDefaultAsync(p => p.purchase_id == purchaseId, ct);
+
+            if (purchase == null)
+                throw new ArgumentException($"Purchase {purchaseId} not found");
+
+            if (string.Equals(purchase.status, "Delivered", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Delivered purchase order cannot be cancelled");
+
+            if (string.Equals(purchase.status, "Cancel", StringComparison.OrdinalIgnoreCase))
+            {
+                return new
+                {
+                    purchaseId = purchase.purchase_id,
+                    code = purchase.code,
+                    status = purchase.status,
+                    message = "Purchase order is already cancelled"
+                };
+            }
+
+            purchase.status = "Cancel";
+
+            await _db.SaveChangesAsync(ct);
+
+            return new
+            {
+                purchaseId = purchase.purchase_id,
+                code = purchase.code,
+                status = purchase.status,
+                message = "Purchase order cancelled successfully"
+            };
+        }
     }
 }

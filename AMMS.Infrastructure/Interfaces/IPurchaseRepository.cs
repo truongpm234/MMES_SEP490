@@ -29,5 +29,7 @@ namespace AMMS.Infrastructure.Interfaces
 
         Task<PagedResultLite<PurchaseOrderListItemDto>> GetPendingPurchasesAsync(
             int page, int pageSize, CancellationToken ct = default);
+
+        Task<object> CancelPurchaseOrderAsync(int purchaseId, CancellationToken ct = default);
     }
 }
