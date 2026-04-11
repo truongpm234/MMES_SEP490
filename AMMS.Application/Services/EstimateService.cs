@@ -44,8 +44,6 @@ namespace AMMS.Application.Services
 
         public async Task UpdateFinalCostAsync(int orderRequestId, decimal? finalCostInput)
         {
-            await _accessService.EnsureCanAccessAssignedRequestAsync(orderRequestId);
-
             var estimate = await _estimateRepo.GetByOrderRequestIdAsync(orderRequestId)
                 ?? throw new Exception("Estimate not found for this order_request_id");
 
@@ -87,8 +85,6 @@ namespace AMMS.Application.Services
 
         public async Task<int> SaveFeCostEstimateAsync(CostEstimateInsertRequest req, CancellationToken ct = default)
         {
-            await _accessService.EnsureCanAccessAssignedRequestAsync(req.order_request_id, ct);
-
             if (req.order_request_id <= 0)
                 throw new ArgumentException("order_request_id must be > 0");
 
@@ -283,8 +279,6 @@ namespace AMMS.Application.Services
             if (fileStream == null) throw new ArgumentException("file is required");
             if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("fileName is required");
 
-            await _accessService.EnsureCanAccessAssignedRequestAsync(requestId, ct);
-
             var estimate = await _estimateRepo.GetTrackingByIdAsync(estimateId, ct);
             if (estimate == null || estimate.order_request_id != requestId)
                 throw new InvalidOperationException("Estimate not found");
@@ -323,8 +317,6 @@ namespace AMMS.Application.Services
             if (estimateId <= 0) throw new ArgumentException("estimate_id must be > 0");
             if (fileStream == null) throw new ArgumentException("file is required");
             if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("fileName is required");
-
-            await _accessService.EnsureCanAccessAssignedRequestAsync(requestId, ct);
 
             var estimate = await _estimateRepo.GetTrackingByIdAsync(estimateId, ct);
             if (estimate == null || estimate.order_request_id != requestId)
@@ -417,8 +409,6 @@ namespace AMMS.Application.Services
     string? alternativeMaterialReason,
     CancellationToken ct = default)
         {
-            await _accessService.EnsureCanAccessAssignedRequestAsync(requestId, ct);
-
             var request = await _estimateRepo.GetOrderRequestTrackingAsync(requestId, ct);
             if (request == null)
                 throw new InvalidOperationException("Order request not found");

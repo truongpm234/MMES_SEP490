@@ -187,8 +187,6 @@ namespace AMMS.Application.Services
 
         public async Task<UpdateRequestResponse> UpdateAsync(int id, UpdateOrderRequest req)
         {
-            await _currentUser.EnsureCanAccessAssignedRequestAsync(id);
-
             var entity = await _requestRepo.GetByIdAsync(id);
             if (entity == null)
             {
@@ -204,6 +202,7 @@ namespace AMMS.Application.Services
             var oldDeliveryDate = entity.delivery_date;
             var newDeliveryDate = ToDeliveryDate(req.delivery_date);
 
+            // ===== order_request =====
             entity.customer_name = req.customer_name ?? entity.customer_name;
             entity.customer_phone = req.customer_phone ?? entity.customer_phone;
             entity.customer_email = req.customer_email ?? entity.customer_email;
@@ -211,7 +210,27 @@ namespace AMMS.Application.Services
             entity.quantity = req.quantity ?? entity.quantity;
             entity.description = req.description ?? entity.description;
             entity.design_file_path = req.design_file_path ?? entity.design_file_path;
+            entity.order_request_date = req.order_request_date ?? entity.order_request_date;
             entity.detail_address = req.detail_address ?? entity.detail_address;
+            entity.product_type = req.product_type ?? entity.product_type;
+            entity.number_of_plates = req.number_of_plates ?? entity.number_of_plates;
+            entity.product_length_mm = req.product_length_mm ?? entity.product_length_mm;
+            entity.product_width_mm = req.product_width_mm ?? entity.product_width_mm;
+            entity.product_height_mm = req.product_height_mm ?? entity.product_height_mm;
+            entity.glue_tab_mm = req.glue_tab_mm ?? entity.glue_tab_mm;
+            entity.bleed_mm = req.bleed_mm ?? entity.bleed_mm;
+            entity.is_one_side_box = req.is_one_side_box ?? entity.is_one_side_box;
+            entity.print_width_mm = req.print_width_mm ?? entity.print_width_mm;
+            entity.print_length_mm = req.print_length_mm ?? entity.print_length_mm;
+            entity.is_send_design = req.is_send_design ?? entity.is_send_design;
+            entity.preliminary_estimated_price = req.preliminary_estimated_price ?? entity.preliminary_estimated_price;
+            entity.reason = req.reason ?? entity.reason;
+            entity.note = req.note ?? entity.note;
+            entity.consultant_note = req.consultant_note ?? entity.consultant_note;
+            entity.message_to_customer = req.message_to_customer ?? entity.message_to_customer;
+            entity.delivery_note = req.delivery_note ?? entity.delivery_note;
+            entity.print_ready_file = req.print_ready_file ?? entity.print_ready_file;
+
             entity.delivery_date = ToDeliveryDate(req.delivery_date);
 
             if (req.delivery_date.HasValue)
@@ -226,24 +245,23 @@ namespace AMMS.Application.Services
                         : req.delivery_date_change_reason.Trim();
                 }
             }
+            else if (req.delivery_date_change_reason != null)
+            {
+                entity.delivery_date_change_reason = string.IsNullOrWhiteSpace(req.delivery_date_change_reason)
+                    ? null
+                    : req.delivery_date_change_reason.Trim();
+            }
 
-            entity.product_type = req.product_type ?? entity.product_type;
-            entity.number_of_plates = req.number_of_plates ?? entity.number_of_plates;
-            entity.product_length_mm = req.product_length_mm ?? entity.product_length_mm;
-            entity.product_width_mm = req.product_width_mm ?? entity.product_width_mm;
-            entity.product_height_mm = req.product_height_mm ?? entity.product_height_mm;
-            entity.glue_tab_mm = req.glue_tab_mm ?? entity.glue_tab_mm;
-            entity.bleed_mm = req.bleed_mm ?? entity.bleed_mm;
-            entity.is_one_side_box = req.is_one_side_box ?? entity.is_one_side_box;
-            entity.print_width_mm = req.print_width_mm ?? entity.print_width_mm;
-            entity.print_length_mm = req.print_length_mm ?? entity.print_length_mm;
-            entity.is_send_design = req.is_send_design ?? entity.is_send_design;
+            // giữ lại 3 field trong DTO để tương thích request từ FE/API
+            // province, district: hiện chưa có cột tương ứng trong bảng order_request nên chưa persist
+            // processing_status: hiện chưa dùng để ghi đè vì nghiệp vụ đang reset process_status = Pending sau khi sửa
 
-            if (ce != null && !string.IsNullOrWhiteSpace(req.production_processes))
-                ce.production_processes = req.production_processes.Trim();
-
+            // ===== cost_estimate =====
             if (ce != null)
             {
+                if (!string.IsNullOrWhiteSpace(req.production_processes))
+                    ce.production_processes = req.production_processes.Trim();
+
                 if (!string.IsNullOrWhiteSpace(req.paper_code))
                     ce.paper_code = req.paper_code.Trim();
 
@@ -265,8 +283,24 @@ namespace AMMS.Application.Services
                     ce.wave_alternative = string.IsNullOrWhiteSpace(req.wave_alternative)
                         ? null
                         : req.wave_alternative.Trim();
+
+                if (req.cost_note != null)
+                    ce.cost_note = string.IsNullOrWhiteSpace(req.cost_note)
+                        ? null
+                        : req.cost_note.Trim();
+
+                if (req.ink_type_names != null)
+                    ce.ink_type_names = string.IsNullOrWhiteSpace(req.ink_type_names)
+                        ? null
+                        : req.ink_type_names.Trim();
+
+                if (req.alternative_material_reason != null)
+                    ce.alternative_material_reason = string.IsNullOrWhiteSpace(req.alternative_material_reason)
+                        ? null
+                        : req.alternative_material_reason.Trim();
             }
 
+            // ===== reset approval flow sau khi sửa =====
             entity.process_status = "Pending";
             entity.verified_at = null;
             entity.quote_expires_at = null;
@@ -288,7 +322,6 @@ namespace AMMS.Application.Services
 
         public async Task CancelAsync(int id, string? reason, CancellationToken ct = default)
         {
-            await _currentUser.EnsureCanAccessAssignedRequestAsync(id, ct);
 
             var entity = await _requestRepo.GetByIdAsync(id);
             if (entity == null) return;
@@ -466,8 +499,6 @@ namespace AMMS.Application.Services
 
         public async Task<OrderRequestDesignFileResponse?> GetDesignFileAsync(int orderRequestId, CancellationToken ct = default)
         {
-            await _currentUser.EnsureCanAccessAssignedRequestAsync(orderRequestId, ct);
-
             var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
             var path = await _requestRepo.GetDesignFilePathAsync(orderRequestId, consultantUserId, ct);
 
@@ -568,7 +599,6 @@ namespace AMMS.Application.Services
 
         public async Task SubmitEstimateForApprovalAsync(SubmitForApprovalRequestDto input)
         {
-            await _currentUser.EnsureCanAccessAssignedRequestAsync(input.request_id);
             if (input.request_id <= 0)
                 throw new ArgumentException("request_id is required");
 
@@ -626,7 +656,6 @@ namespace AMMS.Application.Services
         {
             if (requestId <= 0) return null;
 
-            await _currentUser.EnsureCanAccessAssignedRequestAsync(requestId, ct);
             var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
 
             return await _requestRepo.GetActiveEstimatesInProcessAsync(requestId, consultantUserId, ct);
@@ -634,7 +663,6 @@ namespace AMMS.Application.Services
 
         public async Task<CloneRequestResponseDto> CloneRequestAsync(int requestId, CancellationToken ct = default)
         {
-            await _currentUser.EnsureCanAccessAssignedRequestAsync(requestId, ct);
             if (requestId <= 0)
                 throw new ArgumentException("request_id is required");
 
@@ -816,7 +844,6 @@ namespace AMMS.Application.Services
 
         public async Task UpdateConsultantMessageToCustomerAsync(int requestId, string? message, CancellationToken ct = default)
         {
-            await _currentUser.EnsureCanAccessAssignedRequestAsync(requestId, ct);
             if (requestId <= 0)
                 throw new ArgumentException("request_id is required");
 
@@ -1262,8 +1289,6 @@ namespace AMMS.Application.Services
 
             if (string.IsNullOrWhiteSpace(fileName))
                 throw new ArgumentException("fileName is required");
-
-            await _accessService.EnsureCanAccessAssignedRequestAsync(requestId, ct);
 
             var request = await _requestRepo.GetByIdAsync(requestId);
             if (request == null)
