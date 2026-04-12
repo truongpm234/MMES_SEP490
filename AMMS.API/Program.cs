@@ -300,6 +300,8 @@ builder.Services.AddScoped<AutoStartProductionJob>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IAccessService, AccessService>();
 builder.Services.AddScoped<IContractCompareService, ContractCompareService>();
+builder.Services.AddScoped<DeliveryHandoverEmailJob>();
+
 // Logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();

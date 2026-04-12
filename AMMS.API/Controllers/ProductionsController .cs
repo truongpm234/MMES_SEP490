@@ -1,9 +1,11 @@
-﻿using AMMS.Application.Helpers;
+﻿using AMMS.API.Jobs;
+using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
 using AMMS.Shared.DTOs.Exceptions;
 using AMMS.Shared.DTOs.Orders;
 using AMMS.Shared.DTOs.Productions;
 using AMMS.Shared.Helpers;
+using Hangfire;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -18,15 +20,21 @@ namespace AMMS.API.Controllers
         private readonly IProductionService _service;
         private readonly IProductionSchedulingService _svc;
         private readonly IOrderMaterialService _orderMaterialService;
+        private readonly IBackgroundJobClient _backgroundJobClient;
+        private readonly ILogger<ProductionsController> _logger;
 
         public ProductionsController(
-            IProductionService service,
-            IProductionSchedulingService svc,
-            IOrderMaterialService orderMaterialService)
+    IProductionService service,
+    IProductionSchedulingService svc,
+    IOrderMaterialService orderMaterialService,
+    IBackgroundJobClient backgroundJobClient,
+    ILogger<ProductionsController> logger)
         {
             _service = service;
             _svc = svc;
             _orderMaterialService = orderMaterialService;
+            _backgroundJobClient = backgroundJobClient;
+            _logger = logger;
         }
 
         private int? GetRoleId()
@@ -223,6 +231,18 @@ namespace AMMS.API.Controllers
 
             if (!ok)
                 return NotFound(new { message = "Production not found for this orderId" });
+
+            try
+            {
+                _backgroundJobClient.Enqueue<DeliveryHandoverEmailJob>(
+                    x => x.RunAsync(orderId, CancellationToken.None));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Failed to enqueue DeliveryHandoverEmailJob. orderId={OrderId}",
+                    orderId);
+            }
 
             return NoContent();
         }

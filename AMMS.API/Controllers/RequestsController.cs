@@ -1327,6 +1327,7 @@ namespace AMMS.API.Controllers
             }
             return BadRequest();
         }
+
         [HttpPut("customer-receive")]
         public async Task<IActionResult> ReceiveOrder(int request_id)
         {
