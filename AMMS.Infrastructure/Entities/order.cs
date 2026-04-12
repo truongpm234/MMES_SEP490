@@ -31,6 +31,8 @@ public partial class order
 
     public bool is_production_ready { get; set; } = false;
 
+    public DateTime? confirmed_delivery_at { get; set; }
+
     public virtual production? production { get; set; }
 
     public virtual ICollection<delivery> deliveries { get; set; } = new List<delivery>();

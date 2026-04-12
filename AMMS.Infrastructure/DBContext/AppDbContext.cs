@@ -135,6 +135,7 @@ public partial class AppDbContext : DbContext
 
             entity.Property(e => e.code).HasMaxLength(20);
             entity.Property(e => e.delivery_date).HasColumnType("timestamp without time zone");
+            entity.Property(e => e.confirmed_delivery_at).HasColumnType("timestamp without time zone");
             entity.Property(e => e.order_date)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP")
                 .HasColumnType("timestamp without time zone");
@@ -145,16 +146,19 @@ public partial class AppDbContext : DbContext
                 .HasMaxLength(30)
                 .HasDefaultValueSql("'New'::character varying");
             entity.Property(e => e.total_amount).HasPrecision(15, 2);
+
             entity.HasOne(d => d.quote).WithMany(p => p.orders)
                 .HasForeignKey(d => d.quote_id)
                 .HasConstraintName("orders_quote_id_fkey");
+
             entity.HasOne(o => o.production)
                 .WithMany()
                 .HasForeignKey(o => o.production_id)
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("fk_orders_production");
+
             entity.Property(e => e.layout_confirmed)
-        .HasDefaultValue(false);
+                .HasDefaultValue(false);
 
             entity.HasIndex(e => e.layout_confirmed)
                 .HasDatabaseName("ix_orders_layout_confirmed");
