@@ -264,7 +264,7 @@ namespace AMMS.API.Controllers
 
         [AllowAnonymous]
         [HttpGet("payos/status-by-request-id")]
-        public async Task<IActionResult> CheckAndProcessPayOsPayment(
+        public async Task<IActionResult> CheckPayOsStatus(
     [FromQuery] int request_id,
     [FromQuery] int estimate_id,
     [FromQuery] int? quote_id,
@@ -284,11 +284,17 @@ namespace AMMS.API.Controllers
                 {
                     paid = false,
                     processed = false,
-                    message = "Payment not found"
+                    status = "NOT_FOUND",
+                    order_code = 0L,
+                    estimate_id = estimate_id,
+                    quote_id = quote_id
                 });
             }
 
-            if (string.Equals(latest.status, "PAID", StringComparison.OrdinalIgnoreCase))
+            var localStatus = NormalizePaymentStatus(latest.status);
+            var processed = IsPaidLikeStatus(localStatus);
+
+            if (processed)
             {
                 return Ok(new
                 {
@@ -296,55 +302,52 @@ namespace AMMS.API.Controllers
                     processed = true,
                     status = "PAID",
                     order_code = latest.order_code,
-                    estimate_id = latest.estimate_id,
-                    quote_id = latest.quote_id
+                    estimate_id = latest.estimate_id ?? estimate_id,
+                    quote_id = latest.quote_id ?? quote_id
                 });
             }
 
-            var info = await _payos.GetPaymentLinkInformationAsync(latest.order_code, ct);
+            try
+            {
+                var info = await _payos.GetPaymentLinkInformationAsync(latest.order_code, ct);
+                var providerStatus = NormalizePaymentStatus(info?.status);
+                var paid = IsPaidLikeStatus(providerStatus);
 
-            var isPaid =
-                string.Equals(info?.status, "PAID", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(info?.status, "SUCCESS", StringComparison.OrdinalIgnoreCase);
-
-            if (!isPaid)
+                return Ok(new
+                {
+                    paid = paid,
+                    processed = false,
+                    status = paid ? "PAID" : providerStatus,
+                    order_code = latest.order_code,
+                    estimate_id = latest.estimate_id ?? estimate_id,
+                    quote_id = latest.quote_id ?? quote_id
+                });
+            }
+            catch
             {
                 return Ok(new
                 {
                     paid = false,
                     processed = false,
-                    status = info?.status ?? latest.status ?? "PENDING",
+                    status = localStatus,
                     order_code = latest.order_code,
-                    estimate_id = latest.estimate_id,
-                    quote_id = latest.quote_id
+                    estimate_id = latest.estimate_id ?? estimate_id,
+                    quote_id = latest.quote_id ?? quote_id
                 });
             }
+        }
 
-            var result = await ProcessPaidAsync(
-                orderRequestId: request_id,
-                orderCode: latest.order_code,
-                amount: info?.amount ?? (long)latest.amount,
-                paymentLinkId: info?.payment_link_id ?? latest.payos_payment_link_id,
-                transactionId: info?.transaction_id ?? latest.payos_transaction_id,
-                rawJson: info?.raw_json ?? latest.payos_raw ?? "{}",
-                estimateIdFromQuery: latest.estimate_id ?? estimate_id,
-                quoteIdFromQuery: latest.quote_id ?? quote_id,
-                paymentRepo: HttpContext.RequestServices.GetRequiredService<IPaymentRepository>(),
-                ct: ct
-            );
+        private static string NormalizePaymentStatus(string? status)
+        {
+            return string.IsNullOrWhiteSpace(status)
+                ? "PENDING"
+                : status.Trim().ToUpperInvariant();
+        }
 
-            var latestAfter = await _paymentService.GetLatestByRequestIdAndEstimateIdAsync(request_id, estimate_id, ct);
-
-            return Ok(new
-            {
-                paid = result.ok,
-                processed = result.ok,
-                message = result.message,
-                status = latestAfter?.status ?? info?.status ?? "PAID",
-                order_code = latest.order_code,
-                estimate_id = latestAfter?.estimate_id ?? latest.estimate_id,
-                quote_id = latestAfter?.quote_id ?? latest.quote_id
-            });
+        private static bool IsPaidLikeStatus(string? status)
+        {
+            var normalized = NormalizePaymentStatus(status);
+            return normalized == "PAID" || normalized == "SUCCESS";
         }
 
         [HttpPost("reject")]
@@ -692,6 +695,12 @@ namespace AMMS.API.Controllers
                     }
                 }
 
+                var paymentBefore = await _db.payments
+                    .FirstOrDefaultAsync(p => p.provider == "PAYOS" && p.order_code == orderCode, ct);
+
+                var shouldSendPaidEmail = paymentBefore == null ||
+                                          !string.Equals(paymentBefore.status, "PAID", StringComparison.OrdinalIgnoreCase);
+
                 await UpsertPaidPaymentRowAsync(
                     orderRequestId, orderCode, amount,
                     paymentLinkId, transactionId, rawJson,
@@ -764,7 +773,6 @@ namespace AMMS.API.Controllers
                                 x => x.quote_id == resolvedQuoteId ? "Accepted" : "Rejected"), ct);
                 }
 
-                // BỎ contract gate -> convert order ngay sau khi cọc thành công nếu chưa có order
                 if (!req.order_id.HasValue)
                 {
                     var convert = await _service.ConvertToOrderInCurrentTransactionAsync(orderRequestId);
@@ -796,13 +804,16 @@ namespace AMMS.API.Controllers
                 await _db.SaveChangesAsync(ct);
                 await tx.CommitAsync(ct);
 
-                try
+                if (shouldSendPaidEmail)
                 {
-                    await _dealService.NotifyConsultantPaidAsync(orderRequestId, paidPayment.amount, now);
-                    await _dealService.NotifyCustomerPaidAsync(orderRequestId, paidPayment.amount, now);
-                }
-                catch
-                {
+                    try
+                    {
+                        await _dealService.NotifyConsultantPaidAsync(orderRequestId, paidPayment.amount, now);
+                        await _dealService.NotifyCustomerPaidAsync(orderRequestId, paidPayment.amount, now);
+                    }
+                    catch
+                    {
+                    }
                 }
 
                 return (true, "Deposit payment recorded successfully. Request is Accepted.");

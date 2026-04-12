@@ -34,7 +34,7 @@ var hangfireConnStr =
     builder.Configuration.GetConnectionString("HangfireConnection")
     ?? postgresConnStr;
 
-var hangfireEnableDashboard = builder.Configuration.GetValue("Hangfire:EnableDashboard", false);
+var hangfireEnableDashboard = builder.Configuration.GetValue("Hangfire:EnableDashboard", true);
 var hangfireSchema = builder.Configuration["Hangfire:SchemaName"] ?? "hangfire";
 var hangfireRunServer = builder.Configuration.GetValue("Hangfire:RunServer", true);
 var hangfireWorkerCount = builder.Configuration.GetValue("Hangfire:WorkerCount", 2);
