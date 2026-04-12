@@ -102,7 +102,6 @@ public class TasksController : ControllerBase
         };
     }
 
-    [Authorize]
     [HttpPost("finish")]
     public async Task<ActionResult<ScanTaskResult>> Finish([FromBody] ScanTaskRequest req)
     {

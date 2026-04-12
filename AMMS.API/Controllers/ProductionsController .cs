@@ -147,7 +147,6 @@ namespace AMMS.API.Controllers
             return Ok(res);
         }
 
-        [Authorize]
         [HttpGet("start-ready/{orderId:int}")]
         public async Task<IActionResult> GetProductionReady(int orderId, CancellationToken ct)
         {
@@ -158,13 +157,9 @@ namespace AMMS.API.Controllers
             return Ok(result);
         }
 
-        [Authorize]
         [HttpPut("start-ready/{orderId:int}")]
         public async Task<IActionResult> SetProductionReady(int orderId, [FromBody] ConfirmProductionReadyRequest req, CancellationToken ct)
         {
-            if (!IsGeneralManager())
-                return Forbid();
-
             var ok = await _service.SetProductionReadyAsync(orderId, req.is_production_ready, ct);
             if (!ok)
                 return NotFound(new { message = "Order not found" });
