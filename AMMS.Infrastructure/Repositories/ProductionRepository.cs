@@ -819,8 +819,11 @@ namespace AMMS.Infrastructure.Repositories
             if (request == null)
                 return false;
 
+            var now = AppTime.NowVnUnspecified();
+
             prod.status = "Delivery";
             order.status = "Delivery";
+            order.confirmed_delivery_at = now;
             request.process_status = "Delivery";
 
             await _db.SaveChangesAsync(ct);
