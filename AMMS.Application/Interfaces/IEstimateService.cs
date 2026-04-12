@@ -26,5 +26,6 @@ namespace AMMS.Application.Interfaces
         Task<RemainingByRequestResponse?> GetRemainingByRequestIdAsync(int requestId, CancellationToken ct = default);
         Task UpdateAlternativeMaterialsAsync(int requestId, int? estimateId, string? paperAlternative, string? waveAlternative, string? alternativeMaterialReason, CancellationToken ct = default);
         Task<GenerateConsultantContractResponse> GenerateConsultantContractAsync(int requestId, int estimateId, CancellationToken ct = default);
+        Task SaveConsultantContractPathAsync(int requestId, int estimateId, string consultantContractPath, CancellationToken ct = default);
     }
 }

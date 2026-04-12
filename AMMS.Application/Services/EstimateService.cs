@@ -635,5 +635,24 @@ namespace AMMS.Application.Services
                 message = "Generate consultant contract successfully"
             };
         }
+        public async Task SaveConsultantContractPathAsync(int requestId, int estimateId, string consultantContractPath, CancellationToken ct = default)
+        {
+            if (requestId <= 0)
+                throw new ArgumentException("request_id must be > 0");
+
+            if (estimateId <= 0)
+                throw new ArgumentException("estimate_id must be > 0");
+
+            if (string.IsNullOrWhiteSpace(consultantContractPath))
+                throw new ArgumentException("consultant_contract_path is required");
+
+            var estimate = await _estimateRepo.GetTrackingByIdAsync(estimateId, ct);
+            if (estimate == null || estimate.order_request_id != requestId)
+                throw new InvalidOperationException("Estimate not found");
+
+            estimate.consultant_contract_path = consultantContractPath.Trim();
+
+            await _estimateRepo.SaveChangesAsync();
+        }
     }
 }

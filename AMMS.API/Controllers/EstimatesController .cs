@@ -254,5 +254,54 @@ namespace AMMS.API.Controllers
                 });
             }
         }
+
+        [HttpPut("save-consultant-contract-path")]
+        public async Task<IActionResult> SaveConsultantContractPath([FromBody] SaveConsultantContractPathRequest req, CancellationToken ct)
+        {
+            try
+            {
+                if (req == null)
+                    return BadRequest(new { message = "Request body is required" });
+
+                if (req.request_id <= 0)
+                    return BadRequest(new { message = "request_id must be > 0" });
+
+                if (req.estimate_id <= 0)
+                    return BadRequest(new { message = "estimate_id must be > 0" });
+
+                if (string.IsNullOrWhiteSpace(req.consultant_contract_path))
+                    return BadRequest(new { message = "consultant_contract_path is required" });
+
+                await _service.SaveConsultantContractPathAsync(
+                    req.request_id,
+                    req.estimate_id,
+                    req.consultant_contract_path,
+                    ct);
+
+                return Ok(new
+                {
+                    message = "Save consultant_contract_path successfully",
+                    request_id = req.request_id,
+                    estimate_id = req.estimate_id,
+                    consultant_contract_path = req.consultant_contract_path
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Save consultant_contract_path failed",
+                    detail = ex.Message
+                });
+            }
+        }
     }
 }
