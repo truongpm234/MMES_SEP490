@@ -252,5 +252,13 @@ namespace AMMS.Application.Services
             return result;
 
         }
+
+        public async Task<object> CancelPurchaseOrderAsync(int purchaseId, CancellationToken ct = default)
+        {
+            if (purchaseId <= 0)
+                throw new ArgumentException("purchaseId is required");
+
+            return await _repo.CancelPurchaseOrderAsync(purchaseId, ct);
+        }
     }
 }
