@@ -291,6 +291,7 @@ CancellationToken ct)
                 message = "PayOS shows PAID. FE should navigate to return_api_url once."
             });
         }
+
         private string NormalizeBaseUrl(string? url, string fallback)
         {
             var value = string.IsNullOrWhiteSpace(url) ? fallback : url.Trim();
