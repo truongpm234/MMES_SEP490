@@ -518,5 +518,16 @@ namespace AMMS.Infrastructure.Repositories
 
             return filtered.Count > 0 ? filtered : allSteps;
         }
+
+        public async Task<bool> SetTaskReadyAsync(int taskId, CancellationToken ct = default)
+        {
+            var t = await _db.tasks.FirstOrDefaultAsync(x => x.task_id == taskId, ct);
+            if (t == null)
+                return false;
+
+            t.status = "Ready";
+            await _db.SaveChangesAsync(ct);
+            return true;
+        }
     }
 }
