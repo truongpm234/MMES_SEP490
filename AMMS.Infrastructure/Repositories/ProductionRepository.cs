@@ -390,7 +390,6 @@ namespace AMMS.Infrastructure.Repositories
                 planned_start_date = header.pr.planned_start_date,
                 actual_start_date = header.pr.actual_start_date,
                 end_date = header.pr.end_date,
-
                 order_id = header.o?.order_id,
                 order_code = header.o?.code,
                 delivery_date = header.o?.delivery_date,
@@ -448,6 +447,11 @@ namespace AMMS.Infrastructure.Repositories
 
             dto.ready_print_file = orderReq?.print_ready_file;
             dto.ink_type_names = estimate?.ink_type_names;
+            dto.wave_type = estimate?.wave_type;
+            dto.paper_name = estimate?.paper_name;
+            dto.coating_type = estimate?.coating_type;
+            dto.paper_alternative = estimate?.paper_alternative;
+            dto.wave_alternative = estimate?.wave_alternative;
 
             decimal estInkWeightKg = 0m;
             if (header.first_item?.i_ink_weight_kg.HasValue == true)

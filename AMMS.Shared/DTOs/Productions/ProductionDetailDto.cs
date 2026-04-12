@@ -31,7 +31,11 @@ namespace AMMS.Shared.DTOs.Productions
         public int? height_mm { get; set; }
         public string? ready_print_file { get; set; }
         public string? ink_type_names { get; set; }
-
+        public string? wave_type { get; set; }
+        public string? paper_name { get; set; }
+        public string? coating_type { get; set; }
+        public string? paper_alternative { get; set; }
+        public string? wave_alternative { get; set; }
         // Timeline stages
         public DateTime? created_at { get; set; }
         public DateTime? planned_start_date { get; set; }
