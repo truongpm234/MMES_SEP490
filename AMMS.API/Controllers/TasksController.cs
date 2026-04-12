@@ -113,4 +113,23 @@ public class TasksController : ControllerBase
 
         return Ok(res);
     }
+
+    [HttpPut("ready")]
+    public async Task<IActionResult> SetTaskReady([FromBody] SetTaskReadyRequest req, CancellationToken ct)
+    {
+        if (req == null || req.task_id <= 0)
+            return BadRequest(new { message = "task_id is required" });
+
+        var ok = await _taskRepo.SetTaskReadyAsync(req.task_id, ct);
+
+        if (!ok)
+            return NotFound(new { message = "Task not found", task_id = req.task_id });
+
+        return Ok(new
+        {
+            message = "Task status updated to Ready",
+            task_id = req.task_id,
+            status = "Ready"
+        });
+    }
 }
