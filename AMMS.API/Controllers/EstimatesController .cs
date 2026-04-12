@@ -1,4 +1,5 @@
 ﻿using AMMS.Application.Interfaces;
+using AMMS.Application.Services;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Estimates;
 using AMMS.Shared.DTOs.Planning;
@@ -203,6 +204,55 @@ namespace AMMS.API.Controllers
                 ct);
 
             return NoContent();
+        }
+
+        [HttpPost("generate-consultant-contract")]
+        public async Task<IActionResult> GenerateConsultantContract(
+    [FromBody] GenerateConsultantContractRequest req,
+    CancellationToken ct)
+        {
+            try
+            {
+                if (req == null)
+                    return BadRequest(new { message = "Request body is required" });
+
+                if (req.request_id <= 0)
+                    return BadRequest(new { message = "request_id must be > 0" });
+
+                if (req.estimate_id <= 0)
+                    return BadRequest(new { message = "estimate_id must be > 0" });
+
+                var result = await _service.GenerateConsultantContractAsync(
+                    req.request_id,
+                    req.estimate_id,
+                    ct);
+
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (FileNotFoundException ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Contract template not found",
+                    detail = ex.Message
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Generate consultant contract failed",
+                    detail = ex.Message
+                });
+            }
         }
     }
 }

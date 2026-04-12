@@ -6,6 +6,11 @@ using AMMS.Shared.DTOs.Email;
 using AMMS.Shared.DTOs.Estimates;
 using AMMS.Shared.DTOs.Requests;
 using AMMS.Shared.Helpers;
+using DocumentFormat.OpenXml.Packaging;
+using Microsoft.AspNetCore.Hosting;
+using System.Globalization;
+using DocumentFormat.OpenXml.Wordprocessing;
+using System.Text;
 
 namespace AMMS.Application.Services
 {
@@ -20,6 +25,9 @@ namespace AMMS.Application.Services
         private readonly IMaterialRepository _materialRepo;
         private readonly IBomRepository _bomRepo;
         private readonly IContractCompareService _contractCompareService;
+        private readonly IEstimateConfigRepository _estimateConfigRepo;
+        private readonly IWebHostEnvironment _env;
+
         public EstimateService(
             ICostEstimateRepository costEstimateRepository,
             IQuoteRepository quoteRepo,
@@ -29,7 +37,7 @@ namespace AMMS.Application.Services
             IOrderRepository orderRepo,
             IMaterialRepository materialRepo,
             IBomRepository bomRepo,
-            IContractCompareService contractCompareService)
+            IContractCompareService contractCompareService, IEstimateConfigRepository estimateConfigRepository, IWebHostEnvironment env)
         {
             _estimateRepo = costEstimateRepository;
             _quoteRepo = quoteRepo;
@@ -40,6 +48,8 @@ namespace AMMS.Application.Services
             _materialRepo = materialRepo;
             _bomRepo = bomRepo;
             _contractCompareService = contractCompareService;
+            _estimateConfigRepo = estimateConfigRepository;
+            _env = env;
         }
 
         public async Task UpdateFinalCostAsync(int orderRequestId, decimal? finalCostInput)
@@ -373,7 +383,7 @@ namespace AMMS.Application.Services
             await _estimateRepo.SaveChangesAsync();
 
             var request = await _requestRepository.GetByIdAsync(requestId);
-            
+
             return new UploadCustomerSignedContractResponse
             {
                 request_id = requestId,
@@ -447,7 +457,7 @@ namespace AMMS.Application.Services
 
             if (alternativeMaterialReason != null)
                 estimate.alternative_material_reason = string.IsNullOrWhiteSpace(alternativeMaterialReason) ? null : alternativeMaterialReason.Trim();
-           
+
             await SyncOperationalMaterialSnapshotAsync(request, estimate, ct);
 
             await _estimateRepo.SaveChangesAsync();
@@ -553,6 +563,77 @@ namespace AMMS.Application.Services
                 bom.material_code = EstimateHelper.Trunc20(mountingGlueCode);
                 bom.material_name = "Keo bồi";
             }
+        }
+
+        public async Task<GenerateConsultantContractResponse> GenerateConsultantContractAsync(
+    int requestId,
+    int estimateId,
+    CancellationToken ct = default)
+        {
+            if (requestId <= 0)
+                throw new ArgumentException("request_id must be > 0");
+
+            if (estimateId <= 0)
+                throw new ArgumentException("estimate_id must be > 0");
+
+            var request = await _requestRepository.GetByIdAsync(requestId);
+            if (request == null)
+                throw new InvalidOperationException("Order request not found");
+
+            var estimate = await _estimateRepo.GetTrackingByIdAsync(estimateId, ct);
+            if (estimate == null || estimate.order_request_id != requestId)
+                throw new InvalidOperationException("Estimate not found");
+
+            var vatPercent = await _requestRepository.GetVatPercentAsync(ct);
+
+            var templatePath = Path.Combine(
+                AppContext.BaseDirectory,
+                "Templates",
+                "HopDongTemplate.docx");
+
+            if (!File.Exists(templatePath))
+                throw new FileNotFoundException("Contract template not found", templatePath);
+
+            var signDate = AppTime.NowVnUnspecified();
+
+            var placeholders = ContractDocxHelper.BuildPlaceholders(
+                request,
+                estimate,
+                vatPercent,
+                signDate);
+
+            var templateBytes = await File.ReadAllBytesAsync(templatePath, ct);
+            var generatedBytes = ContractDocxHelper.GenerateDocx(templateBytes, placeholders);
+
+            await using var docxStream = new MemoryStream(generatedBytes);
+
+            var safeFileName = $"contract_request_{requestId}_estimate_{estimateId}.docx";
+            var publicId = $"contracts/request_{requestId}/estimate_{estimateId}/consultant_auto";
+
+            var url = await _cloudinaryStorage.UploadRawWithPublicIdAsync(
+                docxStream,
+                safeFileName,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                publicId);
+
+            estimate.consultant_contract_path = url;
+            await _estimateRepo.SaveChangesAsync();
+
+            var amounts = ContractDocxHelper.CalculateAmounts(estimate, vatPercent);
+
+            return new GenerateConsultantContractResponse
+            {
+                request_id = requestId,
+                estimate_id = estimateId,
+                vat_percent = amounts.VatPercent,
+                subtotal_before_vat = amounts.SubtotalBeforeVat,
+                vat_amount = amounts.VatAmount,
+                final_total_cost = amounts.FinalTotalCost,
+                deposit_amount = amounts.DepositAmount,
+                remaining_amount = amounts.RemainingAmount,
+                consultant_contract_path = url,
+                message = "Generate consultant contract successfully"
+            };
         }
     }
 }

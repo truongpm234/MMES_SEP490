@@ -55,5 +55,6 @@ namespace AMMS.Infrastructure.Interfaces
         Task<DateTime?> CalculateAsync(int orderRequestId, CancellationToken ct = default);
         Task<DateTime?> RecalculateAndPersistAsync(int orderRequestId, CancellationToken ct = default);
         Task MarkProcessStatusImportingByOrderAsync(int orderId, int? quoteId, CancellationToken ct = default);
+        Task<decimal> GetVatPercentAsync(CancellationToken ct = default);
     }
 }

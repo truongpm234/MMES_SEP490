@@ -24,12 +24,7 @@ namespace AMMS.Application.Interfaces
         Task<UploadCustomerSignedContractResponse> UploadCustomerSignedContractAsync(int requestId, int estimateId, Stream fileStream, string fileName, string contentType, CancellationToken ct = default);
         Task<cost_estimate?> GetTrackingByIdAsync(int estimateId, CancellationToken ct = default);
         Task<RemainingByRequestResponse?> GetRemainingByRequestIdAsync(int requestId, CancellationToken ct = default);
-        Task UpdateAlternativeMaterialsAsync(
-            int requestId,
-            int? estimateId,
-            string? paperAlternative,
-            string? waveAlternative,
-            string? alternativeMaterialReason,
-            CancellationToken ct = default);
+        Task UpdateAlternativeMaterialsAsync(int requestId, int? estimateId, string? paperAlternative, string? waveAlternative, string? alternativeMaterialReason, CancellationToken ct = default);
+        Task<GenerateConsultantContractResponse> GenerateConsultantContractAsync(int requestId, int estimateId, CancellationToken ct = default);
     }
 }

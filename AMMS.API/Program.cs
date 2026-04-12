@@ -301,7 +301,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IAccessService, AccessService>();
 builder.Services.AddScoped<IContractCompareService, ContractCompareService>();
 builder.Services.AddScoped<DeliveryHandoverEmailJob>();
-
+builder.Services.AddScoped<IEstimateConfigRepository, EstimateConfigRepository>();
 // Logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();

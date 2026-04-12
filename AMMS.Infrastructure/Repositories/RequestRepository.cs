@@ -1238,7 +1238,7 @@ namespace AMMS.Infrastructure.Repositories
                 .FirstOrDefaultAsync(ct);
         }
 
-        private async Task<decimal> GetVatPercentAsync(CancellationToken ct = default)
+        public async Task<decimal> GetVatPercentAsync(CancellationToken ct = default)
         {
             var vat = await _db.estimate_config
                 .AsNoTracking()
