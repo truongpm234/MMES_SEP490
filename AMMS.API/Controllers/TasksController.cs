@@ -1,24 +1,29 @@
 ﻿using AMMS.Application.Interfaces;
+using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Productions;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
 [ApiController]
 [Route("api/[controller]")]
 public class TasksController : ControllerBase
 {
-    private readonly ITaskRepository _taskRepo; 
+    private readonly ITaskRepository _taskRepo;
     private readonly ITaskQrTokenService _tokenSvc;
     private readonly ITaskScanService _scanSvc;
-    private readonly ITaskService _taskService; 
+    private readonly ITaskService _taskService;
+    private readonly AppDbContext _db;
 
     public TasksController(
+        AppDbContext db,
         ITaskRepository taskRepo,
         ITaskQrTokenService tokenSvc,
         ITaskScanService scanSvc,
         ITaskService taskService)
     {
+        _db = db;
         _taskRepo = taskRepo;
         _tokenSvc = tokenSvc;
         _scanSvc = scanSvc;
@@ -122,7 +127,14 @@ public class TasksController : ControllerBase
     {
         if (req == null || req.task_id <= 0)
             return BadRequest(new { message = "task_id is required" });
-
+        var prevTask = await _db.tasks.FirstOrDefaultAsync(t => t.task_id == (req.task_id - 1));
+        if (prevTask != null)
+        {
+            if (prevTask.status != "Finished")
+            {
+                return BadRequest("Không thể bắt đầu, công đoạn trước chưa được hoàn thành");
+            }
+        }
         try
         {
             var ok = await _taskService.SetTaskReadyAsync(req.task_id, ct);
