@@ -10,5 +10,6 @@ namespace AMMS.Application.Interfaces
     public interface IBaseConfigService
     {
         Task<EstimateBaseConfigDto> GetAsync(CancellationToken ct = default);
+        Task<PaymentTermsConfig> GetPaymentTermsAsync(CancellationToken ct);
     }
 }

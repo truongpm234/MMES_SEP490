@@ -30,10 +30,43 @@ namespace AMMS.Infrastructure.Repositories
                 SystemParameters = MapSystemParameters(rows),
                 ProcessCosts = MapProcessCosts(rows),
                 Design = MapDesign(rows),
-                PlatePrices = MapPlatePrices(rows)
+                PlatePrices = MapPlatePrices(rows),
+                PaymentTerms = MapPaymentTerms(rows) // thêm mới
             };
 
             return dto;
+        }
+
+        public async Task<PaymentTermsConfig> GetPaymentTermsAsync(CancellationToken ct)
+        {
+            var rows = await _db.Set<estimate_config>()
+                .AsNoTracking()
+                .Where(x => x.config_group == "paymentTerms")
+                .ToListAsync(ct);
+
+            return MapPaymentTerms(rows);
+        }
+
+        private static PaymentTermsConfig MapPaymentTerms(List<estimate_config> rows)
+        {
+            decimal GetNum(string key, decimal fallback) =>
+                rows.FirstOrDefault(x => x.config_group == "paymentTerms" && x.config_key == key)?.value_num
+                ?? fallback;
+
+            var deposit = GetNum("deposit_percent", 30m);
+            var remaining = GetNum("remaining_percent", 70m);
+
+            if (deposit < 0) deposit = 0;
+            if (deposit > 100) deposit = 100;
+
+            // nếu DB chưa đồng bộ hết thì vẫn tự cân ở tầng app
+            remaining = 100m - deposit;
+
+            return new PaymentTermsConfig
+            {
+                deposit_percent = deposit,
+                remaining_percent = remaining
+            };
         }
 
         private static PlatePriceConfig MapPlatePrices(List<estimate_config> rows)
@@ -146,7 +179,6 @@ namespace AMMS.Infrastructure.Repositories
                 }
             };
         }
-
 
         private static SystemConfig MapSystemParameters(List<estimate_config> rows)
         {

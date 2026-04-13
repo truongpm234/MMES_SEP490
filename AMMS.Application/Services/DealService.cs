@@ -33,8 +33,10 @@ namespace AMMS.Application.Services
         private readonly IProductionRepository _prodRepo;
         private readonly IHubContext<RealtimeHub> _hub;
         private readonly NotificationService _notificationService;
+        private readonly IBaseConfigRepository _baseConfigRepo;
+
         public DealService(
-            NotificationService notificationService,
+    NotificationService notificationService,
     IHubContext<RealtimeHub> hub,
     AppDbContext db,
     IRequestRepository requestRepo,
@@ -47,7 +49,10 @@ namespace AMMS.Application.Services
     IRealtimePublisher rt,
     ILogger<DealService> logger,
     IEmailBackgroundQueue emailQueue,
-    IUserRepository userRepo, IOrderRepository orderRepository, IProductionRepository productionRepository)
+    IUserRepository userRepo,
+    IOrderRepository orderRepository,
+    IProductionRepository productionRepository,
+    IBaseConfigRepository baseConfigRepo)  
         {
             _db = db;
             _notificationService = notificationService;
@@ -65,6 +70,7 @@ namespace AMMS.Application.Services
             _orderRepo = orderRepository;
             _prodRepo = productionRepository;
             _hub = hub;
+            _baseConfigRepo = baseConfigRepo;     
         }
 
         public async Task SendDealAndEmailAsync(int orderRequestId, int? estimateId = null)
@@ -268,15 +274,12 @@ namespace AMMS.Application.Services
             var delivery = req.delivery_date?.ToString("dd/MM/yyyy") ?? "N/A";
 
             var finalTotal = est?.final_total_cost ?? 0m;
-            var deposit = est?.deposit_amount ?? 0m;
 
-            var paidLine = paidAmount.HasValue
-                ? $"<p><b>Số tiền đã thanh toán:</b> {paidAmount.Value:n0} VND</p>"
-                : "";
+            var paymentTerms = await _baseConfigRepo.GetPaymentTermsAsync(ct);
+            var deposit = est == null
+                ? 0m
+                : PaymentAmountHelper.GetDepositDisplayAmount(est, paymentTerms);
 
-            var paidAtLine = paidAt.HasValue
-                ? $"<p><b>Thời gian thanh toán:</b> {paidAt.Value:dd/MM/yyyy HH:mm:ss}</p>"
-                : "";
             string FormatVND(decimal amount) => string.Format("{0:N0} đ", amount);
 
             string paymentInfoHtml = "";
@@ -416,7 +419,12 @@ namespace AMMS.Application.Services
             catch { }
 
             var finalTotal = est?.final_total_cost ?? 0m;
-            var deposit = est?.deposit_amount ?? 0m;
+
+            var paymentTerms = await _baseConfigRepo.GetPaymentTermsAsync(CancellationToken.None);
+            var deposit = est == null
+                ? 0m
+                : PaymentAmountHelper.GetDepositDisplayAmount(est, paymentTerms);
+
             string FormatVND(decimal amount) => string.Format("{0:N0} đ", amount);
 
             var html = $@"
@@ -428,14 +436,10 @@ namespace AMMS.Application.Services
     .container {{ max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }}
     table {{ width: 100%; border-collapse: collapse; }}
     td {{ vertical-align: top; }}
-    
-    /* Typography */
     .header-text {{ color: #ffffff; font-size: 20px; font-weight: 700; }}
     .label {{ color: #64748b; font-size: 13px; padding: 8px 0; }}
     .value {{ color: #1e293b; font-weight: 600; font-size: 13px; text-align: right; padding: 8px 0; }}
     .section-title {{ font-size: 14px; font-weight: 700; text-transform: uppercase; color: #334155; margin-bottom: 10px; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; display: inline-block; }}
-    
-    /* Success Box */
     .success-box {{ background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 20px; text-align: center; margin-bottom: 25px; }}
     .paid-amount {{ color: #15803d; font-size: 24px; font-weight: 800; margin: 5px 0; }}
     .success-badge {{ display: inline-block; background: #16a34a; color: white; padding: 4px 12px; border-radius: 50px; font-size: 12px; font-weight: bold; margin-bottom: 8px; }}
@@ -493,16 +497,16 @@ namespace AMMS.Application.Services
       </table>
 
       <div style='margin-top: 30px; border-top: 1px solid #f1f5f9; padding-top: 20px; text-align: center;'>
-   <p style='color: #64748b; font-size: 13px; line-height: 1.5; margin: 0 0 8px 0;'>
-      Đơn hàng của bạn đang được xử lý.
-   </p>
-   <p style='color: #64748b; font-size: 13px; line-height: 1.5; margin: 0 0 8px 0;'>
-      Bạn có thể tra cứu tiến trình đơn hàng bằng cách copy đường dẫn bên dưới và dán vào trình duyệt:
-   </p>
-   <p style='color: #0f172a; font-size: 12px; line-height: 1.6; margin: 0; background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; word-break:break-all; user-select:all; -webkit-user-select:all;'>
-      {fe}/look-up
-   </p>
-</div>
+        <p style='color: #64748b; font-size: 13px; line-height: 1.5; margin: 0 0 8px 0;'>
+            Đơn hàng của bạn đang được xử lý.
+        </p>
+        <p style='color: #64748b; font-size: 13px; line-height: 1.5; margin: 0 0 8px 0;'>
+            Bạn có thể tra cứu tiến trình đơn hàng bằng cách copy đường dẫn bên dưới và dán vào trình duyệt:
+        </p>
+        <p style='color: #0f172a; font-size: 12px; line-height: 1.6; margin: 0; background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; word-break:break-all; user-select:all; -webkit-user-select:all;'>
+            {fe}/look-up
+        </p>
+      </div>
 
     </div>
     
@@ -537,6 +541,8 @@ namespace AMMS.Application.Services
 
             if (est.order_request_id != requestId)
                 throw new InvalidOperationException("Estimate does not belong to this request");
+
+            var paymentTerms = await _baseConfigRepo.GetPaymentTermsAsync(ct);
 
             var pending = await _payment.GetLatestPendingByRequestIdAndEstimateIdAsync(requestId, estimateId, ct);
             if (pending != null)
@@ -578,7 +584,7 @@ namespace AMMS.Application.Services
             var backendUrl = _config["Deal:BaseUrl"]!;
             var feBase = _config["Deal:BaseUrlFe"] ?? "https://sep490-fe.vercel.app";
 
-            var actualAmount = PaymentAmountHelper.GetDepositAmount(est);
+            var actualAmount = PaymentAmountHelper.GetDepositAmount(est, paymentTerms);
             var gatewayAmount = PaymentAmountHelper.ToGatewayAmount(actualAmount, _config);
 
             const int maxAttempt = 9;
@@ -597,15 +603,15 @@ namespace AMMS.Application.Services
                 try
                 {
                     var payos = await _payOs.CreatePaymentLinkAsync(
-    orderCode: orderCode,
-    amount: gatewayAmount,
-    description: description,
-    buyerName: req.customer_name ?? "Khach hang",
-    buyerEmail: req.customer_email ?? "",
-    buyerPhone: req.customer_phone ?? "",
-    returnUrl: returnUrl,
-    cancelUrl: cancelUrl,
-    ct: ct);
+                        orderCode: orderCode,
+                        amount: gatewayAmount,
+                        description: description,
+                        buyerName: req.customer_name ?? "Khach hang",
+                        buyerEmail: req.customer_email ?? "",
+                        buyerPhone: req.customer_phone ?? "",
+                        returnUrl: returnUrl,
+                        cancelUrl: cancelUrl,
+                        ct: ct);
 
                     var now = AppTime.NowVnUnspecified();
                     await _payment.UpsertPendingAsync(new payment
@@ -667,7 +673,8 @@ namespace AMMS.Application.Services
                 throw new InvalidOperationException("Customer email missing");
 
             var est = await ResolveAcceptedEstimateAsync(req, ct);
-            var remainingAmount = PaymentAmountHelper.GetRemainingAmount(est);
+            var paymentTerms = await _baseConfigRepo.GetPaymentTermsAsync(ct);
+            var remainingAmount = PaymentAmountHelper.GetRemainingAmount(est, paymentTerms);
 
             if (remainingAmount <= 0)
                 throw new InvalidOperationException("Remaining amount is already 0. No need to send remaining-payment email.");
@@ -717,10 +724,13 @@ namespace AMMS.Application.Services
             }
 
             var est = await ResolveAcceptedEstimateAsync(req, ct);
-            var actualRemainingAmount = PaymentAmountHelper.GetRemainingAmount(est);
+            var paymentTerms = await _baseConfigRepo.GetPaymentTermsAsync(ct);
+
+            var actualRemainingAmount = PaymentAmountHelper.GetRemainingAmount(est, paymentTerms);
             var gatewayRemainingAmount = PaymentAmountHelper.ToGatewayAmount(actualRemainingAmount, _config);
 
-            if (actualRemainingAmount <= 0) throw new InvalidOperationException("Remaining amount is already 0.");
+            if (actualRemainingAmount <= 0)
+                throw new InvalidOperationException("Remaining amount is already 0.");
 
             var paid = await _payment.GetLatestByRequestIdAndTypeAsync(req.order_request_id, PaymentTypes.Remaining, ct);
             if (paid != null && IsPaidStatus(paid.status))
@@ -773,15 +783,15 @@ namespace AMMS.Application.Services
             var cancelUrl = $"{feBase}/payment/{id}?status=cancel";
 
             var payos = await _payOs.CreatePaymentLinkAsync(
-    orderCode: orderCode,
-    amount: gatewayRemainingAmount,
-    description: description,
-    buyerName: req.customer_name ?? "Khach hang",
-    buyerEmail: req.customer_email ?? "",
-    buyerPhone: req.customer_phone ?? "",
-    returnUrl: returnUrl,
-    cancelUrl: cancelUrl,
-    ct: ct);
+                orderCode: orderCode,
+                amount: gatewayRemainingAmount,
+                description: description,
+                buyerName: req.customer_name ?? "Khach hang",
+                buyerEmail: req.customer_email ?? "",
+                buyerPhone: req.customer_phone ?? "",
+                returnUrl: returnUrl,
+                cancelUrl: cancelUrl,
+                ct: ct);
 
             var now = AppTime.NowVnUnspecified();
 
