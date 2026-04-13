@@ -63,6 +63,7 @@ namespace AMMS.Application.Services
             _emailService = emailService;
             _quoteRepo = quoteRepo;
             _payOs = payOs;
+            _paymentRepo = paymentRepo;
             _rt = rt;
             _logger = logger;
             _emailQueue = emailQueue;
@@ -71,7 +72,6 @@ namespace AMMS.Application.Services
             _prodRepo = productionRepository;
             _hub = hub;
             _baseConfigRepo = baseConfigRepo;
-            
         }
 
         public async Task SendDealAndEmailAsync(int orderRequestId, int? estimateId = null)
