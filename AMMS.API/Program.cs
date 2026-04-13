@@ -236,9 +236,8 @@ builder.Services.AddHttpClient("Resend", client =>
 builder.Services.AddScoped<QuoteExpiryJob>();
 builder.Services.AddScoped<AutoSendDealAfterVerifiedJob>();
 builder.Services.Configure<SchedulingOptions>(
-    builder.Configuration.GetSection("Scheduling"));
-builder.Services.AddSingleton<WorkCalendar>();
-
+builder.Configuration.GetSection("Scheduling"));
+builder.Services.AddScoped<WorkCalendar>();
 // Services
 builder.Services.AddScoped<IUploadFileService, UploadFileService>();
 builder.Services.AddScoped<ICloudinaryFileStorageService, CloudinaryFileStorageService>();
@@ -303,6 +302,8 @@ builder.Services.AddScoped<IContractCompareService, ContractCompareService>();
 builder.Services.AddScoped<DeliveryHandoverEmailJob>();
 builder.Services.AddScoped<IEstimateConfigRepository, EstimateConfigRepository>();
 builder.Services.AddScoped<ITaskService, TaskService>();
+builder.Services.AddScoped<IProductionCalendarRepository, ProductionCalendarRepository>();
+builder.Services.AddScoped<IProductionCalendarService, ProductionCalendarService>();
 // Logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();

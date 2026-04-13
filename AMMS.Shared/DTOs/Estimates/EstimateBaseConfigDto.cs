@@ -10,8 +10,18 @@
         public DesignConfig Design { get; set; } = null!;
         public PlatePriceConfig PlatePrices { get; set; } = null!;
         public PaymentTermsConfig PaymentTerms { get; set; } = null!;
-
+        public PlanningConfig Planning { get; set; } = null!;
     }
+
+    public class PlanningConfig
+    {
+        public decimal min_start_wait_hours { get; set; } = 6;
+        public string work_start_time { get; set; } = "08:00";
+        public string break_start_time { get; set; } = "12:00";
+        public string break_end_time { get; set; } = "13:00";
+        public string work_end_time { get; set; } = "17:00";
+    }
+
     public class PaymentTermsConfig
     {
         public decimal deposit_percent { get; set; }
