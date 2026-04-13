@@ -50,6 +50,8 @@ var autoStartProductionEnabled = builder.Configuration.GetValue("AutoStartProduc
 var autoStartProductionCron = builder.Configuration["AutoStartProduction:Cron"] ?? "* * * * *";
 var autoCompleteDeliveredEnabled = builder.Configuration.GetValue("AutoCompleteDelivered:Enabled", true);
 var autoCompleteDeliveredCron = builder.Configuration["AutoCompleteDelivered:Cron"] ?? "0 1 * * *";
+var autoCancelPendingRequestEnabled = builder.Configuration.GetValue("AutoCancelPendingRequest:Enabled", true);
+var autoCancelPendingRequestCron = builder.Configuration["AutoCancelPendingRequest:Cron"] ?? "0 0 * * *";
 
 builder.Services.AddDbContext<AppDbContext>((sp, options) =>
 {
@@ -241,6 +243,7 @@ builder.Services.Configure<SchedulingOptions>(
     builder.Configuration.GetSection("Scheduling"));
 builder.Services.AddSingleton<WorkCalendar>();
 builder.Services.AddScoped<AutoCompleteDeliveredAfter7DaysJob>();
+builder.Services.AddScoped<AutoCancelPendingRequestAfter3DaysJob>();
 
 // Services
 builder.Services.AddScoped<IUploadFileService, UploadFileService>();
@@ -369,6 +372,15 @@ if (hangfireRunServer)
                     "auto-complete-delivered-after-7-days",
                     job => job.RunAsync(CancellationToken.None),
                     autoCompleteDeliveredCron,
+                    vnTz
+                );
+            }
+            if (autoCancelPendingRequestEnabled)
+            {
+                RecurringJob.AddOrUpdate<AutoCancelPendingRequestAfter3DaysJob>(
+                    "auto-cancel-pending-request-after-3-days",
+                    job => job.RunAsync(CancellationToken.None),
+                    autoCancelPendingRequestCron,
                     vnTz
                 );
             }
