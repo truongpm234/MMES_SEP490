@@ -284,7 +284,6 @@ builder.Services.AddScoped<IProductTemplateRepository, ProductTemplateRepository
 builder.Services.AddScoped<IProductTemplateService, ProductTemplateService>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IUserService, UserService>();
-builder.Services.AddScoped<ScanService>();
 builder.Services.AddScoped<JWTService>();
 builder.Services.AddScoped<GoogleAuthService>();
 builder.Services.AddScoped<ISmsOtpService, TwilioSmsOtpService>();
