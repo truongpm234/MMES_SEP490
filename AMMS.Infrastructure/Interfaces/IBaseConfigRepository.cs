@@ -10,5 +10,6 @@ namespace AMMS.Infrastructure.Interfaces
     public interface IBaseConfigRepository
     {
         Task<EstimateBaseConfigDto> GetAsync(CancellationToken ct);
+        Task<PaymentTermsConfig> GetPaymentTermsAsync(CancellationToken ct);
     }
 }

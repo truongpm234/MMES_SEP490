@@ -9,6 +9,13 @@
         public ProcessCostConfig ProcessCosts { get; set; } = null!;
         public DesignConfig Design { get; set; } = null!;
         public PlatePriceConfig PlatePrices { get; set; } = null!;
+        public PaymentTermsConfig PaymentTerms { get; set; } = null!;
+
+    }
+    public class PaymentTermsConfig
+    {
+        public decimal deposit_percent { get; set; }
+        public decimal remaining_percent { get; set; }
     }
 
     public class PlatePriceConfig

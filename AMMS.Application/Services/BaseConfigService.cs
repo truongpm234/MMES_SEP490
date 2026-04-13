@@ -20,5 +20,10 @@ namespace AMMS.Application.Services
         {
             return await _repo.GetAsync(ct);
         }
+
+        public async Task<PaymentTermsConfig> GetPaymentTermsAsync(CancellationToken ct)
+        {
+            return await _repo.GetPaymentTermsAsync(ct);
+        }
     }
 }
