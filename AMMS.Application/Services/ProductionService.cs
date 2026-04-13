@@ -20,15 +20,23 @@ namespace AMMS.Application.Services
         private readonly AppDbContext _db;
         private readonly IHubContext<RealtimeHub> _rt;
         private readonly NotificationService _notiService;
-        public ProductionService(IHubContext<RealtimeHub> rt, IProductionRepository repo, IRealtimePublisher hub, AppDbContext db, IOrderRepository oderRepository, NotificationService notiService)
+
+        public ProductionService(
+            IHubContext<RealtimeHub> rt,
+            IProductionRepository repo,
+            IRealtimePublisher hub,
+            AppDbContext db,
+            IOrderRepository orderRepository,
+            NotificationService notiService)
         {
             _db = db;
             _rt = rt;
             _repo = repo;
             _hub = hub;
-            _orderRepo = oderRepository;
+            _orderRepo = orderRepository;
             _notiService = notiService;
         }
+
         public async Task<NearestDeliveryResponse> GetNearestDeliveryAsync()
         {
             var nearestDate = await _repo.GetNearestDeliveryDateAsync();
@@ -50,25 +58,33 @@ namespace AMMS.Application.Services
             return Task.FromResult(result);
         }
 
-        public Task<PagedResultLite<ProducingOrderCardDto>> GetProducingOrdersAsync(int page, int pageSize, int? roleId, CancellationToken ct = default)
-           => _repo.GetProducingOrdersAsync(page, pageSize, roleId, ct);
+        public Task<PagedResultLite<ProducingOrderCardDto>> GetProducingOrdersAsync(
+            int page,
+            int pageSize,
+            int? roleId,
+            CancellationToken ct = default)
+            => _repo.GetProducingOrdersAsync(page, pageSize, roleId, ct);
 
         public async Task<ProductionProgressResponse> GetProgressAsync(int prodId)
         {
-            var progress = await _repo.GetProgressAsync(prodId);
-            return progress;
+            return await _repo.GetProgressAsync(prodId);
         }
 
-        public async Task<ProductionDetailDto?> GetProductionDetailByOrderIdAsync(int orderId, CancellationToken ct = default)
+        public async Task<ProductionDetailDto?> GetProductionDetailByOrderIdAsync(
+            int orderId,
+            CancellationToken ct = default)
         {
             return await _repo.GetProductionDetailByOrderIdAsync(orderId, ct);
         }
 
-        public async Task<ProductionWasteReportDto?> GetProductionWasteAsync(int prodId, CancellationToken ct = default)
+        public async Task<ProductionWasteReportDto?> GetProductionWasteAsync(
+            int prodId,
+            CancellationToken ct = default)
         {
             return await _repo.GetProductionWasteAsync(prodId, ct);
         }
 
+        // Đồng bộ flow mới: start production nhưng KHÔNG promote task đầu
         public async Task<bool> StartProductionByOrderIdAsync(int orderId, CancellationToken ct = default)
         {
             var ord = await _db.orders
@@ -82,7 +98,7 @@ namespace AMMS.Application.Services
                 throw new InvalidOperationException("General manager has not confirmed production readiness.");
 
             var now = AppTime.NowVnUnspecified();
-            var prodId = await _repo.StartProductionByOrderIdAndPromoteFirstTaskAsync(orderId, now, ct);
+            var prodId = await _repo.StartProductionByOrderIdOnlyAsync(orderId, now, ct);
             return prodId.HasValue;
         }
 
@@ -96,6 +112,8 @@ namespace AMMS.Application.Services
             return await _repo.SetCompletedByOrderIdAsync(orderId, ct);
         }
 
+        // Giữ tên method cũ để controller hiện tại không phải đổi
+        // nhưng bên trong vẫn dùng flow mới: KHÔNG promote first task
         public async Task<int?> StartProductionAndPromoteFirstTaskAsync(int orderId, CancellationToken ct = default)
         {
             var ord = await _db.orders
@@ -108,18 +126,23 @@ namespace AMMS.Application.Services
             if (!ord.is_production_ready)
                 throw new InvalidOperationException("General manager has not confirmed production readiness.");
 
-            return await _repo.StartProductionByOrderIdAndPromoteFirstTaskAsync(
+            return await _repo.StartProductionByOrderIdOnlyAsync(
                 orderId,
                 AppTime.NowVnUnspecified(),
                 ct);
         }
 
-        public async Task<List<MachineScheduleBoardDto>> GetMachineScheduleBoardAsync(DateTime from, DateTime to, CancellationToken ct = default)
+        public async Task<List<MachineScheduleBoardDto>> GetMachineScheduleBoardAsync(
+            DateTime from,
+            DateTime to,
+            CancellationToken ct = default)
         {
             return await _repo.GetMachineScheduleBoardAsync(from, to, ct);
         }
 
-        public async Task<ProductionReadyCheckResponse?> GetProductionReadyAsync(int orderId, CancellationToken ct = default)
+        public async Task<ProductionReadyCheckResponse?> GetProductionReadyAsync(
+            int orderId,
+            CancellationToken ct = default)
         {
             var ord = await _db.orders
                 .AsTracking()
@@ -146,7 +169,10 @@ namespace AMMS.Application.Services
             };
         }
 
-        public async Task<bool> SetProductionReadyAsync(int orderId, bool isProductionReady, CancellationToken ct = default)
+        public async Task<bool> SetProductionReadyAsync(
+            int orderId,
+            bool isProductionReady,
+            CancellationToken ct = default)
         {
             var ord = await _db.orders
                 .FirstOrDefaultAsync(x => x.order_id == orderId, ct);
@@ -160,23 +186,38 @@ namespace AMMS.Application.Services
                 var hasFreeMachine = await HasFreeMachineForFirstReleaseAsync(orderId, ct);
 
                 if (!hasEnoughMaterial || !hasFreeMachine)
-                    throw new InvalidOperationException("Order chưa đủ điều kiện sản xuất: thiếu nguyên vật liệu hoặc chưa có máy rảnh.");
+                    throw new InvalidOperationException(
+                        "Order chưa đủ điều kiện sản xuất: thiếu nguyên vật liệu hoặc chưa có máy rảnh.");
 
                 ord.is_enough = hasEnoughMaterial;
             }
 
             ord.is_production_ready = isProductionReady;
             await _db.SaveChangesAsync(ct);
-            await _rt.Clients.Group(RealtimeGroups.ByRole("production manager")).SendAsync("scheduled", new { message = $"Đơn hàng {orderId} đã được lên lịch sản xuất có thể bắt đầu sản xuất" });
-            var req = await _db.order_requests.FirstOrDefaultAsync(o => o.order_id == orderId);
+
+            await _rt.Clients
+                .Group(RealtimeGroups.ByRole("production manager"))
+                .SendAsync("scheduled", new
+                {
+                    message = $"Đơn hàng {orderId} đã được lên lịch sản xuất có thể bắt đầu sản xuất"
+                });
+
+            var req = await _db.order_requests.FirstOrDefaultAsync(o => o.order_id == orderId, ct);
             if (req != null)
             {
-                await _notiService.CreateNotfi(6, $"Đơn hàng {orderId} đã được lên lịch sản xuất có thể bắt đầu sản xuất", null, req.order_request_id);
+                await _notiService.CreateNotfi(
+                    6,
+                    $"Đơn hàng {orderId} đã được lên lịch sản xuất có thể bắt đầu sản xuất",
+                    null,
+                    req.order_request_id);
             }
+
             return true;
         }
 
-        private async Task<bool> HasFreeMachineForFirstReleaseAsync(int orderId, CancellationToken ct = default)
+        private async Task<bool> HasFreeMachineForFirstReleaseAsync(
+            int orderId,
+            CancellationToken ct = default)
         {
             var prod = await _db.productions
                 .AsNoTracking()
@@ -198,11 +239,12 @@ namespace AMMS.Application.Services
             if (tasks.Count == 0)
                 return false;
 
-            var hasInitialParallel = tasks.Any(x => ProductionFlowHelper.IsInitialParallel(x.process?.process_code));
+            var hasInitialParallel = tasks.Any(x =>
+                ProductionFlowHelper.IsInitialParallel(x.process?.process_code));
 
             var candidateMachineCodes = (hasInitialParallel
-                ? tasks.Where(x => ProductionFlowHelper.IsInitialParallel(x.process?.process_code))
-                : tasks.Take(1))
+                    ? tasks.Where(x => ProductionFlowHelper.IsInitialParallel(x.process?.process_code))
+                    : tasks.Take(1))
                 .Select(x => x.machine)
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Distinct()
@@ -216,7 +258,8 @@ namespace AMMS.Application.Services
                 .AnyAsync(m =>
                     m.is_active &&
                     candidateMachineCodes.Contains(m.machine_code) &&
-                    ((m.free_quantity ?? (m.quantity - (m.busy_quantity ?? 0))) > 0), ct);
+                    ((m.free_quantity ?? (m.quantity - (m.busy_quantity ?? 0))) > 0),
+                    ct);
         }
     }
 }

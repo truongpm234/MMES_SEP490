@@ -1,8 +1,6 @@
 ﻿using AMMS.Application.Interfaces;
-using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Productions;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
 
@@ -10,15 +8,21 @@ using System.Security.Claims;
 [Route("api/[controller]")]
 public class TasksController : ControllerBase
 {
-    private readonly ITaskRepository _taskRepo;
+    private readonly ITaskRepository _taskRepo; 
     private readonly ITaskQrTokenService _tokenSvc;
-    private readonly ITaskScanService _svc;
+    private readonly ITaskScanService _scanSvc;
+    private readonly ITaskService _taskService; 
 
-    public TasksController(ITaskRepository taskRepo, ITaskQrTokenService tokenSvc, ITaskScanService svc)
+    public TasksController(
+        ITaskRepository taskRepo,
+        ITaskQrTokenService tokenSvc,
+        ITaskScanService scanSvc,
+        ITaskService taskService)
     {
         _taskRepo = taskRepo;
         _tokenSvc = tokenSvc;
-        _svc = svc;
+        _scanSvc = scanSvc;
+        _taskService = taskService;
     }
 
     private int? GetCurrentUserId()
@@ -54,8 +58,7 @@ public class TasksController : ControllerBase
         if (isAuto)
         {
             qtyGood = policy.suggested_qty;
-            if (qtyGood <= 0)
-                qtyGood = 1;
+            if (qtyGood <= 0) qtyGood = 1;
         }
         else
         {
@@ -109,7 +112,7 @@ public class TasksController : ControllerBase
             return BadRequest("Invalid request or missing token.");
 
         var scannedByUserId = GetCurrentUserId();
-        var res = await _svc.ScanFinishAsync(req, scannedByUserId);
+        var res = await _scanSvc.ScanFinishAsync(req, scannedByUserId);
 
         return Ok(res);
     }
@@ -120,16 +123,27 @@ public class TasksController : ControllerBase
         if (req == null || req.task_id <= 0)
             return BadRequest(new { message = "task_id is required" });
 
-        var ok = await _taskRepo.SetTaskReadyAsync(req.task_id, ct);
-
-        if (!ok)
-            return NotFound(new { message = "Task not found", task_id = req.task_id });
-
-        return Ok(new
+        try
         {
-            message = "Task status updated to Ready",
-            task_id = req.task_id,
-            status = "Ready"
-        });
+            var ok = await _taskService.SetTaskReadyAsync(req.task_id, ct);
+
+            if (!ok)
+                return NotFound(new { message = "Task not found", task_id = req.task_id });
+
+            return Ok(new
+            {
+                message = "Task status updated to Ready",
+                task_id = req.task_id,
+                status = "Ready"
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new
+            {
+                message = ex.Message,
+                task_id = req.task_id
+            });
+        }
     }
 }

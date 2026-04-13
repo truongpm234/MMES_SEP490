@@ -9,9 +9,14 @@ namespace AMMS.Infrastructure.Repositories
 {
     public class TaskRepository : ITaskRepository
     {
+        private const int TokenQtyMax = 65535;
+
         private readonly AppDbContext _db;
 
-        public TaskRepository(AppDbContext db) => _db = db;
+        public TaskRepository(AppDbContext db)
+        {
+            _db = db;
+        }
 
         public Task AddRangeAsync(IEnumerable<task> tasks)
         {
@@ -19,7 +24,8 @@ namespace AMMS.Infrastructure.Repositories
             return Task.CompletedTask;
         }
 
-        public Task SaveChangesAsync() => _db.SaveChangesAsync();
+        public Task SaveChangesAsync()
+            => _db.SaveChangesAsync();
 
         public Task SaveChangesAsync(CancellationToken ct)
             => _db.SaveChangesAsync(ct);
@@ -27,23 +33,38 @@ namespace AMMS.Infrastructure.Repositories
         public Task<task?> GetByIdAsync(int taskId)
             => _db.tasks.FirstOrDefaultAsync(x => x.task_id == taskId);
 
+        public Task<task?> GetByIdWithProcessAsync(int taskId, CancellationToken ct = default)
+            => _db.tasks
+                .Include(x => x.process)
+                .FirstOrDefaultAsync(x => x.task_id == taskId, ct);
+
         public Task<task?> GetNextTaskAsync(int prodId, int currentSeqNum)
             => _db.tasks
                 .Where(x => x.prod_id == prodId && x.seq_num > currentSeqNum)
                 .OrderBy(x => x.seq_num)
+                .ThenBy(x => x.task_id)
                 .FirstOrDefaultAsync();
 
         public Task<task?> GetPrevTaskAsync(int prodId, int seqNum)
-        {
-            return _db.tasks
+            => _db.tasks
                 .Where(x => x.prod_id == prodId && x.seq_num < seqNum)
                 .OrderByDescending(x => x.seq_num)
+                .ThenByDescending(x => x.task_id)
                 .FirstOrDefaultAsync();
-        }
 
         public async Task<List<task>> GetTasksByProductionAsync(int prodId, CancellationToken ct = default)
         {
             return await _db.tasks
+                .Where(x => x.prod_id == prodId)
+                .OrderBy(x => x.seq_num)
+                .ThenBy(x => x.task_id)
+                .ToListAsync(ct);
+        }
+
+        public async Task<List<task>> GetTasksByProductionWithProcessAsync(int prodId, CancellationToken ct = default)
+        {
+            return await _db.tasks
+                .Include(x => x.process)
                 .Where(x => x.prod_id == prodId)
                 .OrderBy(x => x.seq_num)
                 .ThenBy(x => x.task_id)
@@ -78,6 +99,41 @@ namespace AMMS.Infrastructure.Repositories
                 .ToListAsync(ct);
         }
 
+        public async Task<bool> SetTaskReadyAsync(int taskId, CancellationToken ct = default)
+        {
+            var now = AppTime.NowVnUnspecified();
+
+            var t = await _db.tasks
+                .Include(x => x.process)
+                .FirstOrDefaultAsync(x => x.task_id == taskId, ct);
+
+            if (t == null)
+                return false;
+
+            t.status = "Ready";
+            t.start_time ??= now;
+
+            await TryAllocateMachineWhenReadyAsync(t, ct);
+            await _db.SaveChangesAsync(ct);
+            return true;
+        }
+
+        public async Task MarkTaskReadyAsync(int taskId, DateTime now, CancellationToken ct = default)
+        {
+            var t = await _db.tasks
+                .Include(x => x.process)
+                .FirstOrDefaultAsync(x => x.task_id == taskId, ct);
+
+            if (t == null)
+                throw new InvalidOperationException("Task not found");
+
+            t.status = "Ready";
+            t.start_time ??= now;
+
+            await TryAllocateMachineWhenReadyAsync(t, ct);
+            await _db.SaveChangesAsync(ct);
+        }
+
         public async Task<bool> PromoteInitialTasksAsync(int prodId, DateTime now, CancellationToken ct = default)
         {
             var tasks = await _db.tasks
@@ -99,7 +155,9 @@ namespace AMMS.Infrastructure.Repositories
 
             if (initialTasks.Count == 0)
             {
-                var first = tasks.FirstOrDefault(x => !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase));
+                var first = tasks.FirstOrDefault(x =>
+                    !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase));
+
                 if (first != null)
                     initialTasks.Add(first);
             }
@@ -118,10 +176,8 @@ namespace AMMS.Infrastructure.Repositories
             return promoted;
         }
 
-        public async Task<bool> PromoteFirstTaskToReadyAsync(int prodId, DateTime now, CancellationToken ct = default)
-        {
-            return await PromoteInitialTasksAsync(prodId, now, ct);
-        }
+        public Task<bool> PromoteFirstTaskToReadyAsync(int prodId, DateTime now, CancellationToken ct = default)
+            => PromoteInitialTasksAsync(prodId, now, ct);
 
         public async Task<bool> PromoteAllTasksAfterRaloAsync(int prodId, DateTime now, CancellationToken ct = default)
         {
@@ -167,45 +223,24 @@ namespace AMMS.Infrastructure.Repositories
             if (current == null || !current.prod_id.HasValue)
                 return false;
 
-            var prodTasks = await _db.tasks
+            var tasks = await _db.tasks
                 .Include(x => x.process)
                 .Where(x => x.prod_id == current.prod_id.Value)
                 .OrderBy(x => x.seq_num)
                 .ThenBy(x => x.task_id)
                 .ToListAsync(ct);
 
-            if (prodTasks.Count == 0)
+            if (tasks.Count == 0)
                 return false;
-
-            var hasOtherReady = prodTasks.Any(x =>
-                x.task_id != currentTaskId &&
-                string.Equals(x.status, "Ready", StringComparison.OrdinalIgnoreCase));
-
-            if (hasOtherReady)
-                return false;
-
-            var hasInitialParallel = prodTasks.Any(x =>
-                ProductionFlowHelper.IsInitialParallel(x.process?.process_code));
-
-            if (hasInitialParallel)
-            {
-                var unfinishedInitialParallel = prodTasks.Any(x =>
-                    ProductionFlowHelper.IsInitialParallel(x.process?.process_code) &&
-                    !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase));
-
-                if (unfinishedInitialParallel)
-                    return false;
-            }
 
             var currentSeq = current.seq_num ?? int.MinValue;
 
-            var next = prodTasks
+            var next = tasks
                 .Where(x =>
-                    x.task_id != currentTaskId &&
+                    x.task_id != current.task_id &&
                     !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase) &&
-                    x.end_time == null &&
                     (x.seq_num ?? int.MaxValue) > currentSeq)
-                .OrderBy(x => x.seq_num ?? int.MaxValue)
+                .OrderBy(x => x.seq_num)
                 .ThenBy(x => x.task_id)
                 .FirstOrDefault();
 
@@ -214,7 +249,7 @@ namespace AMMS.Infrastructure.Repositories
 
             var nextSeq = next.seq_num ?? int.MaxValue;
 
-            var hasPreviousUnfinished = prodTasks.Any(x =>
+            var hasPreviousUnfinished = tasks.Any(x =>
                 x.task_id != next.task_id &&
                 (x.seq_num ?? int.MaxValue) < nextSeq &&
                 !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase));
@@ -222,29 +257,22 @@ namespace AMMS.Infrastructure.Repositories
             if (hasPreviousUnfinished)
                 return false;
 
+            if (string.Equals(next.status, "Ready", StringComparison.OrdinalIgnoreCase))
+                return false;
+
             next.status = "Ready";
             next.start_time ??= now;
 
             await TryAllocateMachineWhenReadyAsync(next, ct);
-
             return true;
         }
 
         public async Task<TaskQtyPolicyDto?> GetQtyPolicyAsync(int taskId, CancellationToken ct = default)
         {
-            const int TokenQtyMax = 0xFFFF;
-
             var taskRow = await _db.tasks
                 .AsNoTracking()
-                .Where(x => x.task_id == taskId)
-                .Select(x => new
-                {
-                    x.task_id,
-                    x.prod_id,
-                    x.process_id,
-                    x.seq_num
-                })
-                .FirstOrDefaultAsync(ct);
+                .Include(x => x.process)
+                .FirstOrDefaultAsync(x => x.task_id == taskId, ct);
 
             if (taskRow == null || !taskRow.prod_id.HasValue)
                 return null;
@@ -253,115 +281,47 @@ namespace AMMS.Infrastructure.Repositories
                 .AsNoTracking()
                 .FirstOrDefaultAsync(x => x.prod_id == taskRow.prod_id.Value, ct);
 
-            if (prod == null)
-                return null;
-
-            order? ord = null;
-            if (prod.order_id.HasValue)
-            {
-                ord = await _db.orders
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(x => x.order_id == prod.order_id.Value, ct);
-            }
-
             order_request? req = null;
+            cost_estimate? est = null;
 
-            if (ord?.quote_id is int quoteId && quoteId > 0)
+            if (prod?.order_id.HasValue == true)
             {
-                req = await (
-                    from q in _db.quotes.AsNoTracking()
-                    join r in _db.order_requests.AsNoTracking()
-                        on q.order_request_id equals r.order_request_id
-                    where q.quote_id == quoteId
-                    select r
-                ).FirstOrDefaultAsync(ct);
-            }
-
-            req ??= prod.order_id.HasValue
-                ? await _db.order_requests
+                req = await _db.order_requests
                     .AsNoTracking()
                     .Where(x => x.order_id == prod.order_id.Value)
                     .OrderByDescending(x => x.order_request_id)
-                    .FirstOrDefaultAsync(ct)
-                : null;
-
-            var currentStep = taskRow.process_id.HasValue
-                ? await _db.product_type_processes
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(x => x.process_id == taskRow.process_id.Value, ct)
-                : null;
-
-            int? productTypeId = prod.product_type_id ?? currentStep?.product_type_id;
-
-            if (!productTypeId.HasValue && !string.IsNullOrWhiteSpace(req?.product_type))
-            {
-                productTypeId = await _db.product_types
-                    .AsNoTracking()
-                    .Where(x => x.code == req!.product_type)
-                    .Select(x => (int?)x.product_type_id)
                     .FirstOrDefaultAsync(ct);
-            }
 
-            if (!productTypeId.HasValue)
-                return null;
-
-            cost_estimate? est = null;
-            if (req != null)
-            {
-                var estQuery = _db.cost_estimates
-                    .AsNoTracking()
-                    .Where(x => x.order_request_id == req.order_request_id);
-
-                if (req.accepted_estimate_id.HasValue && req.accepted_estimate_id.Value > 0)
+                if (req != null)
                 {
-                    est = await estQuery
-                        .FirstOrDefaultAsync(x => x.estimate_id == req.accepted_estimate_id.Value, ct);
+                    est = await _db.cost_estimates
+                        .AsNoTracking()
+                        .Where(x => x.order_request_id == req.order_request_id)
+                        .OrderByDescending(x => x.estimate_id)
+                        .FirstOrDefaultAsync(ct);
                 }
-
-                est ??= await estQuery
-                    .OrderByDescending(x => x.is_active)
-                    .ThenByDescending(x => x.estimate_id)
-                    .FirstOrDefaultAsync(ct);
             }
 
-            var itemProcessCsv = prod.order_id.HasValue
-                ? await _db.order_items
-                    .AsNoTracking()
-                    .Where(x => x.order_id == prod.order_id.Value)
-                    .OrderBy(x => x.item_id)
-                    .Select(x => x.production_process)
-                    .FirstOrDefaultAsync(ct)
-                : null;
-
-            var allSteps = await _db.product_type_processes
+            var route = await _db.tasks
                 .AsNoTracking()
-                .Where(x => x.product_type_id == productTypeId.Value && (x.is_active ?? true))
+                .Include(x => x.process)
+                .Where(x => x.prod_id == taskRow.prod_id.Value)
                 .OrderBy(x => x.seq_num)
+                .ThenBy(x => x.task_id)
                 .ToListAsync(ct);
 
-            if (allSteps.Count == 0)
+            if (route.Count == 0)
                 return null;
 
-            var route = ResolveFixedRoute(
-                allSteps,
-                x => x.process_code,
-                !string.IsNullOrWhiteSpace(itemProcessCsv) ? itemProcessCsv : est?.production_processes);
-
-            if (route.Count == 0)
-                route = allSteps;
-
-            var currentIndex = route.FindIndex(x =>
-                (taskRow.process_id.HasValue && x.process_id == taskRow.process_id.Value) ||
-                (taskRow.seq_num.HasValue && x.seq_num == taskRow.seq_num.Value));
-
+            var currentIndex = route.FindIndex(x => x.task_id == taskId);
             if (currentIndex < 0)
                 currentIndex = 0;
 
             var stage = route[currentIndex];
-            var pcode = Norm(stage.process_code);
-            var pname = string.IsNullOrWhiteSpace(stage.process_name)
+            var pcode = Norm(stage.process?.process_code);
+            var pname = string.IsNullOrWhiteSpace(stage.process?.process_name)
                 ? pcode
-                : stage.process_name!;
+                : stage.process!.process_name!;
 
             var orderQty = SafePositive(req?.quantity ?? 0, 1);
 
@@ -384,7 +344,7 @@ namespace AMMS.Infrastructure.Repositories
                 sheetsTotal = 1;
 
             var routeCodes = route
-                .Select(x => (string?)x.process_code)
+                .Select(x => (string?)x.process?.process_code)
                 .ToList();
 
             var qtyProfile = StageQuantityHelper.BuildPolicy(
@@ -469,65 +429,12 @@ namespace AMMS.Infrastructure.Repositories
         }
 
         private static string Norm(string? code)
-    => (code ?? "").Trim().ToUpperInvariant();
+            => (code ?? "").Trim().ToUpperInvariant();
 
         private static bool IsRalo(string? code)
             => Norm(code) is "RALO" or "RA_LO";
 
         private static int SafePositive(int value, int fallback = 1)
             => value > 0 ? value : fallback;
-
-        private static int SafeMul(int a, int b)
-        {
-            try
-            {
-                return checked(a * b);
-            }
-            catch
-            {
-                return int.MaxValue;
-            }
-        }
-
-        private static HashSet<string> ParseSelectedProcessCodes(string? csv)
-        {
-            if (string.IsNullOrWhiteSpace(csv))
-                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            return csv.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                .Select(x => Norm(x))
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        }
-
-        private static List<T> ResolveFixedRoute<T>(
-            List<T> allSteps,
-            Func<T, string?> processCodeSelector,
-            string? selectedProcessesCsv)
-        {
-            if (allSteps == null || allSteps.Count == 0)
-                return new List<T>();
-
-            var selected = ParseSelectedProcessCodes(selectedProcessesCsv);
-            if (selected.Count == 0)
-                return allSteps;
-
-            var filtered = allSteps
-                .Where(x => selected.Contains(Norm(processCodeSelector(x))))
-                .ToList();
-
-            return filtered.Count > 0 ? filtered : allSteps;
-        }
-
-        public async Task<bool> SetTaskReadyAsync(int taskId, CancellationToken ct = default)
-        {
-            var t = await _db.tasks.FirstOrDefaultAsync(x => x.task_id == taskId, ct);
-            if (t == null)
-                return false;
-
-            t.status = "Ready";
-            await _db.SaveChangesAsync(ct);
-            return true;
-        }
     }
 }

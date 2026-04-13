@@ -109,13 +109,6 @@ namespace AMMS.Application.Services
                     if (hasTask)
                     {
                         await tx.CommitAsync();
-
-                        try { await DispatchDueTasksAsync(); }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "DispatchDueTasksAsync failed after existing-task detection. OrderId={OrderId}, ProdId={ProdId}", orderId, prod.prod_id);
-                        }
-
                         return prod.prod_id;
                     }
 
@@ -153,13 +146,6 @@ namespace AMMS.Application.Services
                         orderId, prod.prod_id, tasks.Count, plan.NormalizedProcessCsv);
 
                     await tx.CommitAsync();
-
-                    try { await DispatchDueTasksAsync(); }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "DispatchDueTasksAsync failed after schedule commit. OrderId={OrderId}, ProdId={ProdId}", orderId, prod.prod_id);
-                    }
-
                     return prod.prod_id;
                 }
                 catch (Exception ex)
@@ -215,135 +201,8 @@ namespace AMMS.Application.Services
 
         public async Task<int> DispatchDueTasksAsync(CancellationToken ct = default)
         {
-            var strategy = _db.Database.CreateExecutionStrategy();
-
-            return await strategy.ExecuteAsync(async () =>
-            {
-                await using var tx = await _db.Database.BeginTransactionAsync(ct);
-
-                var now = AppTime.NowVnUnspecified();
-
-                var dueTasks = await (
-                    from t in _db.tasks.AsTracking()
-                    join p in _db.productions.AsTracking() on t.prod_id equals p.prod_id
-                    join o in _db.orders.AsTracking() on p.order_id equals o.order_id into oj
-                    from o in oj.DefaultIfEmpty()
-                    where (t.status == null || t.status == "Unassigned")
-                          && t.planned_start_time != null
-                          && t.planned_start_time <= now
-                          && (o == null || o.is_enough != false)
-                    orderby
-                        (o != null ? o.order_date : DateTime.MaxValue),
-                        (o != null ? o.order_id : int.MaxValue),
-                        p.planned_start_date,
-                        t.planned_start_time,
-                        t.seq_num,
-                        t.task_id
-                    select t
-                ).ToListAsync(ct);
-
-                if (dueTasks.Count == 0)
-                {
-                    await tx.CommitAsync(ct);
-                    return 0;
-                }
-
-                var prodIds = dueTasks
-                    .Where(x => x.prod_id != null)
-                    .Select(x => x.prod_id!.Value)
-                    .Distinct()
-                    .ToList();
-
-                var allProdTasks = await _db.tasks
-                    .Include(x => x.process)
-                    .AsTracking()
-                    .Where(t => t.prod_id != null && prodIds.Contains(t.prod_id.Value))
-                    .OrderBy(t => t.seq_num)
-                    .ThenBy(t => t.task_id)
-                    .ToListAsync(ct);
-
-                var promoted = 0;
-
-                foreach (var due in dueTasks)
-                {
-                    if (!due.prod_id.HasValue)
-                        continue;
-
-                    var prodTasks = allProdTasks
-                        .Where(x => x.prod_id == due.prod_id.Value)
-                        .OrderBy(x => x.seq_num)
-                        .ThenBy(x => x.task_id)
-                        .ToList();
-
-                    if (prodTasks.Count == 0)
-                        continue;
-
-                    var currentTask = prodTasks.FirstOrDefault(x => x.task_id == due.task_id);
-                    if (currentTask == null)
-                        continue;
-
-                    var hasInitialParallel = prodTasks.Any(x =>
-                        ProductionFlowHelper.IsInitialParallel(x.process?.process_code));
-
-                    bool canRelease;
-
-                    if (hasInitialParallel)
-                    {
-                        canRelease = ProductionFlowHelper.IsInitialParallel(currentTask.process?.process_code);
-                    }
-                    else
-                    {
-                        var firstUnfinished = prodTasks.FirstOrDefault(x =>
-                            !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase));
-
-                        canRelease = firstUnfinished != null && firstUnfinished.task_id == currentTask.task_id;
-                    }
-
-                    if (!canRelease)
-                        continue;
-
-                    if (string.Equals(currentTask.status, "Ready", StringComparison.OrdinalIgnoreCase))
-                        continue;
-
-                    if (string.IsNullOrWhiteSpace(currentTask.machine))
-                    {
-                        var pcode = ProductionProcessSelectionHelper.Norm(currentTask.process?.process_code);
-                        if (!string.IsNullOrWhiteSpace(pcode))
-                        {
-                            var best = await _machineRepo.FindBestMachineByProcessCodeAsync(pcode, ct);
-                            if (best != null)
-                                currentTask.machine = best.machine_code;
-                        }
-                    }
-
-                    if (string.IsNullOrWhiteSpace(currentTask.machine))
-                        continue;
-
-                    var machine = await _db.machines
-                        .FirstOrDefaultAsync(x => x.machine_code == currentTask.machine && x.is_active, ct);
-
-                    if (machine == null)
-                        continue;
-
-                    machine.busy_quantity ??= 0;
-                    machine.free_quantity ??= (machine.quantity - machine.busy_quantity.Value);
-
-                    if (machine.free_quantity > 0)
-                    {
-                        machine.free_quantity -= 1;
-                        machine.busy_quantity += 1;
-                    }
-
-                    currentTask.status = "Ready";
-                    currentTask.start_time ??= now;
-                    promoted++;
-                }
-
-                await _db.SaveChangesAsync(ct);
-                await tx.CommitAsync(ct);
-
-                return promoted;
-            });
+            await Task.CompletedTask;
+            return 0;
         }
 
         private async Task<production> GetOrCreateProductionAsync(int orderId, int productTypeId, int? managerId, DateTime now)

@@ -713,39 +713,7 @@ namespace AMMS.Infrastructure.Repositories
             };
         }
 
-        public async Task<bool> TryCloseProductionIfCompletedAsync(int prodId, DateTime now, CancellationToken ct = default)
-        {
-            var prod = await _db.productions.FirstOrDefaultAsync(p => p.prod_id == prodId, ct);
-            if (prod == null) return false;
-
-            var tasks = await _db.tasks
-                .Where(t => t.prod_id == prodId)
-                .Select(t => new { t.status, t.end_time, t.seq_num })
-                .ToListAsync(ct);
-
-            if (tasks.Count == 0) return false;
-
-            bool allFinished = tasks.All(t =>
-                string.Equals(t.status, "Finished", StringComparison.OrdinalIgnoreCase)
-                || t.end_time != null);
-
-            if (!allFinished) return false;
-
-            var finishedAt = tasks.Where(t => t.end_time != null)
-                .Select(t => t.end_time!.Value)
-                .DefaultIfEmpty(now)
-                .Max();
-
-            prod.end_date = finishedAt;
-            prod.status = "Importing";
-            if (prod.actual_start_date == null)
-                prod.actual_start_date = finishedAt;
-
-            await _db.SaveChangesAsync(ct);
-            return true;
-        }
-
-        public async Task<int?> StartProductionByOrderIdAndPromoteFirstTaskAsync(int orderId, DateTime now, CancellationToken ct = default)
+        public async Task<int?> StartProductionByOrderIdOnlyAsync(int orderId, DateTime now, CancellationToken ct = default)
         {
             var strategy = _db.Database.CreateExecutionStrategy();
 
@@ -784,19 +752,48 @@ namespace AMMS.Infrastructure.Repositories
                 }
 
                 await _db.SaveChangesAsync(ct);
-
-                await _taskRepo.PromoteInitialTasksAsync(prod.prod_id, now, ct);
-                await _taskRepo.SaveChangesAsync(ct);
-
                 await tx.CommitAsync(ct);
+
                 return prod.prod_id;
             });
         }
 
         public async Task<bool> StartProductionByOrderIdAsync(int orderId, DateTime now, CancellationToken ct = default)
         {
-            var prodId = await StartProductionByOrderIdAndPromoteFirstTaskAsync(orderId, now, ct);
+            var prodId = await StartProductionByOrderIdOnlyAsync(orderId, now, ct);
             return prodId.HasValue;
+        }
+
+        public async Task<bool> TryCloseProductionIfCompletedAsync(int prodId, DateTime now, CancellationToken ct = default)
+        {
+            var prod = await _db.productions.FirstOrDefaultAsync(p => p.prod_id == prodId, ct);
+            if (prod == null) return false;
+
+            var tasks = await _db.tasks
+                .Where(t => t.prod_id == prodId)
+                .Select(t => new { t.status, t.end_time, t.seq_num })
+                .ToListAsync(ct);
+
+            if (tasks.Count == 0) return false;
+
+            bool allFinished = tasks.All(t =>
+                string.Equals(t.status, "Finished", StringComparison.OrdinalIgnoreCase)
+                || t.end_time != null);
+
+            if (!allFinished) return false;
+
+            var finishedAt = tasks.Where(t => t.end_time != null)
+                .Select(t => t.end_time!.Value)
+                .DefaultIfEmpty(now)
+                .Max();
+
+            prod.end_date = finishedAt;
+            prod.status = "Importing";
+            if (prod.actual_start_date == null)
+                prod.actual_start_date = finishedAt;
+
+            await _db.SaveChangesAsync(ct);
+            return true;
         }
 
         public async Task<bool> SetProductionDeliveryByOrderIdAsync(int orderId, CancellationToken ct = default)

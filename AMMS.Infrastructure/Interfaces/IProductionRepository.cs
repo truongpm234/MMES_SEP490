@@ -23,9 +23,10 @@ namespace AMMS.Infrastructure.Interfaces
         Task<bool> StartProductionByOrderIdAsync(int orderId, DateTime now, CancellationToken ct = default);
         Task<bool> SetProductionDeliveryByOrderIdAsync(int orderId, CancellationToken ct = default);
         Task SaveChangesAsync(CancellationToken ct = default);
-        Task<int?> StartProductionByOrderIdAndPromoteFirstTaskAsync(int orderId, DateTime now, CancellationToken ct = default);
         Task<List<MachineScheduleBoardDto>> GetMachineScheduleBoardAsync(DateTime from, DateTime to, CancellationToken ct = default);
         Task<bool> SetCompletedByOrderIdAsync(int orderId, CancellationToken ct = default);
         Task<production?> GetLatestByOrderIdAsync(int orderId, CancellationToken ct = default);
+        Task<int?> StartProductionByOrderIdOnlyAsync(int orderId, DateTime now, CancellationToken ct = default);
+
     }
 }

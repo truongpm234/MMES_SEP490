@@ -188,7 +188,8 @@ namespace AMMS.API.Controllers
                 {
                     message = "Production started successfully",
                     prod_id = prodId.Value,
-                    first_task_status = "Ready"
+                    first_task_status = "Unassigned",
+                    start_mode = "ManualReadyByStaff"
                 });
             }
             catch (BomValidationException ex)

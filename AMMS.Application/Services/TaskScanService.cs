@@ -19,7 +19,6 @@ namespace AMMS.Application.Services
         private readonly ITaskLogRepository _logRepo;
         private readonly IProductionRepository _prodRepo;
         private readonly IMachineRepository _machineRepo;
-        private readonly IProductionSchedulingService _scheduling;
         private readonly IHubContext<RealtimeHub> _hub;
         private readonly IRequestRepository _orderRequestRepo;
         private readonly IOrderRepository _orderRepo;
@@ -33,7 +32,6 @@ namespace AMMS.Application.Services
             ITaskLogRepository logRepo,
             IProductionRepository productionRepo,
             IMachineRepository machineRepo,
-            IProductionSchedulingService scheduling,
             IHubContext<RealtimeHub> hub,
             IRequestRepository orderRequestRepo,
             IOrderRepository orderRepo)
@@ -44,7 +42,6 @@ namespace AMMS.Application.Services
             _logRepo = logRepo;
             _prodRepo = productionRepo;
             _machineRepo = machineRepo;
-            _scheduling = scheduling;
             _hub = hub;
             _orderRequestRepo = orderRequestRepo;
             _orderRepo = orderRepo;
@@ -75,14 +72,14 @@ namespace AMMS.Application.Services
                 if (!t.prod_id.HasValue || !t.seq_num.HasValue)
                     throw new Exception("Task missing prod_id/seq_num");
 
-                var flowTasks = await _taskRepo.GetTasksWithCodesByProductionAsync(t.prod_id.Value, innerCt);
+                var flowTasks = await _taskRepo.GetTasksByProductionWithProcessAsync(t.prod_id.Value, innerCt);
                 var currentFlow = flowTasks.FirstOrDefault(x => x.task_id == t.task_id)
                     ?? throw new Exception("Task flow info not found");
 
-                var currentCode = ProductionFlowHelper.Norm(currentFlow.process_code);
-                var hasRalo = flowTasks.Any(x => ProductionFlowHelper.IsRalo(x.process_code));
+                var currentCode = ProductionFlowHelper.Norm(currentFlow.process?.process_code);
+                var hasRalo = flowTasks.Any(x => ProductionFlowHelper.IsRalo(x.process?.process_code));
                 var raloFinished = !hasRalo || flowTasks.Any(x =>
-                    ProductionFlowHelper.IsRalo(x.process_code) &&
+                    ProductionFlowHelper.IsRalo(x.process?.process_code) &&
                     string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase));
 
                 if (!hasRalo)
@@ -122,28 +119,8 @@ namespace AMMS.Application.Services
                 await _logRepo.AddAsync(log);
                 await _taskRepo.SaveChangesAsync(innerCt);
 
-                bool promotedNext = await _taskRepo.PromoteNextTaskToReadyAsync(t.task_id, now, innerCt);
-                task? nextTask = null;
-
-                if (promotedNext)
-                {
-                    nextTask = await _db.tasks
-                        .Include(x => x.process)
-                        .Where(x => x.prod_id == t.prod_id
-                            && x.status == "Ready"
-                            && x.task_id != t.task_id)
-                        .OrderBy(x => x.seq_num)
-                        .ThenBy(x => x.task_id)
-                        .FirstOrDefaultAsync(innerCt);
-
-                    if (nextTask != null)
-                    {
-                        await _hub.Clients.Group(RealtimeGroups.ByRole(nextTask.name))
-                            .SendAsync("nextTask", new { message = $"Công đoạn {nextTask.name} được bắt đầu" });
-                    }
-                }
-
-                await _taskRepo.SaveChangesAsync(innerCt);
+                // KHÔNG auto promote task kế tiếp nữa
+                // task kế tiếp sẽ do staff bấm PUT /api/Tasks/ready
 
                 if (t.prod_id.HasValue)
                     await _prodRepo.TryCloseProductionIfCompletedAsync(t.prod_id.Value, now, innerCt);
@@ -172,10 +149,12 @@ namespace AMMS.Application.Services
                             ord.order_id,
                             ord.quote_id,
                             innerCt);
-                        await _orderRequestRepo.MarkProcessStatusImportingByOrderAsync(ord.order_id, null, ct);
-                    }
 
-                    //await _taskRepo.SaveChangesAsync(innerCt);
+                        await _orderRequestRepo.MarkProcessStatusImportingByOrderAsync(
+                            ord.order_id,
+                            null,
+                            innerCt);
+                    }
                 }
 
                 await _hub.Clients
@@ -183,23 +162,14 @@ namespace AMMS.Application.Services
                     .SendAsync("finishedTask", new { message = $"Hoàn thành công đoạn" });
 
                 await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
+
                 return new ScanTaskResult
                 {
                     task_id = t.task_id,
                     prod_id = t.prod_id,
-                    message = promotedNext
-                        ? $"Finished & logged qty_good={qtyGood}. Flow released."
-                        : $"Finished & logged qty_good={qtyGood}."
+                    message = $"Finished & logged qty_good={qtyGood}. Task kế tiếp chờ staff tự bấm Ready."
                 };
             }, ct);
-
-            try
-            {
-                await _scheduling.DispatchDueTasksAsync();
-            }
-            catch
-            {
-            }
 
             if (result.prod_id.HasValue)
             {
