@@ -128,11 +128,15 @@ public class TasksController : ControllerBase
         if (req == null || req.task_id <= 0)
             return BadRequest(new { message = "task_id is required" });
         var prevTask = await _db.tasks.FirstOrDefaultAsync(t => t.task_id == (req.task_id - 1));
-        if (prevTask != null)
+        var currentTask = await _db.tasks.FirstOrDefaultAsync(t => t.task_id == req.task_id);
+        if (prevTask != null && currentTask != null)
         {
-            if (prevTask.status != "Finished")
+            if (prevTask.prod_id == currentTask.prod_id)
             {
-                return BadRequest("Không thể bắt đầu, công đoạn trước chưa được hoàn thành");
+                if (prevTask.status != "Finished")
+                {
+                    return BadRequest("Không thể bắt đầu, công đoạn trước chưa được hoàn thành");
+                }
             }
         }
         try
