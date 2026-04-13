@@ -25,7 +25,7 @@ namespace AMMS.Application.Services
         private readonly IEmailService _emailService;
         private readonly IQuoteRepository _quoteRepo;
         private readonly IPayOsService _payOs;
-        private readonly IPaymentsService _payment;
+        private readonly IPaymentRepository _paymentRepo;
         private readonly IRealtimePublisher _rt;
         private readonly ILogger<DealService> _logger;
         private readonly IEmailBackgroundQueue _emailQueue;
@@ -46,14 +46,14 @@ namespace AMMS.Application.Services
     IEmailService emailService,
     IQuoteRepository quoteRepo,
     IPayOsService payOs,
-    IPaymentsService payment,
+    IPaymentRepository paymentRepo,
     IRealtimePublisher rt,
     ILogger<DealService> logger,
     IEmailBackgroundQueue emailQueue,
     IUserRepository userRepo,
     IOrderRepository orderRepository,
     IProductionRepository productionRepository,
-    IBaseConfigRepository baseConfigRepo)  
+    IBaseConfigRepository baseConfigRepo)
         {
             _db = db;
             _notificationService = notificationService;
@@ -63,7 +63,6 @@ namespace AMMS.Application.Services
             _emailService = emailService;
             _quoteRepo = quoteRepo;
             _payOs = payOs;
-            _payment = payment;
             _rt = rt;
             _logger = logger;
             _emailQueue = emailQueue;
@@ -71,7 +70,8 @@ namespace AMMS.Application.Services
             _orderRepo = orderRepository;
             _prodRepo = productionRepository;
             _hub = hub;
-            _baseConfigRepo = baseConfigRepo;     
+            _baseConfigRepo = baseConfigRepo;
+            
         }
 
         public async Task SendDealAndEmailAsync(int orderRequestId, int? estimateId = null)
@@ -229,16 +229,9 @@ namespace AMMS.Application.Services
                 quoteId: resolvedQuoteId,
                 ct: CancellationToken.None);
 
-            await _hub.Clients.Group(RealtimeGroups.ByRole("consultant"))
-                .SendAsync("deposited", new { message = $"Yêu cầu {req.order_request_id} - {req.order_id} đã được đặt cọc" });
-
-            await _hub.Clients.Group(RealtimeGroups.ByRole("production manager"))
-                .SendAsync("scheduled", new { message = $"#{req.order_id} đã được lên lịch sản xuất", id = req.order_id });
-
-            await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
-
             return dto.check_out_url ?? "";
         }
+
         private async Task<int?> ResolveQuoteIdForEstimateAsync(
     int orderRequestId,
     int estimateId,
@@ -575,7 +568,7 @@ namespace AMMS.Application.Services
 
             var paymentTerms = await _baseConfigRepo.GetPaymentTermsAsync(ct);
 
-            var pending = await _payment.GetLatestPendingByRequestIdAndEstimateIdAsync(requestId, estimateId, ct);
+            var pending = await _paymentRepo.GetLatestPendingByRequestIdAndEstimateIdAsync(requestId, estimateId, ct);
             if (pending != null)
             {
                 PayOsResultDto? liveInfo = null;
@@ -645,7 +638,7 @@ namespace AMMS.Application.Services
                         ct: ct);
 
                     var now = AppTime.NowVnUnspecified();
-                    await _payment.UpsertPendingAsync(new payment
+                    await _paymentRepo.UpsertPendingAsync(new payment
                     {
                         order_request_id = requestId,
                         provider = "PAYOS",
@@ -663,7 +656,7 @@ namespace AMMS.Application.Services
                         quote_id = (quoteId.HasValue && quoteId.Value > 0) ? quoteId.Value : null
                     }, ct);
 
-                    await _payment.SaveChangesAsync(ct);
+                    await _paymentRepo.SaveChangesAsync(ct);
                     return payos;
                 }
                 catch (PayOsException ex) when (IsDuplicateOrderCode(ex.Message))
@@ -763,13 +756,13 @@ namespace AMMS.Application.Services
             if (actualRemainingAmount <= 0)
                 throw new InvalidOperationException("Remaining amount is already 0.");
 
-            var paid = await _payment.GetLatestByRequestIdAndTypeAsync(req.order_request_id, PaymentTypes.Remaining, ct);
+            var paid = await _paymentRepo.GetLatestByRequestIdAndTypeAsync(req.order_request_id, PaymentTypes.Remaining, ct);
             if (paid != null && IsPaidStatus(paid.status))
             {
                 return MergePayOsResult(null, PayOsRawMapper.FromPayment(paid), paid);
             }
 
-            var pending = await _payment.GetLatestPendingByRequestIdAndTypeAsync(req.order_request_id, PaymentTypes.Remaining, ct);
+            var pending = await _paymentRepo.GetLatestPendingByRequestIdAndTypeAsync(req.order_request_id, PaymentTypes.Remaining, ct);
             if (pending != null)
             {
                 PayOsResultDto? liveInfo = null;
@@ -826,7 +819,7 @@ namespace AMMS.Application.Services
 
             var now = AppTime.NowVnUnspecified();
 
-            await _payment.UpsertPendingAsync(new payment
+            await _paymentRepo.UpsertPendingAsync(new payment
             {
                 order_request_id = req.order_request_id,
                 provider = "PAYOS",
@@ -844,7 +837,7 @@ namespace AMMS.Application.Services
                 quote_id = req.quote_id
             }, ct);
 
-            await _payment.SaveChangesAsync(ct);
+            await _paymentRepo.SaveChangesAsync(ct);
             return payos;
         }
 

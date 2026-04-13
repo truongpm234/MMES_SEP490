@@ -14,5 +14,15 @@ namespace AMMS.Application.Interfaces
         Task<payment?> GetLatestByRequestIdAndEstimateIdAsync(int requestId, int estimateId, CancellationToken ct = default);
         Task<payment?> GetLatestPendingByRequestIdAndTypeAsync(int requestId, string paymentType, CancellationToken ct = default);
         Task<payment?> GetLatestByRequestIdAndTypeAsync(int requestId, string paymentType, CancellationToken ct = default);
+        Task<(bool ok, string message)> ProcessPaidAsync(
+            int orderRequestId,
+            long orderCode,
+            long amount,
+            string? paymentLinkId,
+            string? transactionId,
+            string rawJson,
+            int? estimateIdFromQuery,
+            int? quoteIdFromQuery,
+            CancellationToken ct = default);
     }
 }

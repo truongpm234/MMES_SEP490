@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -36,16 +37,22 @@ namespace AMMS.API.Controllers
         private readonly ILogger<RequestsController> _logger;
         private readonly IHubContext<RealtimeHub> _rt;
         private readonly NotificationService _notiService;
+        private readonly IServiceScopeFactory _scopeFactory;
+        private static readonly ConcurrentDictionary<long, byte> _payosProcessingLocks = new();
+
         public RequestsController(
-            NotificationService notiService,
-            IHubContext<RealtimeHub> rt,
-            IRequestService service,
-            IDealService dealService,
-            IPaymentsService paymentService,
-            AppDbContext db,
-            IProductionSchedulingService schedulingService,
-            ISmsOtpService smsOtp,
-            IConfiguration config, IPayOsService payos, ILogger<RequestsController> logger)
+    NotificationService notiService,
+    IHubContext<RealtimeHub> rt,
+    IRequestService service,
+    IDealService dealService,
+    IPaymentsService paymentService,
+    AppDbContext db,
+    IProductionSchedulingService schedulingService,
+    ISmsOtpService smsOtp,
+    IConfiguration config,
+    IPayOsService payos,
+    ILogger<RequestsController> logger,
+    IServiceScopeFactory scopeFactory)
         {
             _notiService = notiService;
             _rt = rt;
@@ -58,7 +65,9 @@ namespace AMMS.API.Controllers
             _config = config;
             _payos = payos;
             _logger = logger;
+            _scopeFactory = scopeFactory;
         }
+
         [HttpPost("create-request-by-consultant")]
         [ProducesResponseType(typeof(CreateRequestResponse), StatusCodes.Status201Created)]
         public async Task<IActionResult> CreateOrderRequest([FromBody] CreateResquestConsultant dto)
@@ -291,10 +300,23 @@ namespace AMMS.API.Controllers
                 });
             }
 
-            var localStatus = NormalizePaymentStatus(latest.status);
-            var processed = IsPaidLikeStatus(localStatus);
+            var req = await _db.order_requests
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.order_request_id == request_id, ct);
 
-            if (processed)
+            var resolvedEstimateId = latest.estimate_id ?? estimate_id;
+            var resolvedQuoteId = latest.quote_id ?? quote_id;
+            var localStatus = NormalizePaymentStatus(latest.status);
+
+            var finalized =
+                req != null &&
+                (
+                    string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(req.process_status, "Paid", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(req.process_status, "Completed", StringComparison.OrdinalIgnoreCase)
+                );
+
+            if (IsPaidLikeStatus(localStatus) && finalized)
             {
                 return Ok(new
                 {
@@ -302,39 +324,66 @@ namespace AMMS.API.Controllers
                     processed = true,
                     status = "PAID",
                     order_code = latest.order_code,
-                    estimate_id = latest.estimate_id ?? estimate_id,
-                    quote_id = latest.quote_id ?? quote_id
+                    estimate_id = resolvedEstimateId,
+                    quote_id = resolvedQuoteId
                 });
             }
+
+            PayOsResultDto? info = null;
+            string providerStatus = "UNKNOWN";
 
             try
             {
-                var info = await _payos.GetPaymentLinkInformationAsync(latest.order_code, ct);
-                var providerStatus = NormalizePaymentStatus(info?.status);
-                var paid = IsPaidLikeStatus(providerStatus);
+                info = await _payos.GetPaymentLinkInformationAsync(latest.order_code, ct);
+                providerStatus = NormalizePaymentStatus(info?.status);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "CheckPayOsStatus failed to call PayOS. RequestId={RequestId}, OrderCode={OrderCode}",
+                    request_id, latest.order_code);
+            }
+
+            var paid = IsPaidLikeStatus(localStatus) || IsPaidLikeStatus(providerStatus);
+
+            if (paid)
+            {
+                await TryMarkRequestAcceptedLightweightAsync(
+                    request_id,
+                    resolvedEstimateId,
+                    resolvedQuoteId,
+                    ct);
+
+                QueueProcessPaidInBackground(
+                    orderRequestId: request_id,
+                    orderCode: latest.order_code,
+                    amount: info?.amount ?? Convert.ToInt64(latest.amount),
+                    paymentLinkId: info?.payment_link_id ?? latest.payos_payment_link_id,
+                    transactionId: info?.transaction_id ?? latest.payos_transaction_id,
+                    rawJson: info?.raw_json ?? latest.payos_raw ?? "{}",
+                    estimateId: resolvedEstimateId,
+                    quoteId: resolvedQuoteId);
 
                 return Ok(new
                 {
-                    paid = paid,
-                    processed = false,
-                    status = paid ? "PAID" : providerStatus,
+                    paid = true,
+                    processed = finalized,
+                    status = "PAID",
                     order_code = latest.order_code,
-                    estimate_id = latest.estimate_id ?? estimate_id,
-                    quote_id = latest.quote_id ?? quote_id
+                    estimate_id = resolvedEstimateId,
+                    quote_id = resolvedQuoteId
                 });
             }
-            catch
+
+            return Ok(new
             {
-                return Ok(new
-                {
-                    paid = false,
-                    processed = false,
-                    status = localStatus,
-                    order_code = latest.order_code,
-                    estimate_id = latest.estimate_id ?? estimate_id,
-                    quote_id = latest.quote_id ?? quote_id
-                });
-            }
+                paid = false,
+                processed = false,
+                status = providerStatus != "UNKNOWN" ? providerStatus : localStatus,
+                order_code = latest.order_code,
+                estimate_id = resolvedEstimateId,
+                quote_id = resolvedQuoteId
+            });
         }
 
         private static string NormalizePaymentStatus(string? status)
@@ -348,6 +397,87 @@ namespace AMMS.API.Controllers
         {
             var normalized = NormalizePaymentStatus(status);
             return normalized == "PAID" || normalized == "SUCCESS";
+        }
+        private async Task TryMarkRequestAcceptedLightweightAsync(
+    int requestId,
+    int? estimateId,
+    int? quoteId,
+    CancellationToken ct)
+        {
+            var req = await _db.order_requests
+                .FirstOrDefaultAsync(x => x.order_request_id == requestId, ct);
+
+            if (req == null)
+                return;
+
+            if (string.Equals(req.process_status, "Rejected", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            if (!string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(req.process_status, "Paid", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(req.process_status, "Completed", StringComparison.OrdinalIgnoreCase))
+            {
+                req.process_status = "Accepted";
+            }
+
+            if (!req.accepted_estimate_id.HasValue && estimateId.GetValueOrDefault() > 0)
+                req.accepted_estimate_id = estimateId!.Value;
+
+            if (!req.quote_id.HasValue && quoteId.GetValueOrDefault() > 0)
+                req.quote_id = quoteId!.Value;
+
+            await _db.SaveChangesAsync(ct);
+        }
+
+        private void QueueProcessPaidInBackground(
+            int orderRequestId,
+            long orderCode,
+            long amount,
+            string? paymentLinkId,
+            string? transactionId,
+            string rawJson,
+            int? estimateId,
+            int? quoteId)
+        {
+            if (!_payosProcessingLocks.TryAdd(orderCode, 0))
+                return;
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var finalizeService = scope.ServiceProvider.GetRequiredService<IPaymentsService>();
+
+                    var (ok, message) = await finalizeService.ProcessPaidAsync(
+                        orderRequestId: orderRequestId,
+                        orderCode: orderCode,
+                        amount: amount,
+                        paymentLinkId: paymentLinkId,
+                        transactionId: transactionId,
+                        rawJson: rawJson,
+                        estimateIdFromQuery: estimateId,
+                        quoteIdFromQuery: quoteId,
+                        ct: CancellationToken.None);
+
+                    if (!ok)
+                    {
+                        _logger.LogError(
+                            "Background ProcessPaidAsync failed. RequestId={RequestId}, OrderCode={OrderCode}, Message={Message}",
+                            orderRequestId, orderCode, message);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Background ProcessPaidAsync crashed. RequestId={RequestId}, OrderCode={OrderCode}",
+                        orderRequestId, orderCode);
+                }
+                finally
+                {
+                    _payosProcessingLocks.TryRemove(orderCode, out _);
+                }
+            });
         }
 
         [HttpPost("reject")]
@@ -401,7 +531,6 @@ namespace AMMS.API.Controllers
             {
                 long oc = orderCode ?? 0;
 
-                // hỗ trợ backward compatibility nếu chỗ nào cũ vẫn gọi ?orderCode=
                 if (oc <= 0 &&
                     long.TryParse(Request.Query["orderCode"], out var legacyOrderCode))
                 {
@@ -442,7 +571,7 @@ namespace AMMS.API.Controllers
 
                 if (isPaid)
                 {
-                    await ProcessPaidAsync(
+                    await _paymentService.ProcessPaidAsync(
                         orderRequestId: payment.order_request_id,
                         orderCode: oc,
                         amount: info?.amount ?? (long)payment.amount,
@@ -451,13 +580,11 @@ namespace AMMS.API.Controllers
                         rawJson: info?.raw_json ?? payment.payos_raw ?? "{}",
                         estimateIdFromQuery: payment.estimate_id,
                         quoteIdFromQuery: payment.quote_id,
-                        paymentRepo: paymentRepo,
                         ct: ct);
                 }
 
                 if (string.Equals(payment.payment_type, "Remaining", StringComparison.OrdinalIgnoreCase) && req.order_id.HasValue)
                 {
-                    //return Redirect($"{fe}/payment/{req.order_id.Value}?payos={(isPaid ? "paid" : "pending")}&orderCode={oc}");
                     return Redirect($"{fe}/request-detail/{payment.order_request_id}?payos={(isPaid ? "paid" : "pending")}&orderCode={oc}");
                 }
 
@@ -537,7 +664,7 @@ namespace AMMS.API.Controllers
                 if (payment == null)
                     return Ok(new { ok = true, ignored = true, reason = "payment_not_found" });
 
-                var (processed, message) = await ProcessPaidAsync(
+                var (processed, message) = await _paymentService.ProcessPaidAsync(
                     payment.order_request_id,
                     orderCode,
                     amount,
@@ -546,7 +673,6 @@ namespace AMMS.API.Controllers
                     raw.ToString(),
                     payment.estimate_id,
                     payment.quote_id,
-                    paymentRepo,
                     ct);
 
                 if (!processed)
@@ -619,412 +745,7 @@ namespace AMMS.API.Controllers
 
             return Ok(result);
         }
-        private async Task<(bool ok, string message)> ProcessPaidAsync(
-    int orderRequestId,
-    long orderCode,
-    long amount,
-    string? paymentLinkId,
-    string? transactionId,
-    string rawJson,
-    int? estimateIdFromQuery,
-    int? quoteIdFromQuery,
-    IPaymentRepository paymentRepo,
-    CancellationToken ct)
-        {
-            var existingPayment = await paymentRepo.GetByOrderCodeAsync(orderCode, ct);
-
-            var paymentType = existingPayment?.payment_type ?? "Deposit";
-
-            if (string.Equals(paymentType, "Remaining", StringComparison.OrdinalIgnoreCase))
-            {
-                return await ProcessRemainingPaidAsync(
-                    orderCode,
-                    amount,
-                    paymentLinkId,
-                    transactionId,
-                    rawJson,
-                    paymentRepo,
-                    ct);
-            }
-
-            return await ProcessDepositPaidAsync(
-                orderRequestId,
-                orderCode,
-                amount,
-                paymentLinkId,
-                transactionId,
-                rawJson,
-                estimateIdFromQuery,
-                quoteIdFromQuery,
-                paymentRepo,
-                ct);
-        }
-
-        private async Task<(bool ok, string message)> ProcessDepositPaidAsync(
-    int orderRequestId,
-    long orderCode,
-    long amount,
-    string? paymentLinkId,
-    string? transactionId,
-    string rawJson,
-    int? estimateIdFromQuery,
-    int? quoteIdFromQuery,
-    IPaymentRepository paymentRepo,
-    CancellationToken ct)
-        {
-            var strategy = _db.Database.CreateExecutionStrategy();
-
-            return await strategy.ExecuteAsync(async () =>
-            {
-                await using var tx = await _db.Database.BeginTransactionAsync(ct);
-
-                var req = await _db.order_requests
-                    .FirstOrDefaultAsync(x => x.order_request_id == orderRequestId, ct);
-
-                if (req == null)
-                    return (false, $"order_request_id={orderRequestId} not found");
-
-                var now = AppTime.NowVnUnspecified();
-
-                var validation = ValidateQuotePaymentWindow(req, now);
-                if (!validation.ok)
-                {
-                    if (!(req.order_id != null &&
-                          string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase)))
-                    {
-                        await tx.RollbackAsync(ct);
-                        return (false, validation.message);
-                    }
-                }
-
-                var paymentBefore = await _db.payments
-                    .FirstOrDefaultAsync(p => p.provider == "PAYOS" && p.order_code == orderCode, ct);
-
-                var shouldSendPaidEmail = paymentBefore == null ||
-                                          !string.Equals(paymentBefore.status, "PAID", StringComparison.OrdinalIgnoreCase);
-
-                // Lấy payment row hiện tại để resolve estimate/quote cho chắc
-                var currentPayment = await _db.payments
-                    .AsNoTracking()
-                    .Where(p => p.provider == "PAYOS" && p.order_code == orderCode)
-                    .OrderByDescending(p => p.payment_id)
-                    .FirstOrDefaultAsync(ct);
-
-                var resolvedEstimateId =
-                    (currentPayment?.estimate_id).GetValueOrDefault() > 0
-                        ? currentPayment!.estimate_id!.Value
-                        : (estimateIdFromQuery.GetValueOrDefault() > 0 ? estimateIdFromQuery!.Value : 0);
-
-                if (resolvedEstimateId <= 0)
-                {
-                    await tx.RollbackAsync(ct);
-                    return (false, "Cannot resolve estimate_id for this payment/order_code");
-                }
-
-                var resolvedQuoteId =
-                    (currentPayment?.quote_id).GetValueOrDefault() > 0
-                        ? currentPayment!.quote_id!.Value
-                        : (quoteIdFromQuery.GetValueOrDefault() > 0 ? quoteIdFromQuery!.Value : 0);
-
-                // fallback nếu payment row chưa có quote_id
-                if (resolvedQuoteId <= 0)
-                {
-                    resolvedQuoteId = await _db.quotes
-                        .AsNoTracking()
-                        .Where(x => x.order_request_id == orderRequestId && x.estimate_id == resolvedEstimateId)
-                        .OrderByDescending(x => x.quote_id)
-                        .Select(x => (int?)x.quote_id)
-                        .FirstOrDefaultAsync(ct) ?? 0;
-                }
-
-                var est = await _db.cost_estimates
-                    .FirstOrDefaultAsync(x => x.estimate_id == resolvedEstimateId
-                                           && x.order_request_id == orderRequestId, ct);
-
-                if (est == null)
-                {
-                    await tx.RollbackAsync(ct);
-                    return (false, "Cost estimate not found for paid payment");
-                }
-
-                // =========================
-                // Update order_request TRƯỚC payment
-                // =========================
-                var wasAccepted = string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase);
-
-                if (!wasAccepted)
-                    req.process_status = "Accepted";
-
-                if (req.accepted_estimate_id == null)
-                    req.accepted_estimate_id = resolvedEstimateId;
-                else if (req.accepted_estimate_id != resolvedEstimateId)
-                {
-                    await tx.RollbackAsync(ct);
-                    return (false, "Request already accepted with a different estimate.");
-                }
-
-                if (resolvedQuoteId > 0)
-                    req.quote_id = resolvedQuoteId;
-
-                await _db.SaveChangesAsync(ct); // flush order_request trước
-
-                // =========================
-                // Update payment thành PAID
-                // =========================
-                await UpsertPaidPaymentRowAsync(
-                    orderRequestId,
-                    orderCode,
-                    amount,
-                    paymentLinkId,
-                    transactionId,
-                    rawJson,
-                    resolvedEstimateId,
-                    resolvedQuoteId > 0 ? resolvedQuoteId : null,
-                    paymentType: "Deposit",
-                    paymentRepo: paymentRepo,
-                    ct: ct);
-
-                var paidPayment = await _db.payments
-                    .Where(p => p.provider == "PAYOS" && p.order_code == orderCode)
-                    .OrderByDescending(p => p.payment_id)
-                    .FirstOrDefaultAsync(ct);
-
-                if (paidPayment == null)
-                {
-                    await tx.RollbackAsync(ct);
-                    return (false, "Payment row not found");
-                }
-
-                if (!string.Equals(paidPayment.status, "PAID", StringComparison.OrdinalIgnoreCase))
-                {
-                    await tx.RollbackAsync(ct);
-                    return (false, $"Payment status was not updated to PAID. Current status = {paidPayment.status}");
-                }
-
-                await _db.cost_estimates
-                    .Where(x => x.order_request_id == orderRequestId)
-                    .ExecuteUpdateAsync(setters => setters
-                        .SetProperty(x => x.is_active, x => x.estimate_id == resolvedEstimateId), ct);
-
-                if (resolvedQuoteId > 0)
-                {
-                    await _db.quotes
-                        .Where(x => x.order_request_id == orderRequestId)
-                        .ExecuteUpdateAsync(setters => setters
-                            .SetProperty(x => x.status,
-                                x => x.quote_id == resolvedQuoteId ? "Accepted" : "Rejected"), ct);
-                }
-
-                if (!req.order_id.HasValue)
-                {
-                    var convert = await _service.ConvertToOrderInCurrentTransactionAsync(orderRequestId);
-                    if (!convert.Success || !convert.OrderId.HasValue)
-                    {
-                        await tx.RollbackAsync(ct);
-                        return (false, convert.Message ?? "Convert to order failed");
-                    }
-                }
-
-                if (req.order_id.HasValue)
-                {
-                    var ord = await _db.orders.FirstOrDefaultAsync(x => x.order_id == req.order_id.Value, ct);
-                    if (ord == null)
-                    {
-                        await tx.RollbackAsync(ct);
-                        return (false, "Order not found");
-                    }
-
-                    ord.payment_status = "Deposited";
-
-                    if (!ord.layout_confirmed &&
-                        string.IsNullOrWhiteSpace(ord.status))
-                    {
-                        ord.status = "LayoutPending";
-                    }
-                }
-
-                await _db.SaveChangesAsync(ct);
-                await tx.CommitAsync(ct);
-
-                if (shouldSendPaidEmail)
-                {
-                    try
-                    {
-                        await _dealService.NotifyConsultantPaidAsync(orderRequestId, paidPayment.amount, now);
-                        await _dealService.NotifyCustomerPaidAsync(orderRequestId, paidPayment.amount, now);
-                    }
-                    catch
-                    {
-                    }
-                }
-
-                return (true, "Deposit payment recorded successfully. Request is Accepted.");
-            });
-        }
-
-        private async Task<(bool ok, string message)> ProcessRemainingPaidAsync(
-    long orderCode,
-    long amount,
-    string? paymentLinkId,
-    string? transactionId,
-    string rawJson,
-    IPaymentRepository paymentRepo,
-    CancellationToken ct)
-        {
-            var strategy = _db.Database.CreateExecutionStrategy();
-
-            return await strategy.ExecuteAsync(async () =>
-            {
-                await using var tx = await _db.Database.BeginTransactionAsync(ct);
-
-                var existing = await _db.payments
-                    .FirstOrDefaultAsync(p => p.provider == "PAYOS" && p.order_code == orderCode, ct);
-
-                if (existing == null)
-                {
-                    await tx.RollbackAsync(ct);
-                    return (false, "Remaining payment row not found");
-                }
-
-                var now = AppTime.NowVnUnspecified();
-
-                existing.status = "PAID";
-                existing.payment_type = "Remaining";
-                existing.paid_at ??= now;
-                existing.updated_at = now;
-
-                if (existing.amount <= 0 && amount > 0)
-                    existing.amount = (decimal)amount;
-
-                if (!string.IsNullOrWhiteSpace(paymentLinkId))
-                    existing.payos_payment_link_id = paymentLinkId;
-
-                if (!string.IsNullOrWhiteSpace(transactionId))
-                    existing.payos_transaction_id = transactionId;
-
-                if (!string.IsNullOrWhiteSpace(rawJson))
-                    existing.payos_raw = rawJson;
-
-                var req = await _service.GetRequestForUpdateAsync(existing.order_request_id, ct);
-                if (req == null)
-                {
-                    await tx.RollbackAsync(ct);
-                    return (false, "Order request not found for remaining payment");
-                }
-
-                if (!req.order_id.HasValue)
-                {
-                    await tx.RollbackAsync(ct);
-                    return (false, "Order has not been created for remaining payment");
-                }
-
-                var ord = await _db.orders.FirstOrDefaultAsync(x => x.order_id == req.order_id.Value, ct);
-                if (ord == null)
-                {
-                    await tx.RollbackAsync(ct);
-                    return (false, "Order not found for remaining payment");
-                }
-
-                var prod = await _db.productions
-                    .Where(x => x.order_id == ord.order_id)
-                    .OrderByDescending(x => x.prod_id)
-                    .FirstOrDefaultAsync(ct);
-
-                req.process_status = "Paid";
-                ord.status = "Paid";
-                ord.payment_status = "Paid";
-
-                if (prod != null)
-                    prod.status = "Paid";
-
-                await _db.SaveChangesAsync(ct);
-                await tx.CommitAsync(ct);
-
-                return (true, $"Remaining payment recorded successfully: order_id={ord.order_id}");
-            });
-        }
-
-        private async Task UpsertPaidPaymentRowAsync(
-    int orderRequestId,
-    long orderCode,
-    long amount,
-    string? paymentLinkId,
-    string? transactionId,
-    string rawJson,
-    int? estimateIdFromQuery,
-    int? quoteIdFromQuery,
-    string paymentType,
-    IPaymentRepository paymentRepo,
-    CancellationToken ct)
-        {
-            var now = AppTime.NowVnUnspecified();
-
-            var existing = await _db.payments
-                .FirstOrDefaultAsync(p => p.provider == "PAYOS" && p.order_code == orderCode, ct);
-
-            if (existing != null)
-            {
-                existing.status = "PAID";
-                existing.payment_type = paymentType;
-                existing.paid_at ??= now;
-
-                if (existing.amount <= 0 && amount > 0)
-                    existing.amount = (decimal)amount;
-
-                if (!string.IsNullOrWhiteSpace(paymentLinkId))
-                    existing.payos_payment_link_id = paymentLinkId;
-
-                if (!string.IsNullOrWhiteSpace(transactionId))
-                    existing.payos_transaction_id = transactionId;
-
-                if (!string.IsNullOrWhiteSpace(rawJson))
-                    existing.payos_raw = rawJson;
-
-                if ((existing.estimate_id == null || existing.estimate_id <= 0) &&
-                    estimateIdFromQuery.HasValue && estimateIdFromQuery.Value > 0)
-                {
-                    existing.estimate_id = estimateIdFromQuery.Value;
-                }
-
-                if ((existing.quote_id == null || existing.quote_id <= 0) &&
-                    quoteIdFromQuery.HasValue && quoteIdFromQuery.Value > 0)
-                {
-                    existing.quote_id = quoteIdFromQuery.Value;
-                }
-
-                existing.updated_at = now;
-
-                await _db.SaveChangesAsync(ct);
-                return;
-            }
-
-            var newPayment = new payment
-            {
-                order_request_id = orderRequestId,
-                provider = "PAYOS",
-                payment_type = paymentType,
-                order_code = orderCode,
-                amount = (decimal)amount,
-                currency = "VND",
-                status = "PAID",
-                estimate_id = (estimateIdFromQuery.HasValue && estimateIdFromQuery.Value > 0)
-                    ? estimateIdFromQuery.Value
-                    : (int?)null,
-                quote_id = (quoteIdFromQuery.HasValue && quoteIdFromQuery.Value > 0)
-                    ? quoteIdFromQuery.Value
-                    : (int?)null,
-                paid_at = now,
-                payos_payment_link_id = paymentLinkId,
-                payos_transaction_id = transactionId,
-                payos_raw = rawJson,
-                created_at = now,
-                updated_at = now
-            };
-
-            await _db.payments.AddAsync(newPayment, ct);
-            await _db.SaveChangesAsync(ct);
-        }
-
+     
         [HttpGet("payos-deposit/{request_id:int}")]
         public async Task<IActionResult> GetPayOsDeposit(
     [FromRoute] int request_id,
