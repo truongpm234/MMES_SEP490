@@ -701,6 +701,18 @@ namespace AMMS.API.Controllers
                 var shouldSendPaidEmail = paymentBefore == null ||
                                           !string.Equals(paymentBefore.status, "PAID", StringComparison.OrdinalIgnoreCase);
 
+                // =========================
+                // CHỈNH Ở ĐÂY:
+                // Update order_request trước payment
+                // =========================
+                var wasAccepted = string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase);
+
+                if (!wasAccepted)
+                {
+                    req.process_status = "Accepted";
+                    await _db.SaveChangesAsync(ct); // flush order_request xuống DB trước
+                }
+
                 await UpsertPaidPaymentRowAsync(
                     orderRequestId, orderCode, amount,
                     paymentLinkId, transactionId, rawJson,
@@ -753,11 +765,6 @@ namespace AMMS.API.Controllers
 
                 if (resolvedQuoteId > 0)
                     req.quote_id = resolvedQuoteId;
-
-                var wasAccepted = string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase);
-
-                if (!wasAccepted)
-                    req.process_status = "Accepted";
 
                 await _db.cost_estimates
                     .Where(x => x.order_request_id == orderRequestId)
