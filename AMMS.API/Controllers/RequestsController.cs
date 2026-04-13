@@ -678,7 +678,9 @@ namespace AMMS.API.Controllers
             {
                 await using var tx = await _db.Database.BeginTransactionAsync(ct);
 
-                var req = await _service.GetRequestForUpdateAsync(orderRequestId, ct);
+                var req = await _db.order_requests
+                    .FirstOrDefaultAsync(x => x.order_request_id == orderRequestId, ct);
+
                 if (req == null)
                     return (false, $"order_request_id={orderRequestId} not found");
 
@@ -701,24 +703,86 @@ namespace AMMS.API.Controllers
                 var shouldSendPaidEmail = paymentBefore == null ||
                                           !string.Equals(paymentBefore.status, "PAID", StringComparison.OrdinalIgnoreCase);
 
+                // Lấy payment row hiện tại để resolve estimate/quote cho chắc
+                var currentPayment = await _db.payments
+                    .AsNoTracking()
+                    .Where(p => p.provider == "PAYOS" && p.order_code == orderCode)
+                    .OrderByDescending(p => p.payment_id)
+                    .FirstOrDefaultAsync(ct);
+
+                var resolvedEstimateId =
+                    (currentPayment?.estimate_id).GetValueOrDefault() > 0
+                        ? currentPayment!.estimate_id!.Value
+                        : (estimateIdFromQuery.GetValueOrDefault() > 0 ? estimateIdFromQuery!.Value : 0);
+
+                if (resolvedEstimateId <= 0)
+                {
+                    await tx.RollbackAsync(ct);
+                    return (false, "Cannot resolve estimate_id for this payment/order_code");
+                }
+
+                var resolvedQuoteId =
+                    (currentPayment?.quote_id).GetValueOrDefault() > 0
+                        ? currentPayment!.quote_id!.Value
+                        : (quoteIdFromQuery.GetValueOrDefault() > 0 ? quoteIdFromQuery!.Value : 0);
+
+                // fallback nếu payment row chưa có quote_id
+                if (resolvedQuoteId <= 0)
+                {
+                    resolvedQuoteId = await _db.quotes
+                        .AsNoTracking()
+                        .Where(x => x.order_request_id == orderRequestId && x.estimate_id == resolvedEstimateId)
+                        .OrderByDescending(x => x.quote_id)
+                        .Select(x => (int?)x.quote_id)
+                        .FirstOrDefaultAsync(ct) ?? 0;
+                }
+
+                var est = await _db.cost_estimates
+                    .FirstOrDefaultAsync(x => x.estimate_id == resolvedEstimateId
+                                           && x.order_request_id == orderRequestId, ct);
+
+                if (est == null)
+                {
+                    await tx.RollbackAsync(ct);
+                    return (false, "Cost estimate not found for paid payment");
+                }
+
                 // =========================
-                // CHỈNH Ở ĐÂY:
-                // Update order_request trước payment
+                // Update order_request TRƯỚC payment
                 // =========================
                 var wasAccepted = string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase);
 
                 if (!wasAccepted)
-                {
                     req.process_status = "Accepted";
-                    await _db.SaveChangesAsync(ct); // flush order_request xuống DB trước
+
+                if (req.accepted_estimate_id == null)
+                    req.accepted_estimate_id = resolvedEstimateId;
+                else if (req.accepted_estimate_id != resolvedEstimateId)
+                {
+                    await tx.RollbackAsync(ct);
+                    return (false, "Request already accepted with a different estimate.");
                 }
 
+                if (resolvedQuoteId > 0)
+                    req.quote_id = resolvedQuoteId;
+
+                await _db.SaveChangesAsync(ct); // flush order_request trước
+
+                // =========================
+                // Update payment thành PAID
+                // =========================
                 await UpsertPaidPaymentRowAsync(
-                    orderRequestId, orderCode, amount,
-                    paymentLinkId, transactionId, rawJson,
-                    estimateIdFromQuery, quoteIdFromQuery,
+                    orderRequestId,
+                    orderCode,
+                    amount,
+                    paymentLinkId,
+                    transactionId,
+                    rawJson,
+                    resolvedEstimateId,
+                    resolvedQuoteId > 0 ? resolvedQuoteId : null,
                     paymentType: "Deposit",
-                    paymentRepo: paymentRepo, ct: ct);
+                    paymentRepo: paymentRepo,
+                    ct: ct);
 
                 var paidPayment = await _db.payments
                     .Where(p => p.provider == "PAYOS" && p.order_code == orderCode)
@@ -731,40 +795,11 @@ namespace AMMS.API.Controllers
                     return (false, "Payment row not found");
                 }
 
-                var resolvedEstimateId =
-                    (paidPayment.estimate_id.HasValue && paidPayment.estimate_id.Value > 0) ? paidPayment.estimate_id.Value :
-                    (estimateIdFromQuery.HasValue && estimateIdFromQuery.Value > 0) ? estimateIdFromQuery.Value : 0;
-
-                if (resolvedEstimateId <= 0)
+                if (!string.Equals(paidPayment.status, "PAID", StringComparison.OrdinalIgnoreCase))
                 {
                     await tx.RollbackAsync(ct);
-                    return (false, "Cannot resolve estimate_id for this payment/order_code");
+                    return (false, $"Payment status was not updated to PAID. Current status = {paidPayment.status}");
                 }
-
-                var resolvedQuoteId =
-                    (quoteIdFromQuery.HasValue && quoteIdFromQuery.Value > 0) ? quoteIdFromQuery.Value :
-                    (paidPayment.quote_id.HasValue && paidPayment.quote_id.Value > 0) ? paidPayment.quote_id.Value : 0;
-
-                var est = await _db.cost_estimates
-                    .FirstOrDefaultAsync(x => x.estimate_id == resolvedEstimateId
-                                           && x.order_request_id == orderRequestId, ct);
-
-                if (est == null)
-                {
-                    await tx.RollbackAsync(ct);
-                    return (false, "Cost estimate not found for paid payment");
-                }
-
-                if (req.accepted_estimate_id == null)
-                    req.accepted_estimate_id = resolvedEstimateId;
-                else if (req.accepted_estimate_id != resolvedEstimateId)
-                {
-                    await tx.RollbackAsync(ct);
-                    return (false, "Request already accepted with a different estimate.");
-                }
-
-                if (resolvedQuoteId > 0)
-                    req.quote_id = resolvedQuoteId;
 
                 await _db.cost_estimates
                     .Where(x => x.order_request_id == orderRequestId)
@@ -963,7 +998,7 @@ namespace AMMS.API.Controllers
                 return;
             }
 
-            await paymentRepo.AddAsync(new payment
+            var newPayment = new payment
             {
                 order_request_id = orderRequestId,
                 provider = "PAYOS",
@@ -984,9 +1019,10 @@ namespace AMMS.API.Controllers
                 payos_raw = rawJson,
                 created_at = now,
                 updated_at = now
-            }, ct);
+            };
 
-            await paymentRepo.SaveChangesAsync(ct);
+            await _db.payments.AddAsync(newPayment, ct);
+            await _db.SaveChangesAsync(ct);
         }
 
         [HttpGet("payos-deposit/{request_id:int}")]
@@ -1361,7 +1397,7 @@ namespace AMMS.API.Controllers
                     pro.status = "Completed";
                     await _db.SaveChangesAsync();
                 }
-                return Ok("Customer confirm recieve order");
+                return Ok("Customer confirm receive order");
             }
             return BadRequest();
         }
