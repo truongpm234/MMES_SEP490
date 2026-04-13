@@ -142,15 +142,15 @@ namespace AMMS.Application.Services
         }
 
         private async Task<(bool ok, string message)> ProcessDepositPaidAsync(
-            int orderRequestId,
-            long orderCode,
-            long amount,
-            string? paymentLinkId,
-            string? transactionId,
-            string rawJson,
-            int? estimateIdFromQuery,
-            int? quoteIdFromQuery,
-            CancellationToken ct)
+    int orderRequestId,
+    long orderCode,
+    long amount,
+    string? paymentLinkId,
+    string? transactionId,
+    string rawJson,
+    int? estimateIdFromQuery,
+    int? quoteIdFromQuery,
+    CancellationToken ct)
         {
             var strategy = _db.Database.CreateExecutionStrategy();
 
@@ -166,11 +166,23 @@ namespace AMMS.Application.Services
 
                 var now = AppTime.NowVnUnspecified();
 
-                var validation = ValidateQuotePaymentWindow(req, now);
-                if (!validation.ok)
+                // Nếu đã reject thì không cho finalize nữa
+                if (string.Equals(req.process_status, "Rejected", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!(req.order_id != null &&
-                          string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase)))
+                    await tx.RollbackAsync(ct);
+                    return (false, "Request has been rejected. Cannot finalize payment.");
+                }
+
+                // Nếu polling đã mark nhẹ Accepted thì vẫn phải cho finalize tiếp
+                var alreadyLightAccepted =
+                    string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(req.process_status, "Paid", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(req.process_status, "Completed", StringComparison.OrdinalIgnoreCase);
+
+                if (!alreadyLightAccepted)
+                {
+                    var validation = ValidateQuotePaymentWindow(req, now);
+                    if (!validation.ok)
                     {
                         await tx.RollbackAsync(ct);
                         return (false, validation.message);
@@ -225,7 +237,10 @@ namespace AMMS.Application.Services
                     return (false, "Cost estimate not found for paid payment");
                 }
 
-                var wasAccepted = string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase);
+                var wasAccepted =
+                    string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(req.process_status, "Paid", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(req.process_status, "Completed", StringComparison.OrdinalIgnoreCase);
 
                 if (!wasAccepted)
                     req.process_status = "Accepted";
