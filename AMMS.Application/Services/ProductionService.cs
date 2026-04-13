@@ -70,21 +70,16 @@ namespace AMMS.Application.Services
             return await _repo.GetProgressAsync(prodId);
         }
 
-        public async Task<ProductionDetailDto?> GetProductionDetailByOrderIdAsync(
-            int orderId,
-            CancellationToken ct = default)
+        public async Task<ProductionDetailDto?> GetProductionDetailByOrderIdAsync(int orderId, CancellationToken ct = default)
         {
             return await _repo.GetProductionDetailByOrderIdAsync(orderId, ct);
         }
 
-        public async Task<ProductionWasteReportDto?> GetProductionWasteAsync(
-            int prodId,
-            CancellationToken ct = default)
+        public async Task<ProductionWasteReportDto?> GetProductionWasteAsync(int prodId, CancellationToken ct = default)
         {
             return await _repo.GetProductionWasteAsync(prodId, ct);
         }
 
-        // Đồng bộ flow mới: start production nhưng KHÔNG promote task đầu
         public async Task<bool> StartProductionByOrderIdAsync(int orderId, CancellationToken ct = default)
         {
             var ord = await _db.orders
