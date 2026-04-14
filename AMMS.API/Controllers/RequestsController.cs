@@ -1328,7 +1328,7 @@ namespace AMMS.API.Controllers
                     prod.status = "Finished";
                     await _db.SaveChangesAsync();
                     await _rt.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("imported", new { message = $"Đơn hàng {order_id} đã được nhập kho, sẵn sàng giao" });
-                    await _notiService.CreateNotfi(2, $"Đơn hàng {order_id} đã được nhập kho, sẵn sàng giao", req.assigned_consultant, req.order_request_id);
+                    await _notiService.CreateNotfi(2, $"Đơn hàng {order_id} đã được nhập kho, sẵn sàng giao", req.assigned_consultant, req.order_request_id, "Paid");
                     return Ok("Success");
                 }
             }

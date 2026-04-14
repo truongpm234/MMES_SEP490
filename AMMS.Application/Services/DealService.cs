@@ -52,7 +52,7 @@ namespace AMMS.Application.Services
     IUserRepository userRepo,
     IOrderRepository orderRepository,
     IProductionRepository productionRepository,
-    IBaseConfigRepository baseConfigRepo)  
+    IBaseConfigRepository baseConfigRepo)
         {
             _db = db;
             _notificationService = notificationService;
@@ -70,7 +70,7 @@ namespace AMMS.Application.Services
             _orderRepo = orderRepository;
             _prodRepo = productionRepository;
             _hub = hub;
-            _baseConfigRepo = baseConfigRepo;     
+            _baseConfigRepo = baseConfigRepo;
         }
 
         public async Task SendDealAndEmailAsync(int orderRequestId, int? estimateId = null)
@@ -252,7 +252,7 @@ namespace AMMS.Application.Services
 
             //Khánh sửa signalr
             await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("rejected", new { message = $"yêu cầu {orderRequestId} đã bị khách hàng từ chối báo giá" });
-            await _notificationService.CreateNotfi(2, $"yêu cầu {orderRequestId} đã bị khách hàng từ chối báo giá", req.assigned_consultant, orderRequestId);
+            await _notificationService.CreateNotfi(2, $"yêu cầu {orderRequestId} đã bị khách hàng từ chối báo giá", req.assigned_consultant, orderRequestId, "Rejected");
             await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
             await SendConsultantStatusEmailAsync(req, est, $"KHACH TU CHOI (LY DO: {safeReason})");
         }
@@ -938,6 +938,6 @@ namespace AMMS.Application.Services
             }
 
             throw new InvalidOperationException("Cannot allocate remaining-payment orderCode.");
-        }       
+        }
     }
 }

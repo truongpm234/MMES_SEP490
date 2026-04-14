@@ -209,7 +209,7 @@ namespace AMMS.Application.Services
                     6,
                     $"Đơn hàng {orderId} đã được lên lịch sản xuất có thể bắt đầu sản xuất",
                     null,
-                    req.order_request_id);
+                    req.order_request_id, "Scheduled");
             }
 
             return true;

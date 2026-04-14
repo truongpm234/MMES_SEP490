@@ -26,9 +26,9 @@ namespace AMMS.Application.Services
             return await _notiRepo.GetConsultantNotificationUserId(id, user_id);
         }
 
-        public async Task<string> CreateNotfi(int role_id, string content, int? user_id, int order_request_id)
+        public async Task<string> CreateNotfi(int role_id, string content, int? user_id, int order_request_id, string status)
         {
-            return await _notiRepo.CreateNoti(role_id, content, user_id, order_request_id);
+            return await _notiRepo.CreateNoti(role_id, content, user_id, order_request_id, status);
         }
 
         public async Task<bool> MarkAsRead(int id)
