@@ -24,7 +24,7 @@ namespace AMMS.Infrastructure.Repositories
             return res;
         }
 
-        public async Task<string> CreateNoti(int role_id, string content, int? user_id, int order_request_id)
+        public async Task<string> CreateNoti(int role_id, string content, int? user_id, int order_request_id, string status)
         {
             var res = new notification();
             res.RoleId = role_id;
@@ -33,7 +33,7 @@ namespace AMMS.Infrastructure.Repositories
             res.UserId = user_id;
             res.Time = DateTime.UtcNow;
             res.IsCheck = false;
-            res.Status = "Active";
+            res.Status = status;
             await _db.notifications.AddAsync(res);
             _db.SaveChanges();
             return "Success";
