@@ -51,18 +51,19 @@ namespace AMMS.Infrastructure.Repositories
                     o.order_date,
                     o.delivery_date,
                     Status = o.status ?? "",
+                    is_production_ready = o.is_production_ready,
                     customer_name = r != null ? (r.customer_name ?? "") : "Khách hàng",
 
                     FirstItem = _db.order_items.AsNoTracking()
-                        .Where(i => i.order_id == o.order_id)
-                        .OrderBy(i => i.item_id)
-                        .Select(i => new
-                        {
-                            i.product_name,
-                            i.product_type_id,
-                            i.quantity
-                        })
-                        .FirstOrDefault()
+        .Where(i => i.order_id == o.order_id)
+        .OrderBy(i => i.item_id)
+        .Select(i => new
+        {
+            i.product_name,
+            i.product_type_id,
+            i.quantity
+        })
+        .FirstOrDefault()
                 }
             )
             .Skip(skip)
@@ -212,7 +213,7 @@ namespace AMMS.Infrastructure.Repositories
                 {
                     order_id = o.order_id.ToString(),
                     code = o.code,
-                    customer_name = o.customer_name ?? "",  
+                    customer_name = o.customer_name ?? "",
                     product_name = o.FirstItem?.product_name,
                     product_id = o.FirstItem?.product_type_id?.ToString(),
                     quantity = o.FirstItem?.quantity ?? 0,
@@ -220,6 +221,7 @@ namespace AMMS.Infrastructure.Repositories
                     delivery_date = ToUtcString(o.delivery_date),
                     status = o.Status,
                     can_fulfill = canFulfill,
+                    is_production_ready = o.is_production_ready,
                     missing_materials = canFulfill == false
                         ? (missingMaterials ?? new List<MissingMaterialDto>())
                         : null
