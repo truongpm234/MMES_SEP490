@@ -18,8 +18,6 @@ public partial class AppDbContext : DbContext
 
     public virtual DbSet<bom> boms { get; set; }
 
-    public virtual DbSet<delivery> deliveries { get; set; }
-
     public virtual DbSet<material> materials { get; set; }
 
     public virtual DbSet<order> orders { get; set; }
@@ -65,7 +63,10 @@ public partial class AppDbContext : DbContext
     public virtual DbSet<product_template> product_templates { get; set; } = null!;
 
     public virtual DbSet<missing_material> missing_materials { get; set; } = null!;
+
     public virtual DbSet<notification> notifications { get; set; } = null!;
+
+    public virtual DbSet<production_calendar> production_calendars { get; set; }
 
     public virtual DbSet<estimate_config> estimate_config { get; set; } = null!;
 
@@ -89,20 +90,6 @@ public partial class AppDbContext : DbContext
             entity.HasOne(d => d.order_item).WithMany(p => p.boms)
                 .HasForeignKey(d => d.order_item_id)
                 .HasConstraintName("boms_order_item_id_fkey");
-        });
-
-        modelBuilder.Entity<delivery>(entity =>
-        {
-            entity.HasKey(e => e.delivery_id).HasName("deliveries_pkey");
-            entity.Property(e => e.carrier).HasMaxLength(100);
-            entity.Property(e => e.ship_date).HasColumnType("timestamp without time zone");
-            entity.Property(e => e.status)
-                .HasMaxLength(20)
-                .HasDefaultValueSql("'Ready'::character varying");
-            entity.Property(e => e.tracking_code).HasMaxLength(50);
-            entity.HasOne(d => d.order).WithMany(p => p.deliveries)
-                .HasForeignKey(d => d.order_id)
-                .HasConstraintName("deliveries_order_id_fkey");
         });
 
         modelBuilder.Entity<material>(entity =>
@@ -665,7 +652,7 @@ public partial class AppDbContext : DbContext
                   .IsRequired();
             entity.Property(e => e.request_date)
                   .HasColumnName("request_date")
-                  .HasColumnType("timestamptz");
+                  .HasColumnType("timestamp without time zone");
             entity.Property(e => e.total_price)
                   .HasColumnName("total_price")
                   .HasColumnType("numeric(18,2)")
@@ -675,7 +662,7 @@ public partial class AppDbContext : DbContext
                   .HasDefaultValue(false);
             entity.Property(e => e.created_at)
                   .HasColumnName("created_at")
-                  .HasColumnType("timestamptz")
+                  .HasColumnType("timestamp without time zone")
                   .HasDefaultValueSql("now()");
             entity.HasIndex(e => e.material_id).HasDatabaseName("ix_missing_materials_material_id");
             entity.HasIndex(e => e.request_date).HasDatabaseName("ix_missing_materials_request_date");
@@ -712,6 +699,43 @@ public partial class AppDbContext : DbContext
                   .OnDelete(DeleteBehavior.Restrict)
                   .HasConstraintName("fk_products_product_type");
         });
+
+        modelBuilder.Entity<production_calendar>(entity =>
+        {
+            entity.HasKey(e => e.calendar_date).HasName("production_calendar_pkey");
+
+            entity.ToTable("production_calendar", "AMMS_DB");
+
+            entity.Property(e => e.calendar_date)
+                .HasColumnType("date");
+
+            entity.Property(e => e.holiday_name)
+                .HasMaxLength(255);
+
+            entity.Property(e => e.holiday_type)
+                .HasMaxLength(50);
+
+            entity.Property(e => e.is_non_working_day)
+                .HasDefaultValue(true);
+
+            entity.Property(e => e.is_manual_override)
+                .HasDefaultValue(false);
+
+            entity.Property(e => e.created_at)
+                .HasDefaultValueSql("CURRENT_TIMESTAMP")
+                .HasColumnType("timestamp without time zone");
+
+            entity.Property(e => e.updated_at)
+                .HasDefaultValueSql("CURRENT_TIMESTAMP")
+                .HasColumnType("timestamp without time zone");
+
+            entity.HasIndex(e => e.holiday_type)
+                .HasDatabaseName("ix_production_calendar_type");
+
+            entity.HasIndex(e => e.is_manual_override)
+                .HasDatabaseName("ix_production_calendar_manual");
+        });
+
         OnModelCreatingPartial(modelBuilder);
     }
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder);

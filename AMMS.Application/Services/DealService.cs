@@ -10,6 +10,7 @@ using AMMS.Shared.DTOs.PayOS;
 using AMMS.Shared.DTOs.Socket;
 using AMMS.Shared.Helpers;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -24,7 +25,7 @@ namespace AMMS.Application.Services
         private readonly IEmailService _emailService;
         private readonly IQuoteRepository _quoteRepo;
         private readonly IPayOsService _payOs;
-        private readonly IPaymentsService _payment;
+        private readonly IPaymentRepository _paymentRepo;
         private readonly IRealtimePublisher _rt;
         private readonly ILogger<DealService> _logger;
         private readonly IEmailBackgroundQueue _emailQueue;
@@ -45,7 +46,7 @@ namespace AMMS.Application.Services
     IEmailService emailService,
     IQuoteRepository quoteRepo,
     IPayOsService payOs,
-    IPaymentsService payment,
+    IPaymentRepository paymentRepo,
     IRealtimePublisher rt,
     ILogger<DealService> logger,
     IEmailBackgroundQueue emailQueue,
@@ -62,7 +63,7 @@ namespace AMMS.Application.Services
             _emailService = emailService;
             _quoteRepo = quoteRepo;
             _payOs = payOs;
-            _payment = payment;
+            _paymentRepo = paymentRepo;
             _rt = rt;
             _logger = logger;
             _emailQueue = emailQueue;
@@ -209,20 +210,43 @@ namespace AMMS.Application.Services
 
         public async Task<string> AcceptAndCreatePayOsLinkAsync(int orderRequestId)
         {
-            var req = await _requestRepo.GetByIdAsync(orderRequestId) ?? throw new Exception("Order request not found");
+            var req = await _requestRepo.GetByIdAsync(orderRequestId)
+                ?? throw new Exception("Order request not found");
+
             var est = await ResolveAcceptedEstimateAsync(req);
 
             await SendConsultantStatusEmailAsync(req, est, statusText: "KHÁCH ĐỒNG Ý BÁO GIÁ");
 
+            var resolvedQuoteId = await ResolveQuoteIdForEstimateAsync(
+                orderRequestId,
+                est.estimate_id,
+                req.quote_id,
+                CancellationToken.None);
+
             var dto = await CreateOrReuseDepositLinkAsync(
                 requestId: orderRequestId,
                 estimateId: est.estimate_id,
-                quoteId: req.quote_id,
+                quoteId: resolvedQuoteId,
                 ct: CancellationToken.None);
-            await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("deposited", new { message = $"Yêu cầu {req.order_request_id} - {req.order_id} đã được đặt cọc" });
-            await _hub.Clients.Group(RealtimeGroups.ByRole("production manager")).SendAsync("scheduled", new { message = $"#{req.order_id} đã được lên lịch sản xuất", id = req.order_id });
-            await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
+
             return dto.check_out_url ?? "";
+        }
+
+        private async Task<int?> ResolveQuoteIdForEstimateAsync(
+    int orderRequestId,
+    int estimateId,
+    int? currentQuoteId,
+    CancellationToken ct = default)
+        {
+            if (currentQuoteId.HasValue && currentQuoteId.Value > 0)
+                return currentQuoteId.Value;
+
+            return await _db.quotes
+                .AsNoTracking()
+                .Where(x => x.order_request_id == orderRequestId && x.estimate_id == estimateId)
+                .OrderByDescending(x => x.quote_id)
+                .Select(x => (int?)x.quote_id)
+                .FirstOrDefaultAsync(ct);
         }
 
         public async Task RejectDealAsync(int orderRequestId, string reason)
@@ -544,7 +568,7 @@ namespace AMMS.Application.Services
 
             var paymentTerms = await _baseConfigRepo.GetPaymentTermsAsync(ct);
 
-            var pending = await _payment.GetLatestPendingByRequestIdAndEstimateIdAsync(requestId, estimateId, ct);
+            var pending = await _paymentRepo.GetLatestPendingByRequestIdAndEstimateIdAsync(requestId, estimateId, ct);
             if (pending != null)
             {
                 PayOsResultDto? liveInfo = null;
@@ -614,7 +638,7 @@ namespace AMMS.Application.Services
                         ct: ct);
 
                     var now = AppTime.NowVnUnspecified();
-                    await _payment.UpsertPendingAsync(new payment
+                    await _paymentRepo.UpsertPendingAsync(new payment
                     {
                         order_request_id = requestId,
                         provider = "PAYOS",
@@ -632,7 +656,7 @@ namespace AMMS.Application.Services
                         quote_id = (quoteId.HasValue && quoteId.Value > 0) ? quoteId.Value : null
                     }, ct);
 
-                    await _payment.SaveChangesAsync(ct);
+                    await _paymentRepo.SaveChangesAsync(ct);
                     return payos;
                 }
                 catch (PayOsException ex) when (IsDuplicateOrderCode(ex.Message))
@@ -732,13 +756,13 @@ namespace AMMS.Application.Services
             if (actualRemainingAmount <= 0)
                 throw new InvalidOperationException("Remaining amount is already 0.");
 
-            var paid = await _payment.GetLatestByRequestIdAndTypeAsync(req.order_request_id, PaymentTypes.Remaining, ct);
+            var paid = await _paymentRepo.GetLatestByRequestIdAndTypeAsync(req.order_request_id, PaymentTypes.Remaining, ct);
             if (paid != null && IsPaidStatus(paid.status))
             {
                 return MergePayOsResult(null, PayOsRawMapper.FromPayment(paid), paid);
             }
 
-            var pending = await _payment.GetLatestPendingByRequestIdAndTypeAsync(req.order_request_id, PaymentTypes.Remaining, ct);
+            var pending = await _paymentRepo.GetLatestPendingByRequestIdAndTypeAsync(req.order_request_id, PaymentTypes.Remaining, ct);
             if (pending != null)
             {
                 PayOsResultDto? liveInfo = null;
@@ -795,7 +819,7 @@ namespace AMMS.Application.Services
 
             var now = AppTime.NowVnUnspecified();
 
-            await _payment.UpsertPendingAsync(new payment
+            await _paymentRepo.UpsertPendingAsync(new payment
             {
                 order_request_id = req.order_request_id,
                 provider = "PAYOS",
@@ -813,7 +837,7 @@ namespace AMMS.Application.Services
                 quote_id = req.quote_id
             }, ct);
 
-            await _payment.SaveChangesAsync(ct);
+            await _paymentRepo.SaveChangesAsync(ct);
             return payos;
         }
 
@@ -890,14 +914,50 @@ namespace AMMS.Application.Services
 
         private async Task<string?> ResolveConsultantEmailAsync(order_request req, CancellationToken ct = default)
         {
-            if (req.assigned_consultant.HasValue)
+            async Task<string?> TryGetUserEmailAsync(int? userId)
             {
-                var assignedUser = await _userRepo.GetByIdAsync(req.assigned_consultant.Value, ct);
-                if (!string.IsNullOrWhiteSpace(assignedUser?.email))
-                    return assignedUser.email.Trim();
+                if (!userId.HasValue || userId.Value <= 0)
+                    return null;
+
+                var user = await _userRepo.GetByIdAsync(userId.Value, ct);
+                var email = user?.email?.Trim();
+
+                return string.IsNullOrWhiteSpace(email) ? null : email;
             }
 
-            return _config["Deal:ConsultantEmail"]?.Trim();
+            var configuredConsultantEmail = (_config["Deal:ConsultantEmail"] ?? "").Trim();
+            var customerEmail = (req.customer_email ?? "").Trim();
+
+            var consultantEmail = await TryGetUserEmailAsync(req.actual_consultant_user_id);
+
+            consultantEmail ??= await TryGetUserEmailAsync(req.assigned_consultant);
+
+            if (string.IsNullOrWhiteSpace(consultantEmail))
+                consultantEmail = configuredConsultantEmail;
+
+            if (!string.IsNullOrWhiteSpace(consultantEmail) &&
+                !string.IsNullOrWhiteSpace(customerEmail) &&
+                string.Equals(consultantEmail, customerEmail, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrWhiteSpace(configuredConsultantEmail) &&
+                    !string.Equals(configuredConsultantEmail, customerEmail, StringComparison.OrdinalIgnoreCase))
+                {
+                    consultantEmail = configuredConsultantEmail;
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Resolved consultant email matched customer email. RequestId={RequestId}, CustomerEmail={CustomerEmail}, AssignedConsultant={AssignedConsultant}, ActualConsultant={ActualConsultant}",
+                        req.order_request_id,
+                        customerEmail,
+                        req.assigned_consultant,
+                        req.actual_consultant_user_id);
+
+                    return null;
+                }
+            }
+
+            return consultantEmail;
         }
 
         private async Task<cost_estimate> ResolveAcceptedEstimateAsync(order_request req, CancellationToken ct = default)

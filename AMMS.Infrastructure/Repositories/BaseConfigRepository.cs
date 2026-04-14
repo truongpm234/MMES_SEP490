@@ -22,19 +22,58 @@ namespace AMMS.Infrastructure.Repositories
                 .AsNoTracking()
                 .ToListAsync(ct);
 
+            var planning = MapPlanning(rows);
+
             var dto = new EstimateBaseConfigDto
             {
                 MaterialPrices = MapMaterialPrices(rows),
                 MaterialRates = MapMaterialRates(rows),
                 WasteRules = MapWasteRules(rows),
-                SystemParameters = MapSystemParameters(rows),
+                SystemParameters = MapSystemParameters(rows, planning),
                 ProcessCosts = MapProcessCosts(rows),
                 Design = MapDesign(rows),
                 PlatePrices = MapPlatePrices(rows),
-                PaymentTerms = MapPaymentTerms(rows) // thêm mới
+                PaymentTerms = MapPaymentTerms(rows),
+                Planning = planning
             };
 
             return dto;
+        }
+
+        private static PlanningConfig MapPlanning(List<estimate_config> rows)
+        {
+            decimal GetNum(string key, decimal fallback) =>
+                rows.FirstOrDefault(x => x.config_group == "planning" && x.config_key == key)?.value_num ?? fallback;
+
+            string GetText(string key, string fallback)
+            {
+                var raw = rows
+                    .Where(x => x.config_group == "planning" && x.config_key == key)
+                    .OrderByDescending(x => x.updated_at)
+                    .Select(x => x.value_text)
+                    .FirstOrDefault();
+
+                return NormalizeTimeText(raw, fallback);
+            }
+
+            return new PlanningConfig
+            {
+                min_start_wait_hours = GetNum("min_start_wait_hours", 6m),
+                work_start_time = GetText("work_start_time", "08:00"),
+                break_start_time = GetText("break_start_time", "12:00"),
+                break_end_time = GetText("break_end_time", "13:00"),
+                work_end_time = GetText("work_end_time", "17:00")
+            };
+        }
+        private static string NormalizeTimeText(string? raw, string fallback)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return fallback;
+
+            if (TimeSpan.TryParse(raw, out var ts))
+                return $"{ts.Hours:D2}:{ts.Minutes:D2}";
+
+            return fallback;
         }
 
         public async Task<PaymentTermsConfig> GetPaymentTermsAsync(CancellationToken ct)
@@ -180,7 +219,7 @@ namespace AMMS.Infrastructure.Repositories
             };
         }
 
-        private static SystemConfig MapSystemParameters(List<estimate_config> rows)
+        private static SystemConfig MapSystemParameters(List<estimate_config> rows, PlanningConfig planning)
         {
             decimal GetNum(string group, string key) =>
                 rows.FirstOrDefault(x => x.config_group == group && x.config_key == key)?.value_num ?? 0;
@@ -197,6 +236,7 @@ namespace AMMS.Infrastructure.Repositories
                 default_production_days = (int)GetNum("systemParameters", "default_production_days"),
                 rush_threshold_days = (int)GetNum("systemParameters", "rush_threshold_days"),
                 vat_percent = GetNum("systemParameters", "vat_percent"),
+                min_start_wait_hours = planning.min_start_wait_hours,
                 rush_percent_by_days_early = rush
             };
         }

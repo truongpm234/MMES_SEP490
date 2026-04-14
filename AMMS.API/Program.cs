@@ -48,6 +48,10 @@ var autoSendDealEnabled = builder.Configuration.GetValue("AutoSendDeal:Enabled",
 var autoSendDealCron = builder.Configuration["AutoSendDeal:Cron"] ?? "*/15 * * * *";
 var autoStartProductionEnabled = builder.Configuration.GetValue("AutoStartProduction:Enabled", true);
 var autoStartProductionCron = builder.Configuration["AutoStartProduction:Cron"] ?? "* * * * *";
+var autoCompleteDeliveredEnabled = builder.Configuration.GetValue("AutoCompleteDelivered:Enabled", true);
+var autoCompleteDeliveredCron = builder.Configuration["AutoCompleteDelivered:Cron"] ?? "0 1 * * *";
+var autoCancelPendingRequestEnabled = builder.Configuration.GetValue("AutoCancelPendingRequest:Enabled", true);
+var autoCancelPendingRequestCron = builder.Configuration["AutoCancelPendingRequest:Cron"] ?? "0 0 * * *";
 
 builder.Services.AddDbContext<AppDbContext>((sp, options) =>
 {
@@ -236,9 +240,10 @@ builder.Services.AddHttpClient("Resend", client =>
 builder.Services.AddScoped<QuoteExpiryJob>();
 builder.Services.AddScoped<AutoSendDealAfterVerifiedJob>();
 builder.Services.Configure<SchedulingOptions>(
-    builder.Configuration.GetSection("Scheduling"));
-builder.Services.AddSingleton<WorkCalendar>();
-
+builder.Configuration.GetSection("Scheduling"));
+builder.Services.AddScoped<WorkCalendar>();
+builder.Services.AddScoped<AutoCompleteDeliveredAfter7DaysJob>();
+builder.Services.AddScoped<AutoCancelPendingRequestAfter3DaysJob>();
 // Services
 builder.Services.AddScoped<IUploadFileService, UploadFileService>();
 builder.Services.AddScoped<ICloudinaryFileStorageService, CloudinaryFileStorageService>();
@@ -279,7 +284,6 @@ builder.Services.AddScoped<IProductTemplateRepository, ProductTemplateRepository
 builder.Services.AddScoped<IProductTemplateService, ProductTemplateService>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IUserService, UserService>();
-builder.Services.AddScoped<ScanService>();
 builder.Services.AddScoped<JWTService>();
 builder.Services.AddScoped<GoogleAuthService>();
 builder.Services.AddScoped<ISmsOtpService, TwilioSmsOtpService>();
@@ -303,6 +307,8 @@ builder.Services.AddScoped<IContractCompareService, ContractCompareService>();
 builder.Services.AddScoped<DeliveryHandoverEmailJob>();
 builder.Services.AddScoped<IEstimateConfigRepository, EstimateConfigRepository>();
 builder.Services.AddScoped<ITaskService, TaskService>();
+builder.Services.AddScoped<IProductionCalendarRepository, ProductionCalendarRepository>();
+builder.Services.AddScoped<IProductionCalendarService, ProductionCalendarService>();
 // Logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
@@ -356,6 +362,25 @@ if (hangfireRunServer)
                     "auto-start-production-by-planned-start",
                     job => job.RunAsync(CancellationToken.None),
                     autoStartProductionCron,
+                    vnTz
+                );
+            }
+
+            if (autoCompleteDeliveredEnabled)
+            {
+                RecurringJob.AddOrUpdate<AutoCompleteDeliveredAfter7DaysJob>(
+                    "auto-complete-delivered-after-7-days",
+                    job => job.RunAsync(CancellationToken.None),
+                    autoCompleteDeliveredCron,
+                    vnTz
+                );
+            }
+            if (autoCancelPendingRequestEnabled)
+            {
+                RecurringJob.AddOrUpdate<AutoCancelPendingRequestAfter3DaysJob>(
+                    "auto-cancel-pending-request-after-3-days",
+                    job => job.RunAsync(CancellationToken.None),
+                    autoCancelPendingRequestCron,
                     vnTz
                 );
             }

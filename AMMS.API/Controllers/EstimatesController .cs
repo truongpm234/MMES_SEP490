@@ -4,6 +4,7 @@ using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Estimates;
 using AMMS.Shared.DTOs.Planning;
 using Microsoft.AspNetCore.Mvc;
+using UglyToad.PdfPig.Core;
 
 namespace AMMS.API.Controllers
 {
@@ -146,9 +147,14 @@ namespace AMMS.API.Controllers
         {
             try
             {
-                if (req.request_id <= 0) return BadRequest(new { message = "request_id must be > 0" });
-                if (req.estimate_id <= 0) return BadRequest(new { message = "estimate_id must be > 0" });
-                if (req.file == null || req.file.Length == 0) return BadRequest(new { message = "file is required" });
+                if (req.request_id <= 0)
+                    return BadRequest(new { message = "request_id must be > 0" });
+
+                if (req.estimate_id <= 0)
+                    return BadRequest(new { message = "estimate_id must be > 0" });
+
+                if (req.file == null || req.file.Length == 0)
+                    return BadRequest(new { message = "file is required" });
 
                 var ext = Path.GetExtension(req.file.FileName)?.ToLowerInvariant();
                 if (ext != ".pdf")
@@ -179,6 +185,13 @@ namespace AMMS.API.Controllers
                     data = result
                 });
             }
+            catch (PdfDocumentFormatException)
+            {
+                return BadRequest(new
+                {
+                    message = "File PDF không hợp lệ hoặc nội dung file bị lỗi nên hệ thống không thể đọc để đối chiếu hợp đồng."
+                });
+            }
             catch (ArgumentException ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -186,6 +199,14 @@ namespace AMMS.API.Controllers
             catch (InvalidOperationException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Upload signed contract failed",
+                    detail = ex.Message
+                });
             }
         }
 

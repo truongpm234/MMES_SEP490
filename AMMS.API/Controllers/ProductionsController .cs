@@ -49,21 +49,6 @@ namespace AMMS.API.Controllers
 
             return null;
         }
-        private bool IsGeneralManager()
-        {
-            var roleName =
-                User.FindFirst("role_name")?.Value ??
-                User.FindFirst(ClaimTypes.Role)?.Value;
-
-            if (string.Equals(roleName, "general manager", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            var roleIdValue =
-                User.FindFirst("roleid")?.Value ??
-                User.FindFirst("role_id")?.Value;
-
-            return int.TryParse(roleIdValue, out var roleId) && roleId == 18;
-        }
 
         [HttpPost("schedule")]
         public async Task<IActionResult> Schedule([FromBody] ScheduleRequest req)
@@ -111,14 +96,6 @@ namespace AMMS.API.Controllers
         {
             var result = await _service.GetProductionDetailByOrderIdAsync(orderId, ct);
             if (result == null) return NotFound();
-
-            var roleId = GetRoleId();
-
-            result.stages = ProductionRoleMap.FilterStages(
-                result.stages,
-                roleId,
-                x => x.process_code
-            );
 
             return Ok(result);
         }

@@ -1,127 +1,185 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using AMMS.Infrastructure.Configurations;
-using Microsoft.Extensions.Options;
+﻿using AMMS.Infrastructure.DBContext;
+using Microsoft.EntityFrameworkCore;
 
 namespace AMMS.Application.Helpers
 {
     public class WorkCalendar
     {
-        private readonly SchedulingOptions _opt;
-        private readonly HashSet<DateOnly> _holidaySet;
-        private readonly int _shiftStartHour;
-        private readonly int _shiftEndHour;
-        private readonly bool _workOnSunday;
+        private readonly AppDbContext _db;
+        private WorkCalendarConfig? _config;
 
-        public WorkCalendar(IOptions<SchedulingOptions> opt)
+        public WorkCalendar(AppDbContext db)
         {
-            _opt = opt.Value ?? new SchedulingOptions();
-
-            _shiftStartHour = _opt.shift_start_hour > 0
-                ? _opt.shift_start_hour
-                : 8;
-
-            var fallbackEndHour = _shiftStartHour + (_opt.shift_hours_per_day > 0 ? _opt.shift_hours_per_day : 9);
-
-            _shiftEndHour = _opt.shift_end_hour > _shiftStartHour
-                ? _opt.shift_end_hour
-                : fallbackEndHour;
-
-            _workOnSunday = _opt.work_on_sunday;
-
-            _holidaySet = (_opt.holidays ?? new List<string>())
-                .Select(s => DateOnly.TryParse(s, out var d) ? d : default)
-                .Where(d => d != default)
-                .ToHashSet();
+            _db = db;
         }
 
-        public bool IsHoliday(DateOnly d) => _holidaySet.Contains(d);
-
-        public bool IsWorkingDay(DateOnly d)
+        public DateTime NormalizeStart(DateTime input)
         {
-            if (!_workOnSunday && d.DayOfWeek == DayOfWeek.Sunday)
-                return false;
-
-            if (IsHoliday(d))
-                return false;
-
-            return true;
-        }
-
-        private DateTime GetShiftStart(DateOnly d)
-            => new DateTime(d.Year, d.Month, d.Day, _shiftStartHour, 0, 0, DateTimeKind.Unspecified);
-
-        private DateTime GetShiftEnd(DateOnly d)
-            => new DateTime(d.Year, d.Month, d.Day, _shiftEndHour, 0, 0, DateTimeKind.Unspecified);
-
-        private DateTime NextDayShiftStart(DateTime dt)
-        {
-            var nextDate = DateOnly.FromDateTime(dt.Date).AddDays(1);
-            return GetShiftStart(nextDate);
-        }
-
-        public DateTime NormalizeStart(DateTime dt)
-        {
-            dt = DateTime.SpecifyKind(dt, DateTimeKind.Unspecified);
+            var cfg = GetConfig();
+            var current = DateTime.SpecifyKind(input, DateTimeKind.Unspecified);
 
             while (true)
             {
-                var d = DateOnly.FromDateTime(dt);
+                current = NormalizeToWorkingTime(current, cfg);
 
-                if (!IsWorkingDay(d))
-                {
-                    dt = NextDayShiftStart(dt);
-                    continue;
-                }
+                if (IsWorkingDay(current.Date))
+                    return current;
 
-                var shiftStart = GetShiftStart(d);
-                var shiftEnd = GetShiftEnd(d);
-
-                if (dt < shiftStart)
-                    return shiftStart;
-
-                if (dt >= shiftEnd)
-                {
-                    dt = NextDayShiftStart(dt);
-                    continue;
-                }
-
-                return dt;
+                current = current.Date.AddDays(1).Add(cfg.WorkStart);
             }
         }
 
         public DateTime AddWorkingHours(DateTime start, double hours)
         {
-            var cur = NormalizeStart(start);
-
             if (hours <= 0)
-                return cur;
+                return NormalizeStart(start);
 
-            var remaining = TimeSpan.FromHours(hours);
+            var cfg = GetConfig();
+            var current = NormalizeStart(start);
+            var remainingMinutes = (int)Math.Ceiling(hours * 60d);
 
-            while (remaining > TimeSpan.Zero)
+            while (remainingMinutes > 0)
             {
-                var d = DateOnly.FromDateTime(cur);
-                var shiftEnd = GetShiftEnd(d);
+                current = NormalizeStart(current);
 
-                var available = shiftEnd - cur;
+                var segmentEnd = GetSegmentEnd(current, cfg);
+                var availableMinutes = (int)(segmentEnd - current).TotalMinutes;
 
-                if (available <= TimeSpan.Zero)
+                if (availableMinutes <= 0)
                 {
-                    cur = NormalizeStart(NextDayShiftStart(cur));
+                    current = MoveToNextSegment(current, cfg);
                     continue;
                 }
 
-                if (remaining <= available)
-                    return cur.Add(remaining);
+                if (remainingMinutes <= availableMinutes)
+                    return current.AddMinutes(remainingMinutes);
 
-                remaining -= available;
-
-                cur = NormalizeStart(NextDayShiftStart(cur));
+                remainingMinutes -= availableMinutes;
+                current = MoveToNextSegment(segmentEnd, cfg);
             }
 
-            return cur;
+            return current;
+        }
+
+        private WorkCalendarConfig GetConfig()
+        {
+            if (_config != null)
+                return _config;
+
+            var rows = _db.estimate_config
+                .AsNoTracking()
+                .Where(x => x.config_group == "planning")
+                .OrderByDescending(x => x.updated_at)
+                .ToList();
+
+            var cfg = new WorkCalendarConfig
+            {
+                WorkStart = ParseTime(
+                    rows.FirstOrDefault(x => x.config_key == "work_start_time")?.value_text,
+                    new TimeSpan(8, 0, 0)),
+
+                BreakStart = ParseTime(
+                    rows.FirstOrDefault(x => x.config_key == "break_start_time")?.value_text,
+                    new TimeSpan(12, 0, 0)),
+
+                BreakEnd = ParseTime(
+                    rows.FirstOrDefault(x => x.config_key == "break_end_time")?.value_text,
+                    new TimeSpan(13, 0, 0)),
+
+                WorkEnd = ParseTime(
+                    rows.FirstOrDefault(x => x.config_key == "work_end_time")?.value_text,
+                    new TimeSpan(17, 0, 0))
+            };
+
+            // Tự sửa config lỗi để tránh vỡ scheduler
+            if (cfg.WorkEnd <= cfg.WorkStart)
+                cfg.WorkEnd = cfg.WorkStart.Add(TimeSpan.FromHours(8));
+
+            if (cfg.BreakStart < cfg.WorkStart || cfg.BreakStart > cfg.WorkEnd)
+                cfg.BreakStart = cfg.WorkEnd;
+
+            if (cfg.BreakEnd < cfg.BreakStart || cfg.BreakEnd > cfg.WorkEnd)
+                cfg.BreakEnd = cfg.BreakStart;
+
+            _config = cfg;
+            return _config;
+        }
+
+        private static DateTime NormalizeToWorkingTime(DateTime dt, WorkCalendarConfig cfg)
+        {
+            var t = dt.TimeOfDay;
+
+            if (t < cfg.WorkStart)
+                return dt.Date.Add(cfg.WorkStart);
+
+            if (t >= cfg.WorkEnd)
+                return dt.Date.AddDays(1).Add(cfg.WorkStart);
+
+            var hasBreak = cfg.BreakEnd > cfg.BreakStart;
+            if (hasBreak && t >= cfg.BreakStart && t < cfg.BreakEnd)
+                return dt.Date.Add(cfg.BreakEnd);
+
+            return dt;
+        }
+
+        private bool IsWorkingDay(DateTime date)
+        {
+            var d = date.Date;
+
+            // Ưu tiên row override trong production_calendar
+            var row = _db.production_calendars
+                .AsNoTracking()
+                .FirstOrDefault(x => x.calendar_date == d);
+
+            if (row != null)
+                return !row.is_non_working_day;
+
+            // Rule mặc định
+            return d.DayOfWeek != DayOfWeek.Sunday;
+        }
+
+        private static DateTime GetSegmentEnd(DateTime dt, WorkCalendarConfig cfg)
+        {
+            var t = dt.TimeOfDay;
+            var hasBreak = cfg.BreakEnd > cfg.BreakStart;
+
+            if (hasBreak && t < cfg.BreakStart)
+                return dt.Date.Add(cfg.BreakStart);
+
+            if ((!hasBreak || t >= cfg.BreakEnd) && t < cfg.WorkEnd)
+                return dt.Date.Add(cfg.WorkEnd);
+
+            return dt;
+        }
+
+        private static DateTime MoveToNextSegment(DateTime dt, WorkCalendarConfig cfg)
+        {
+            var t = dt.TimeOfDay;
+            var hasBreak = cfg.BreakEnd > cfg.BreakStart;
+
+            if (hasBreak && t < cfg.BreakStart)
+                return dt.Date.Add(cfg.BreakEnd);
+
+            return dt.Date.AddDays(1).Add(cfg.WorkStart);
+        }
+
+        private static TimeSpan ParseTime(string? raw, TimeSpan fallback)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return fallback;
+
+            if (TimeSpan.TryParse(raw, out var ts))
+                return ts;
+
+            return fallback;
+        }
+
+        private sealed class WorkCalendarConfig
+        {
+            public TimeSpan WorkStart { get; set; }
+            public TimeSpan BreakStart { get; set; }
+            public TimeSpan BreakEnd { get; set; }
+            public TimeSpan WorkEnd { get; set; }
         }
     }
 }

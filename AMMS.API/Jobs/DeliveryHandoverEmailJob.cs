@@ -84,7 +84,7 @@ namespace AMMS.API.Jobs
             if (string.IsNullOrWhiteSpace(feBase))
                 throw new InvalidOperationException("Missing Deal:BaseUrlFe");
 
-            var confirmReceiveUrl = $"{feBase}/customer-recieve/{req.order_request_id}";
+            var confirmReceiveUrl = $"{feBase}/customer-receive/{req.order_request_id}";
 
             var html = DeliveryEmailTemplates.BuildDeliveryHandoverEmail(
                 req,
