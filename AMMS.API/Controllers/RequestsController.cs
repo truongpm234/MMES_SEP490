@@ -26,6 +26,7 @@ namespace AMMS.API.Controllers
     public class RequestsController : ControllerBase
     {
         private readonly IRequestService _service;
+        private readonly IHubContext<RealtimeHub> _hub;
         private readonly IDealService _dealService;
         private readonly IPaymentsService _paymentService;
         private readonly IProductionSchedulingService _schedulingService;
@@ -40,6 +41,7 @@ namespace AMMS.API.Controllers
         private static readonly ConcurrentDictionary<long, byte> _payosProcessingLocks = new();
 
         public RequestsController(
+            IHubContext<RealtimeHub> hub,
     NotificationService notiService,
     IHubContext<RealtimeHub> rt,
     IRequestService service,
@@ -53,6 +55,7 @@ namespace AMMS.API.Controllers
     ILogger<RequestsController> logger,
     IServiceScopeFactory scopeFactory)
         {
+            _hub = hub;
             _notiService = notiService;
             _rt = rt;
             _service = service;
@@ -425,7 +428,10 @@ namespace AMMS.API.Controllers
             if (!req.quote_id.HasValue && quoteId.GetValueOrDefault() > 0)
                 req.quote_id = quoteId!.Value;
 
+            await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("accepted", new { message = $"Yêu cầu #{req.order_request_id} đã được đặt cọc", id = req.order_request_id });
+            await _notiService.CreateNotfi(2, $"Yêu cầu #{req.order_request_id} đã được đặt cọc", req.assigned_consultant, req.order_request_id, "accepted");
             await _db.SaveChangesAsync(ct);
+
         }
 
         private void QueueProcessPaidInBackground(
@@ -744,7 +750,7 @@ namespace AMMS.API.Controllers
 
             return Ok(result);
         }
-     
+
         [HttpGet("payos-deposit/{request_id:int}")]
         public async Task<IActionResult> GetPayOsDeposit(
     [FromRoute] int request_id,
@@ -980,12 +986,14 @@ namespace AMMS.API.Controllers
                     {
                         ord.status = "Scheduled";
                     }
-
+                    await _hub.Clients.Group(RealtimeGroups.ByRole("general manager")).SendAsync("confirm-layout", new { message = $"Có đơn {orderId} cần được kiểm duyệt sản xuất" });
+                    await _notiService.CreateNotfi(18, $"Có đơn {orderId} cần được kiểm duyệt sản xuất", null, req.order_request_id, "Scheduled");
                     await _db.SaveChangesAsync(ct);
                     await tx.CommitAsync(ct);
                 });
 
                 _service.QueueRelease(orderId);
+
 
                 return Accepted(new
                 {
@@ -1090,8 +1098,8 @@ namespace AMMS.API.Controllers
                     req.process_status = "Finished";
                     prod.status = "Finished";
                     await _db.SaveChangesAsync();
-                    await _rt.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("imported", new { message = $"Đơn hàng {order_id} đã được nhập kho, sẵn sàng giao" });
-                    await _notiService.CreateNotfi(2, $"Đơn hàng {order_id} đã được nhập kho, sẵn sàng giao", req.assigned_consultant, req.order_request_id, "Paid");
+                    await _rt.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("importing", new { message = $"Đơn hàng {order_id} đã được nhập kho, sẵn sàng giao" });
+                    await _notiService.CreateNotfi(2, $"Đơn hàng {order_id} đã được nhập kho, sẵn sàng giao", req.assigned_consultant, req.order_request_id, "Finished");
                     return Ok("Success");
                 }
             }

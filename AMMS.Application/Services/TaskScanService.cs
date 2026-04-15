@@ -115,7 +115,6 @@ namespace AMMS.Application.Services
                     log_time = now,
                     scanned_by_user_id = scannedByUserId
                 };
-
                 await _logRepo.AddAsync(log);
                 await _taskRepo.SaveChangesAsync(innerCt);
 
@@ -141,6 +140,14 @@ namespace AMMS.Application.Services
                         !string.Equals(ord.status, "Importing", StringComparison.OrdinalIgnoreCase))
                     {
                         ord.status = "Importing";
+                        var request = await _db.order_requests.FirstOrDefaultAsync(o => o.order_id == ord.order_id);
+                        await _hub.Clients.All.SendAsync("finishedProduction",
+                        new { message = $"Đơn hàng {prod.order_id} đã được sản xuất xong" });
+                        if (request != null)
+                        {
+                            await _hub.Clients.Group(RealtimeGroups.ByRole("warehouse manager")).SendAsync("Importing", new { message = $"Đơn hàng {ord.order_id} đã được sản xuất xong, chờ nhập kho" });
+                            await _noti.CreateNotfi(4, $"Đơn hàng {ord.order_id} đã được sản xuất xong, chờ nhập kho", null, request.order_request_id, "Importing");
+                        }
                     }
 
                     if (ord != null)
@@ -157,9 +164,6 @@ namespace AMMS.Application.Services
                     }
                 }
 
-                await _hub.Clients
-                    .Group(RealtimeGroups.ByRole("production manager"))
-                    .SendAsync("finishedTask", new { message = $"Hoàn thành công đoạn" });
 
                 await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
 
