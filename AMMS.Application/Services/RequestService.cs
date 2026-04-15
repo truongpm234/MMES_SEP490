@@ -128,7 +128,7 @@ namespace AMMS.Application.Services
                     message = $"Có yêu cầu #{entity.order_request_id} mới được tạo",
                     id = entity.order_request_id
                 });
-            await _notificationService.CreateNotfi(2, $"Có yêu cầu #{entity.order_request_id} mới được tạo", entity.assigned_consultant, entity.order_request_id);
+            await _notificationService.CreateNotfi(2, $"Có yêu cầu #{entity.order_request_id} mới được tạo", entity.assigned_consultant, entity.order_request_id, "Pending");
 
             //khánh sửa signalr
             await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("pending", new { message = $"Có yêu cầu #{entity.order_request_id} mới được tạo", user_id = entity.assigned_consultant });
@@ -171,11 +171,11 @@ namespace AMMS.Application.Services
                     id = entity.order_request_id
                 });
 
-            await _notificationService.CreateNotfi(3, $"Có yêu cầu {entity.order_request_id} cần duyệt", null, entity.order_request_id);
+            await _notificationService.CreateNotfi(3, $"Có yêu cầu {entity.order_request_id} cần duyệt", null, entity.order_request_id, "Processing");
             //Khánh sửa signalr
             await _hub.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("consultantCreateRequest", new { message = $"Có yêu cầu {entity.order_request_id} cần duyệt", id = entity.order_request_id });
 
-            await _notificationService.CreateNotfi(3, $"Có yêu cầu {entity.order_request_id} vừa được tạo", null, entity.order_request_id);
+            await _notificationService.CreateNotfi(3, $"Có yêu cầu {entity.order_request_id} vừa được tạo", null, entity.order_request_id, "Pending");
             return new CreateRequestResponse
             {
                 order_request_id = entity.order_request_id,
@@ -570,7 +570,7 @@ namespace AMMS.Application.Services
                         message = $"Yêu cầu #{req.order_request_id} đã được duyệt",
                         id = req.order_request_id
                     });
-                await _notificationService.CreateNotfi(2, $"Yêu cầu #{req.order_request_id} đã được duyệt", req.assigned_consultant, req.order_request_id);
+                await _notificationService.CreateNotfi(2, $"Yêu cầu #{req.order_request_id} đã được duyệt", req.assigned_consultant, req.order_request_id, "Verified");
                 await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("verified", new { message = $"Yêu cầu #{req.order_request_id} đã được duyệt", user_id = req.assigned_consultant });
             }
             else
@@ -590,7 +590,7 @@ namespace AMMS.Application.Services
                         message = $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa",
                         id = req.order_request_id
                     });
-                await _notificationService.CreateNotfi(2, $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa", req.assigned_consultant, req.order_request_id);
+                await _notificationService.CreateNotfi(2, $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa", req.assigned_consultant, req.order_request_id, "Declined");
                 await _hub.Clients.Group(RealtimeGroups.ByRole("consultant")).SendAsync("declined", new { message = $"Yêu cầu #{req.order_request_id} chưa được duyệt, cần chỉnh sửa", user_id = req.assigned_consultant });
             }
             await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
@@ -829,7 +829,7 @@ namespace AMMS.Application.Services
 
             await _hub.Clients.Group(RealtimeGroups.ByRole("manager")).SendAsync("clone-request", new { message = $"Có yêu cầu {clonedRequest.order_request_id} vừa được tạo", user_id = clonedRequest.assigned_consultant });
 
-            await _notificationService.CreateNotfi(3, $"Có yêu cầu {clonedRequest.order_request_id} vừa được tạo", null, clonedRequest.order_request_id);
+            await _notificationService.CreateNotfi(3, $"Có yêu cầu {clonedRequest.order_request_id} vừa được tạo", null, clonedRequest.order_request_id, "Pending");
 
             await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
 
@@ -905,7 +905,7 @@ namespace AMMS.Application.Services
                     RequestId = requestId
                 };
             }
-           
+
             if (req.quote_id == null)
             {
                 return new ConvertRequestToOrderResponse
@@ -1491,7 +1491,7 @@ namespace AMMS.Application.Services
             }
         }
 
-        
+
         private static string? NormalizeMaterialAlias(string? code)
         {
             var c = (code ?? "").Trim().ToUpperInvariant();
