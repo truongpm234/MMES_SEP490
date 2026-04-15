@@ -13,5 +13,10 @@ namespace AMMS.Application.Interfaces
     {
         Task SendOtpForPhoneAsync(string phone, CancellationToken ct = default);
         Task<PhoneHistoryWithOtpResult> GetHistoryByPhoneWithOtpAsync(string phone, string otp, int page, int pageSize, CancellationToken ct = default);
+        Task<PhoneHistoryWithOtpResult> GetHistoryByPhoneWithOtpAsyncTest(
+    string phone,
+    int page,
+    int pageSize,
+    CancellationToken ct = default);
     }
 }

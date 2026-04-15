@@ -51,5 +51,23 @@ namespace AMMS.API.Controllers
             }
         }
 
+        [HttpPost("history-test")]
+        public async Task<IActionResult> GetHistory([FromBody] RequestLookupWithOtpRequest req, CancellationToken ct)
+        {
+            try
+            {
+                var result = await _lookupService.GetHistoryByPhoneWithOtpAsyncTest(
+                    req.Phone,
+                    req.Page,
+                    req.PageSize,
+                    ct);
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
     }
 }
