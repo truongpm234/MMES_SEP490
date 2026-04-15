@@ -242,7 +242,6 @@ namespace AMMS.Infrastructure.Repositories
         public Task<order?> GetByIdForUpdateAsync(int orderId, CancellationToken ct = default)
         {
             return _db.orders
-                .AsTracking()
                 .FirstOrDefaultAsync(x => x.order_id == orderId, ct);
         }
 

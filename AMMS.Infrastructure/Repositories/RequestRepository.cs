@@ -26,6 +26,11 @@ namespace AMMS.Infrastructure.Repositories
                 .FirstOrDefaultAsync(x => x.order_request_id == id);
         }
 
+        public async Task<order_request?> GetByOderIdAsync(int id)
+        {
+            return await _db.order_requests
+                .FirstOrDefaultAsync(x => x.order_id == id);
+        }
         public async Task<RequestWithCostDto?> GetByIdWithCostAsync(int id, int? consultantUserId = null)
         {
             var request = await _db.order_requests.AsNoTracking()

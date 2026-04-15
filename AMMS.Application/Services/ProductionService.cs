@@ -20,6 +20,7 @@ namespace AMMS.Application.Services
         private readonly AppDbContext _db;
         private readonly IHubContext<RealtimeHub> _rt;
         private readonly NotificationService _notiService;
+        private readonly IRequestRepository _requestRepo;
 
         public ProductionService(
             IHubContext<RealtimeHub> rt,
@@ -27,6 +28,7 @@ namespace AMMS.Application.Services
             IRealtimePublisher hub,
             AppDbContext db,
             IOrderRepository orderRepository,
+            IRequestRepository requestRepository,
             NotificationService notiService)
         {
             _db = db;
@@ -35,6 +37,7 @@ namespace AMMS.Application.Services
             _hub = hub;
             _orderRepo = orderRepository;
             _notiService = notiService;
+            _requestRepo = requestRepository;
         }
 
         public async Task<NearestDeliveryResponse> GetNearestDeliveryAsync()
@@ -107,8 +110,6 @@ namespace AMMS.Application.Services
             return await _repo.SetCompletedByOrderIdAsync(orderId, ct);
         }
 
-        // Giữ tên method cũ để controller hiện tại không phải đổi
-        // nhưng bên trong vẫn dùng flow mới: KHÔNG promote first task
         public async Task<int?> StartProductionAndPromoteFirstTaskAsync(int orderId, CancellationToken ct = default)
         {
             var ord = await _db.orders
@@ -136,49 +137,45 @@ namespace AMMS.Application.Services
         }
 
         public async Task<ProductionReadyCheckResponse?> GetProductionReadyAsync(
-            int orderId,
-            CancellationToken ct = default)
+    int orderId,
+    CancellationToken ct = default)
         {
-            var ord = await _db.orders
-                .AsTracking()
-                .FirstOrDefaultAsync(x => x.order_id == orderId, ct);
+            var ord = await _orderRepo.GetByIdAsync(orderId);
 
             if (ord == null)
                 return null;
 
-            var hasEnoughMaterial = await _orderRepo.IsOrderEnoughByOrderIdAsync(orderId);
-            var hasFreeMachine = await HasFreeMachineForFirstReleaseAsync(orderId, ct);
+            var materials = await GetMaterialReadinessAsync(orderId, ct);
+            var machines = await GetMachineReadinessAsync(orderId, ct);
 
-            if (ord.is_enough != hasEnoughMaterial)
-            {
-                ord.is_enough = hasEnoughMaterial;
-                await _db.SaveChangesAsync(ct);
-            }
+            var hasEnoughMaterial = materials.Count > 0 && materials.All(x => x.is_enough);
+            var hasFreeMachine = machines.Count > 0 && machines.Any(x => x.is_available);
 
             return new ProductionReadyCheckResponse
             {
                 order_id = orderId,
                 is_production_ready = ord.is_production_ready,
                 has_enough_material = hasEnoughMaterial,
-                has_free_machine = hasFreeMachine
+                has_free_machine = hasFreeMachine,
+                materials = materials,
+                machines = machines
             };
         }
 
-        public async Task<bool> SetProductionReadyAsync(
-            int orderId,
-            bool isProductionReady,
-            CancellationToken ct = default)
+        public async Task<bool> SetProductionReadyAsync(int orderId, bool isProductionReady, CancellationToken ct = default)
         {
-            var ord = await _db.orders
-                .FirstOrDefaultAsync(x => x.order_id == orderId, ct);
+            var ord = await _orderRepo.GetByIdForUpdateAsync(orderId, ct);
 
             if (ord == null)
                 return false;
 
             if (isProductionReady)
             {
-                var hasEnoughMaterial = await _orderRepo.IsOrderEnoughByOrderIdAsync(orderId);
-                var hasFreeMachine = await HasFreeMachineForFirstReleaseAsync(orderId, ct);
+                var materials = await GetMaterialReadinessAsync(orderId, ct);
+                var machines = await GetMachineReadinessAsync(orderId, ct);
+
+                var hasEnoughMaterial = materials.Count > 0 && materials.All(x => x.is_enough);
+                var hasFreeMachine = machines.Count > 0 && machines.Any(x => x.is_available);
 
                 if (!hasEnoughMaterial || !hasFreeMachine)
                     throw new InvalidOperationException(
@@ -188,7 +185,7 @@ namespace AMMS.Application.Services
             }
 
             ord.is_production_ready = isProductionReady;
-            await _db.SaveChangesAsync(ct);
+            await _orderRepo.SaveChangesAsync();
 
             await _rt.Clients
                 .Group(RealtimeGroups.ByRole("production manager"))
@@ -197,7 +194,7 @@ namespace AMMS.Application.Services
                     message = $"Đơn hàng {orderId} đã được lên lịch sản xuất có thể bắt đầu sản xuất"
                 });
 
-            var req = await _db.order_requests.FirstOrDefaultAsync(o => o.order_id == orderId, ct);
+            var req = await _requestRepo.GetByOderIdAsync(orderId);
             if (req != null)
             {
                 await _notiService.CreateNotfi(
@@ -210,9 +207,117 @@ namespace AMMS.Application.Services
             return true;
         }
 
-        private async Task<bool> HasFreeMachineForFirstReleaseAsync(
-            int orderId,
-            CancellationToken ct = default)
+        private async Task<List<ProductionReadyMaterialDto>> GetMaterialReadinessAsync(
+    int orderId,
+    CancellationToken ct = default)
+        {
+            var rows = await (
+                from oi in _db.order_items.AsNoTracking()
+                join b in _db.boms.AsNoTracking() on oi.item_id equals b.order_item_id
+                join m in _db.materials.AsNoTracking() on b.material_id equals m.material_id into mj
+                from m in mj.DefaultIfEmpty()
+                where oi.order_id == orderId
+                select new
+                {
+                    order_qty = oi.quantity,
+
+                    b.material_id,
+                    b.material_code,
+                    b.material_name,
+                    b.unit,
+                    b.qty_total,
+                    b.qty_per_product,
+                    b.wastage_percent,
+
+                    material_exists = m != null,
+                    db_material_code = m != null ? m.code : null,
+                    db_material_name = m != null ? m.name : null,
+                    db_unit = m != null ? m.unit : null,
+                    stock_qty = m != null ? (m.stock_qty ?? 0m) : 0m
+                }
+            ).ToListAsync(ct);
+
+            if (rows.Count == 0)
+                return new List<ProductionReadyMaterialDto>();
+
+            var result = rows
+                .GroupBy(x => new
+                {
+                    x.material_id,
+                    MaterialCode = !string.IsNullOrWhiteSpace(x.db_material_code) ? x.db_material_code : x.material_code,
+                    MaterialName = !string.IsNullOrWhiteSpace(x.db_material_name) ? x.db_material_name : x.material_name,
+                    Unit = !string.IsNullOrWhiteSpace(x.db_unit) ? x.db_unit : x.unit,
+                    x.material_exists
+                })
+                .Select(g =>
+                {
+                    decimal requiredQty = 0m;
+
+                    foreach (var line in g)
+                    {
+                        decimal lineQty;
+
+                        if (line.qty_total.HasValue && line.qty_total.Value > 0m)
+                        {
+                            lineQty = line.qty_total.Value;
+                        }
+                        else
+                        {
+                            var orderQty = line.order_qty <= 0 ? 1 : line.order_qty;
+                            var qtyPerProduct = line.qty_per_product ?? 0m;
+                            var wasteFactor = 1m + ((line.wastage_percent ?? 0m) / 100m);
+
+                            lineQty = orderQty * qtyPerProduct * wasteFactor;
+                        }
+
+                        if (lineQty < 0m) lineQty = 0m;
+                        requiredQty += lineQty;
+                    }
+
+                    requiredQty = Math.Round(requiredQty, 4);
+
+                    var mapped = g.Key.material_id.HasValue
+                                 && g.Key.material_id.Value > 0
+                                 && g.Key.material_exists;
+
+                    var availableQty = mapped
+                        ? Math.Round(g.Max(x => x.stock_qty), 4)
+                        : 0m;
+
+                    var missingQty = requiredQty - availableQty;
+                    if (missingQty < 0m) missingQty = 0m;
+
+                    var isEnough = mapped && missingQty <= 0m;
+
+                    var status = !mapped
+                        ? "Unmapped"
+                        : isEnough ? "Enough" : "Missing";
+
+                    return new ProductionReadyMaterialDto
+                    {
+                        material_id = g.Key.material_id,
+                        material_code = g.Key.MaterialCode,
+                        material_name = g.Key.MaterialName,
+                        unit = g.Key.Unit,
+
+                        required_qty = requiredQty,
+                        available_qty = availableQty,
+                        missing_qty = missingQty,
+
+                        is_enough = isEnough,
+                        status = status
+                    };
+                })
+                .OrderBy(x => x.status == "Missing" ? 0 : x.status == "Unmapped" ? 1 : 2)
+                .ThenBy(x => x.material_name)
+                .ToList();
+
+            return result;
+        }
+
+        private async Task<List<ProductionReadyMachineDto>> GetMachineReadinessAsync(
+    int orderId,
+    CancellationToken ct = default)
         {
             var prod = await _db.productions
                 .AsNoTracking()
@@ -221,7 +326,7 @@ namespace AMMS.Application.Services
                 .FirstOrDefaultAsync(ct);
 
             if (prod == null)
-                return false;
+                return new List<ProductionReadyMachineDto>();
 
             var tasks = await _db.tasks
                 .Include(x => x.process)
@@ -232,29 +337,104 @@ namespace AMMS.Application.Services
                 .ToListAsync(ct);
 
             if (tasks.Count == 0)
-                return false;
+                return new List<ProductionReadyMachineDto>();
 
             var hasInitialParallel = tasks.Any(x =>
                 ProductionFlowHelper.IsInitialParallel(x.process?.process_code));
 
-            var candidateMachineCodes = (hasInitialParallel
+            var targetTasks = (hasInitialParallel
                     ? tasks.Where(x => ProductionFlowHelper.IsInitialParallel(x.process?.process_code))
                     : tasks.Take(1))
-                .Select(x => x.machine)
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Distinct()
+                .OrderBy(x => x.seq_num)
+                .ThenBy(x => x.task_id)
                 .ToList();
 
-            if (candidateMachineCodes.Count == 0)
-                return false;
+            if (targetTasks.Count == 0)
+                return new List<ProductionReadyMachineDto>();
 
-            return await _db.machines
+            var machineCodes = targetTasks
+                .Where(x => !string.IsNullOrWhiteSpace(x.machine))
+                .Select(x => x.machine!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var machineMap = await _db.machines
                 .AsNoTracking()
-                .AnyAsync(m =>
-                    m.is_active &&
-                    candidateMachineCodes.Contains(m.machine_code) &&
-                    ((m.free_quantity ?? (m.quantity - (m.busy_quantity ?? 0))) > 0),
-                    ct);
+                .Where(x => machineCodes.Contains(x.machine_code))
+                .ToDictionaryAsync(x => x.machine_code, StringComparer.OrdinalIgnoreCase, ct);
+
+            var result = new List<ProductionReadyMachineDto>();
+
+            foreach (var t in targetTasks)
+            {
+                var machineCode = t.machine?.Trim();
+                var processCode = t.process?.process_code;
+                var processName = t.process?.process_name ?? t.name;
+
+                if (string.IsNullOrWhiteSpace(machineCode))
+                {
+                    result.Add(new ProductionReadyMachineDto
+                    {
+                        process_id = t.process_id,
+                        seq_num = t.seq_num,
+                        process_code = processCode,
+                        process_name = processName,
+                        machine_code = null,
+                        machine_found = false,
+                        is_available = false,
+                        total_quantity = 0,
+                        busy_quantity = 0,
+                        free_quantity = 0,
+                        status = "Unmapped"
+                    });
+
+                    continue;
+                }
+
+                if (!machineMap.TryGetValue(machineCode, out var machine) || !machine.is_active)
+                {
+                    result.Add(new ProductionReadyMachineDto
+                    {
+                        process_id = t.process_id,
+                        seq_num = t.seq_num,
+                        process_code = processCode,
+                        process_name = processName,
+                        machine_code = machineCode,
+                        machine_found = false,
+                        is_available = false,
+                        total_quantity = 0,
+                        busy_quantity = 0,
+                        free_quantity = 0,
+                        status = "Unmapped"
+                    });
+
+                    continue;
+                }
+
+                var totalQty = machine.quantity;
+                var busyQty = machine.busy_quantity ?? 0;
+                var freeQty = machine.free_quantity ?? (totalQty - busyQty);
+                if (freeQty < 0) freeQty = 0;
+
+                var isAvailable = freeQty > 0;
+
+                result.Add(new ProductionReadyMachineDto
+                {
+                    process_id = t.process_id,
+                    seq_num = t.seq_num,
+                    process_code = processCode,
+                    process_name = processName,
+                    machine_code = machineCode,
+                    machine_found = true,
+                    is_available = isAvailable,
+                    total_quantity = totalQty,
+                    busy_quantity = busyQty,
+                    free_quantity = freeQty,
+                    status = isAvailable ? "Available" : "Busy"
+                });
+            }
+
+            return result;
         }
     }
 }

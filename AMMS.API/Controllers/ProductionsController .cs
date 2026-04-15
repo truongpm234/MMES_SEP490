@@ -125,6 +125,8 @@ namespace AMMS.API.Controllers
         }
 
         [HttpGet("start-ready/{orderId:int}")]
+        [ProducesResponseType(typeof(ProductionReadyCheckResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetProductionReady(int orderId, CancellationToken ct)
         {
             var result = await _service.GetProductionReadyAsync(orderId, ct);
