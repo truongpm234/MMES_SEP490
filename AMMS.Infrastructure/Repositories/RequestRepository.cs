@@ -430,135 +430,7 @@ namespace AMMS.Infrastructure.Repositories
 
             return data.StockQty >= data.RequiredQty;
         }
-
-        public async Task<PagedResultLite<RequestSortedDto>> GetSortedByQuantityPagedAsync(
-    bool ascending, int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default)
-        {
-            if (page <= 0) page = 1;
-            if (pageSize <= 0) pageSize = 10;
-
-            var skip = (page - 1) * pageSize;
-
-            var query = _db.order_requests.AsNoTracking();
-
-            query = ascending
-                ? query.OrderBy(x => x.quantity ?? 0)
-                : query.OrderByDescending(x => x.quantity ?? 0);
-
-            var list = await query
-                .Skip(skip)
-                .Take(pageSize + 1)
-                .Select(o => new RequestSortedDto(
-                    o.order_request_id,
-                    o.customer_name ?? "",
-                    o.customer_phone ?? "",
-                    o.customer_email,
-                    o.delivery_date,
-                    o.product_name ?? "",
-                    o.quantity ?? 0,
-                    o.process_status,
-                    o.order_request_date
-                ))
-                .ToListAsync(ct);
-
-            var hasNext = list.Count > pageSize;
-            var data = hasNext ? list.Take(pageSize).ToList() : list;
-
-            return new PagedResultLite<RequestSortedDto>
-            {
-                Page = page,
-                PageSize = pageSize,
-                HasNext = hasNext,
-                Data = data
-            };
-        }
-
-        public async Task<PagedResultLite<RequestSortedDto>> GetSortedByDatePagedAsync(
-    bool ascending, int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default)
-        {
-            if (page <= 0) page = 1;
-            if (pageSize <= 0) pageSize = 10;
-
-            var skip = (page - 1) * pageSize;
-
-            var query = _db.order_requests.AsNoTracking();
-
-            query = ascending
-                ? query.OrderBy(x => x.order_request_date == null)
-                       .ThenBy(x => x.order_request_date)
-                : query.OrderBy(x => x.order_request_date == null)
-                       .ThenByDescending(x => x.order_request_date);
-
-            var list = await query
-                .Skip(skip)
-                .Take(pageSize + 1)
-                .Select(o => new RequestSortedDto(
-                    o.order_request_id,
-                    o.customer_name ?? "",
-                    o.customer_phone ?? "",
-                    o.customer_email,
-                    o.delivery_date,
-                    o.product_name ?? "",
-                    o.quantity ?? 0,
-                    o.process_status,
-                    o.order_request_date
-                ))
-                .ToListAsync(ct);
-
-            var hasNext = list.Count > pageSize;
-            var data = hasNext ? list.Take(pageSize).ToList() : list;
-
-            return new PagedResultLite<RequestSortedDto>
-            {
-                Page = page,
-                PageSize = pageSize,
-                HasNext = hasNext,
-                Data = data
-            };
-        }
-
-        public async Task<PagedResultLite<RequestSortedDto>> GetSortedByDeliveryDatePagedAsync(
-    bool nearestFirst, int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default)
-        {
-            if (page <= 0) page = 1;
-            if (pageSize <= 0) pageSize = 10;
-
-            var skip = (page - 1) * pageSize;
-
-            var query = _db.order_requests.AsNoTracking();
-
-            query = nearestFirst
-                ? query.OrderBy(x => x.delivery_date == null).ThenBy(x => x.delivery_date)
-                : query.OrderBy(x => x.delivery_date == null).ThenByDescending(x => x.delivery_date);
-
-            var list = await query
-                .Skip(skip)
-                .Take(pageSize + 1)
-                .Select(o => new RequestSortedDto(
-                    o.order_request_id,
-                    o.customer_name ?? "",
-                    o.customer_phone ?? "",
-                    o.customer_email,
-                    o.delivery_date,
-                    o.product_name ?? "",
-                    o.quantity ?? 0,
-                    o.process_status,
-                    o.order_request_date
-                ))
-                .ToListAsync(ct);
-
-            var hasNext = list.Count > pageSize;
-            var data = hasNext ? list.Take(pageSize).ToList() : list;
-
-            return new PagedResultLite<RequestSortedDto>
-            {
-                Page = page,
-                PageSize = pageSize,
-                HasNext = hasNext,
-                Data = data
-            };
-        }
-
+        
         public async Task<PagedResultLite<RequestEmailStatsDto>> GetEmailsByAcceptedCountPagedAsync(int page, int pageSize, CancellationToken ct = default)
         {
             if (page <= 0) page = 1;
@@ -652,121 +524,7 @@ namespace AMMS.Infrastructure.Repositories
                 Data = list
             };
         }
-        public async Task<PagedResultLite<RequestSortedDto>> GetByOrderRequestDatePagedAsync(
-    DateOnly date, int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default)
-        {
-            if (page <= 0) page = 1;
-            if (pageSize <= 0) pageSize = 10;
-
-            var skip = (page - 1) * pageSize;
-
-            var start = date.ToDateTime(TimeOnly.MinValue);
-            var end = start.AddDays(1);
-
-            var query = _db.order_requests.AsNoTracking()
-    .Where(x => x.order_request_date != null)
-    .Where(x => x.order_request_date >= start && x.order_request_date < end)
-    .OrderByDescending(x => x.order_request_date);
-
-            var list = await query
-                .Skip(skip)
-                .Take(pageSize + 1)
-                .Select(o => new RequestSortedDto(
-                    o.order_request_id,
-                    o.customer_name ?? "",
-                    o.customer_phone ?? "",
-                    o.customer_email,
-                    o.delivery_date,
-                    o.product_name ?? "",
-                    o.quantity ?? 0,
-                    o.process_status,
-                    o.order_request_date
-                ))
-                .ToListAsync(ct);
-
-            var hasNext = list.Count > pageSize;
-            if (hasNext) list = list.Take(pageSize).ToList();
-
-            return new PagedResultLite<RequestSortedDto>
-            {
-                Page = page,
-                PageSize = pageSize,
-                HasNext = hasNext,
-                Data = list
-            };
-        }
-        public async Task<PagedResultLite<RequestSortedDto>> SearchPagedAsync(
-    string keyword, int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default)
-        {
-            if (page <= 0) page = 1;
-            if (pageSize <= 0) pageSize = 10;
-
-            keyword = (keyword ?? "").Trim();
-            if (string.IsNullOrWhiteSpace(keyword))
-            {
-                return new PagedResultLite<RequestSortedDto>
-                {
-                    Page = page,
-                    PageSize = pageSize,
-                    HasNext = false,
-                    Data = new()
-                };
-            }
-
-            var skip = (page - 1) * pageSize;
-            var pattern = $"%{keyword}%";
-
-            var query = _db.order_requests.AsNoTracking()
-    .Where(o =>
-        (o.product_name != null && EF.Functions.ILike(o.product_name, pattern)) ||
-        (o.product_type != null && EF.Functions.ILike(o.product_type, pattern)) ||
-        (o.customer_email != null && EF.Functions.ILike(o.customer_email, pattern)) ||
-        (o.customer_name != null && EF.Functions.ILike(o.customer_name, pattern)) ||
-        (o.customer_phone != null && EF.Functions.ILike(o.customer_phone, pattern)) ||
-        (o.process_status != null && EF.Functions.ILike(o.process_status, pattern))
-    )
-    .Select(o => new
-    {
-        Entity = o,
-        Rank =
-            o.product_name != null && EF.Functions.ILike(o.product_name, pattern) ? 1 :
-            o.product_type != null && EF.Functions.ILike(o.product_type, pattern) ? 2 :
-            o.customer_email != null && EF.Functions.ILike(o.customer_email, pattern) ? 3 :
-            o.customer_name != null && EF.Functions.ILike(o.customer_name, pattern) ? 4 :
-            o.customer_phone != null && EF.Functions.ILike(o.customer_phone, pattern) ? 5 :
-            6
-    })
-    .OrderBy(x => x.Rank)
-    .ThenByDescending(x => x.Entity.order_request_date);
-
-            var list = await query
-                .Skip(skip)
-                .Take(pageSize + 1)
-                .Select(x => new RequestSortedDto(
-                    x.Entity.order_request_id,
-                    x.Entity.customer_name ?? "",
-                    x.Entity.customer_phone ?? "",
-                    x.Entity.customer_email,
-                    x.Entity.delivery_date,
-                    x.Entity.product_name ?? "",
-                    x.Entity.quantity ?? 0,
-                    x.Entity.process_status,
-                    x.Entity.order_request_date
-                ))
-                .ToListAsync(ct);
-
-            var hasNext = list.Count > pageSize;
-            if (hasNext) list = list.Take(pageSize).ToList();
-
-            return new PagedResultLite<RequestSortedDto>
-            {
-                Page = page,
-                PageSize = pageSize,
-                HasNext = hasNext,
-                Data = list
-            };
-        }
-
+        
         public async Task<string?> GetEmailByPhoneAsync(string phone, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(phone))
@@ -782,8 +540,7 @@ namespace AMMS.Infrastructure.Repositories
                 .FirstOrDefaultAsync(ct);
         }
 
-        public async Task<PagedResultLite<OrderListDto>> GetOrdersByPhonePagedAsync(
-            string phone, int page, int pageSize, CancellationToken ct = default)
+        public async Task<PagedResultLite<OrderListDto>> GetOrdersByPhonePagedAsync(string phone, int page, int pageSize, CancellationToken ct = default)
         {
             if (page <= 0) page = 1;
             if (pageSize <= 0) pageSize = 10;
@@ -799,14 +556,20 @@ namespace AMMS.Infrastructure.Repositories
                 orderby o.order_date descending, o.order_id descending
                 select new OrderListDto
                 {
-                    Order_id = o.order_id,
-                    Code = o.code,
-                    Order_date = o.order_date,
-                    Delivery_date = o.delivery_date,
-                    Status = o.status,
-                    Payment_status = o.payment_status,
-                    Quote_id = o.quote_id,
-                    Total_amount = o.total_amount
+                    order_id = o.order_id,
+                    code = o.code,
+                    quote_id = o.quote_id,
+                    order_date = o.order_date,
+                    delivery_date = o.delivery_date,
+                    total_amount = o.total_amount,
+                    status = o.status,
+                    is_enough = o.is_enough,
+                    is_buy = o.is_buy,
+                    payment_status = o.payment_status,
+                    production_id = o.production_id,
+                    layout_confirmed = o.layout_confirmed,
+                    is_production_ready = o.is_production_ready,
+                    confirmed_delivery_at = o.confirmed_delivery_at
                 };
 
             var list = await baseQuery
@@ -843,25 +606,136 @@ namespace AMMS.Infrastructure.Repositories
             var skip = (page - 1) * pageSize;
             phone = phone.Trim();
 
-            var query = _db.order_requests.AsNoTracking()
-    .Where(r => r.customer_phone == phone)
-    .OrderByDescending(r => r.order_request_date)
-    .ThenByDescending(r => r.order_request_id);
+            var query =
+                from r in _db.order_requests.AsNoTracking()
+                where r.customer_phone == phone
+
+                join ce in _db.cost_estimates.AsNoTracking()
+                    on r.order_request_id equals ce.order_request_id into ceJoin
+
+                from ce in ceJoin
+                    .OrderByDescending(x => x.is_active)
+                    .ThenByDescending(x => x.estimate_id)
+                    .Take(1)
+                    .DefaultIfEmpty()
+
+                orderby r.order_request_date descending, r.order_request_id descending
+                select new RequestSortedDto
+                {
+                    // ===== order_request =====
+                    request_id = r.order_request_id,
+                    customer_name = r.customer_name,
+                    phone = r.customer_phone,
+                    email = r.customer_email,
+                    delivery_date = r.delivery_date,
+                    product_name = r.product_name,
+                    quantity = r.quantity,
+                    description = r.description,
+                    design_file_path = r.design_file_path,
+                    print_ready_file = r.print_ready_file,
+                    request_date = r.order_request_date,
+                    detail_address = r.detail_address,
+                    status = r.process_status,
+                    product_type = r.product_type,
+                    number_of_plates = r.number_of_plates,
+                    order_id = r.order_id,
+                    quote_id = r.quote_id,
+                    product_length_mm = r.product_length_mm,
+                    product_width_mm = r.product_width_mm,
+                    product_height_mm = r.product_height_mm,
+                    glue_tab_mm = r.glue_tab_mm,
+                    bleed_mm = r.bleed_mm,
+                    is_one_side_box = r.is_one_side_box,
+                    print_width_mm = r.print_width_mm,
+                    print_length_mm = r.print_length_mm,
+                    is_send_design = r.is_send_design,
+                    note = r.note,
+                    reason = r.reason,
+                    accepted_estimate_id = r.accepted_estimate_id,
+                    consultant_note = r.consultant_note,
+                    verified_at = r.verified_at,
+                    quote_expires_at = r.quote_expires_at,
+                    message_to_customer = r.message_to_customer,
+                    preliminary_estimated_price = r.preliminary_estimated_price,
+                    assigned_consultant = r.assigned_consultant,
+                    assigned_at = r.assigned_at,
+                    delivery_note = r.delivery_note,
+                    actual_consultant_user_id = r.actual_consultant_user_id,
+                    delivery_date_change_reason = r.delivery_date_change_reason,
+                    estimate_finish_date = r.estimate_finish_date,
+
+                    // ===== cost_estimate =====
+                    estimate_id = ce != null ? ce.estimate_id : null,
+                    estimate_order_request_id = ce != null ? ce.order_request_id : null,
+                    paper_cost = ce != null ? ce.paper_cost : null,
+                    paper_sheets_used = ce != null ? ce.paper_sheets_used : null,
+                    paper_unit_price = ce != null ? ce.paper_unit_price : null,
+                    ink_cost = ce != null ? ce.ink_cost : null,
+                    ink_weight_kg = ce != null ? ce.ink_weight_kg : null,
+                    ink_rate_per_m2 = ce != null ? ce.ink_rate_per_m2 : null,
+                    coating_glue_cost = ce != null ? ce.coating_glue_cost : null,
+                    coating_glue_weight_kg = ce != null ? ce.coating_glue_weight_kg : null,
+                    coating_glue_rate_per_m2 = ce != null ? ce.coating_glue_rate_per_m2 : null,
+                    coating_type = ce != null ? ce.coating_type : null,
+                    mounting_glue_cost = ce != null ? ce.mounting_glue_cost : null,
+                    mounting_glue_weight_kg = ce != null ? ce.mounting_glue_weight_kg : null,
+                    mounting_glue_rate_per_m2 = ce != null ? ce.mounting_glue_rate_per_m2 : null,
+                    lamination_cost = ce != null ? ce.lamination_cost : null,
+                    lamination_weight_kg = ce != null ? ce.lamination_weight_kg : null,
+                    lamination_rate_per_m2 = ce != null ? ce.lamination_rate_per_m2 : null,
+                    material_cost = ce != null ? ce.material_cost : null,
+                    base_cost = ce != null ? ce.base_cost : null,
+                    is_rush = ce != null ? ce.is_rush : null,
+                    rush_percent = ce != null ? ce.rush_percent : null,
+                    rush_amount = ce != null ? ce.rush_amount : null,
+                    days_early = ce != null ? ce.days_early : null,
+                    subtotal = ce != null ? ce.subtotal : null,
+                    discount_percent = ce != null ? ce.discount_percent : null,
+                    discount_amount = ce != null ? ce.discount_amount : null,
+                    final_total_cost = ce != null ? ce.final_total_cost : null,
+                    estimated_finish_date = ce != null ? ce.estimated_finish_date : null,
+                    desired_delivery_date = ce != null ? ce.desired_delivery_date : null,
+                    estimate_created_at = ce != null ? ce.created_at : null,
+                    sheets_required = ce != null ? ce.sheets_required : null,
+                    sheets_waste = ce != null ? ce.sheets_waste : null,
+                    sheets_total = ce != null ? ce.sheets_total : null,
+                    n_up = ce != null ? ce.n_up : null,
+                    total_area_m2 = ce != null ? ce.total_area_m2 : null,
+                    design_cost = ce != null ? ce.design_cost : null,
+                    cost_note = ce != null ? ce.cost_note : null,
+                    is_active = ce != null ? ce.is_active : null,
+                    paper_code = ce != null ? ce.paper_code : null,
+                    paper_name = ce != null ? ce.paper_name : null,
+                    wave_type = ce != null ? ce.wave_type : null,
+                    paper_alternative = ce != null ? ce.paper_alternative : null,
+                    wave_alternative = ce != null ? ce.wave_alternative : null,
+                    wave_sheets_used = ce != null ? ce.wave_sheets_used : null,
+                    production_processes = ce != null ? ce.production_processes : null,
+                    deposit_amount = ce != null ? ce.deposit_amount : null,
+                    previous_estimate_id = ce != null ? ce.previous_estimate_id : null,
+                    consultant_contract_path = ce != null ? ce.consultant_contract_path : null,
+                    customer_signed_contract_path = ce != null ? ce.customer_signed_contract_path : null,
+                    waste_gluing_boxes = ce != null ? ce.waste_gluing_boxes : null,
+                    sheet_area_m2 = ce != null ? ce.sheet_area_m2 : null,
+                    print_sheets_used = ce != null ? ce.print_sheets_used : null,
+                    total_coating_area_m2 = ce != null ? ce.total_coating_area_m2 : null,
+                    total_lamination_area_m2 = ce != null ? ce.total_lamination_area_m2 : null,
+                    coating_sheets_used = ce != null ? ce.coating_sheets_used : null,
+                    lamination_sheets_used = ce != null ? ce.lamination_sheets_used : null,
+                    wave_sheet_area_m2 = ce != null ? ce.wave_sheet_area_m2 : null,
+                    wave_n_up = ce != null ? ce.wave_n_up : null,
+                    wave_sheets_required = ce != null ? ce.wave_sheets_required : null,
+                    total_mounting_area_m2 = ce != null ? ce.total_mounting_area_m2 : null,
+                    wave_unit_price = ce != null ? ce.wave_unit_price : null,
+                    wave_cost = ce != null ? ce.wave_cost : null,
+                    total_process_cost = ce != null ? ce.total_process_cost : null,
+                    ink_type_names = ce != null ? ce.ink_type_names : null,
+                    alternative_material_reason = ce != null ? ce.alternative_material_reason : null
+                };
 
             var list = await query
                 .Skip(skip)
                 .Take(pageSize + 1)
-                .Select(o => new RequestSortedDto(
-                    o.order_request_id,
-                    o.customer_name ?? "",
-                    o.customer_phone ?? "",
-                    o.customer_email,
-                    o.delivery_date,
-                    o.product_name ?? "",
-                    o.quantity ?? 0,
-                    o.process_status,
-                    o.order_request_date
-                ))
                 .ToListAsync(ct);
 
             var hasNext = list.Count > pageSize;

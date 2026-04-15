@@ -407,26 +407,6 @@ namespace AMMS.Application.Services
             var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
             return await _requestRepo.GetInformationRequestById(requestId, consultantUserId, ct);
         }
-        public async Task<PagedResultLite<RequestSortedDto>> GetSortedByQuantityPagedAsync(
-    bool ascending, int page, int pageSize, CancellationToken ct = default)
-        {
-            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
-            return await _requestRepo.GetSortedByQuantityPagedAsync(ascending, page, pageSize, consultantUserId, ct);
-        }
-
-        public async Task<PagedResultLite<RequestSortedDto>> GetSortedByDatePagedAsync(
-    bool ascending, int page, int pageSize, CancellationToken ct = default)
-        {
-            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
-            return await _requestRepo.GetSortedByDatePagedAsync(ascending, page, pageSize, consultantUserId, ct);
-        }
-
-        public async Task<PagedResultLite<RequestSortedDto>> GetSortedByDeliveryDatePagedAsync(
-    bool nearestFirst, int page, int pageSize, CancellationToken ct = default)
-        {
-            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
-            return await _requestRepo.GetSortedByDeliveryDatePagedAsync(nearestFirst, page, pageSize, consultantUserId, ct);
-        }
 
         public Task<PagedResultLite<RequestEmailStatsDto>> GetEmailsByAcceptedCountPagedAsync(
             int page, int pageSize, CancellationToken ct = default)
@@ -437,20 +417,6 @@ namespace AMMS.Application.Services
         {
             var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
             return await _requestRepo.GetSortedByStockCoveragePagedAsync(page, pageSize, consultantUserId, ct);
-        }
-
-        public async Task<PagedResultLite<RequestSortedDto>> GetByOrderRequestDatePagedAsync(
-    DateOnly date, int page, int pageSize, CancellationToken ct = default)
-        {
-            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
-            return await _requestRepo.GetByOrderRequestDatePagedAsync(date, page, pageSize, consultantUserId, ct);
-        }
-
-        public async Task<PagedResultLite<RequestSortedDto>> SearchPagedAsync(
-    string keyword, int page, int pageSize, CancellationToken ct = default)
-        {
-            var consultantUserId = await _currentUser.GetConsultantScopeUserIdAsync(ct);
-            return await _requestRepo.SearchPagedAsync(keyword, page, pageSize, consultantUserId, ct);
         }
 
         public async Task<int> CreateOrderRequestAsync(CreateOrderRequestDto dto, CancellationToken ct = default)

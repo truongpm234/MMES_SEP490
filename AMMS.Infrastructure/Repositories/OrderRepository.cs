@@ -265,14 +265,20 @@ namespace AMMS.Infrastructure.Repositories
                 .Take(take)
                 .Select(o => new OrderListDto
                 {
-                    Order_id = o.order_id,
-                    Code = o.code,
-                    Order_date = o.order_date,
-                    Delivery_date = o.delivery_date,
-                    Status = o.status,
-                    Payment_status = o.payment_status,
-                    Quote_id = o.quote_id,
-                    Total_amount = o.total_amount
+                    order_id = o.order_id,
+                    code = o.code,
+                    order_date = o.order_date,
+                    delivery_date = o.delivery_date,
+                    status = o.status,
+                    payment_status = o.payment_status,
+                    quote_id = o.quote_id,
+                    total_amount = o.total_amount,
+                    is_enough = o.is_enough,
+                    is_buy = o.is_buy,
+                    production_id = o.production_id,
+                    layout_confirmed = o.layout_confirmed,
+                    is_production_ready = o.is_production_ready,
+                    confirmed_delivery_at = o.confirmed_delivery_at
                 })
                 .ToListAsync();
         }
