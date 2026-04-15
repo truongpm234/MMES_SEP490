@@ -4,6 +4,7 @@ using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Common;
+using AMMS.Shared.DTOs.Orders;
 using AMMS.Shared.DTOs.Requests;
 using AMMS.Shared.DTOs.Socket;
 using AMMS.Shared.DTOs.User;
@@ -1494,6 +1495,83 @@ namespace AMMS.Application.Services
             var userId = GetActualConsultantUserId();
             if (userId.HasValue)
                 req.actual_consultant_user_id = userId.Value;
+        }
+
+        public async Task<PagedResultLite<RequestSortedDto>> GetMyRequestsByJwtAsync(
+    int page,
+    int pageSize,
+    CancellationToken ct = default)
+        {
+            var (_, phoneNumber) = await GetCurrentCustomerPhoneAsync(ct);
+
+            return await _requestRepo.GetRequestsByPhonePagedAsync(
+                phone: phoneNumber,
+                page: page,
+                pageSize: pageSize,
+                consultantUserId: null,
+                ct: ct);
+        }
+
+        public async Task<PagedResultLite<OrderListDto>> GetMyOrdersByJwtAsync(
+            int page,
+            int pageSize,
+            CancellationToken ct = default)
+        {
+            var (_, phoneNumber) = await GetCurrentCustomerPhoneAsync(ct);
+
+            return await _requestRepo.GetOrdersByPhonePagedAsync(
+                phone: phoneNumber,
+                page: page,
+                pageSize: pageSize,
+                ct: ct);
+        }
+
+        public async Task<CustomerRequestOrderListDto> GetMyRequestsAndOrdersByJwtAsync(
+            int requestPage,
+            int requestPageSize,
+            int orderPage,
+            int orderPageSize,
+            CancellationToken ct = default)
+        {
+            var (userId, phoneNumber) = await GetCurrentCustomerPhoneAsync(ct);
+
+            var requestsTask = _requestRepo.GetRequestsByPhonePagedAsync(
+                phone: phoneNumber,
+                page: requestPage,
+                pageSize: requestPageSize,
+                consultantUserId: null,
+                ct: ct);
+
+            var ordersTask = _requestRepo.GetOrdersByPhonePagedAsync(
+                phone: phoneNumber,
+                page: orderPage,
+                pageSize: orderPageSize,
+                ct: ct);
+
+            await Task.WhenAll(requestsTask, ordersTask);
+
+            return new CustomerRequestOrderListDto
+            {
+                user_id = userId,
+                phone_number = phoneNumber,
+                requests = await requestsTask,
+                orders = await ordersTask
+            };
+        }
+
+        private async Task<(int userId, string phoneNumber)> GetCurrentCustomerPhoneAsync(CancellationToken ct = default)
+        {
+            if (!_currentUser.UserId.HasValue)
+                throw new UnauthorizedAccessException("User is not authenticated.");
+
+            var userId = _currentUser.UserId.Value;
+
+            var phone = await _userRepo.GetPhoneNumberByUserIdAsync(userId, ct);
+
+            if (string.IsNullOrWhiteSpace(phone))
+                throw new InvalidOperationException("Tài khoản hiện tại chưa có số điện thoại.");
+
+            return (userId, phone.Trim());
         }
     }
 }

@@ -6,12 +6,9 @@ using System.Threading.Tasks;
 
 namespace AMMS.Shared.DTOs.Requests
 {
-    namespace AMMS.Shared.DTOs.Requests
+    public class CancelRequestDto
     {
-        public class CancelRequestDto
-        {
-            public int id { get; set; }
-            public string? reason { get; set; }
-        }
+        public int id { get; set; }
+        public string? reason { get; set; }
     }
 }

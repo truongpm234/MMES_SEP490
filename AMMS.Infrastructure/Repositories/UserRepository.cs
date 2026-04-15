@@ -168,5 +168,14 @@ namespace AMMS.Infrastructure.Repositories
                 })
                 .FirstOrDefaultAsync(ct);
         }
+
+        public async Task<string?> GetPhoneNumberByUserIdAsync(int userId, CancellationToken ct = default)
+        {
+            return await _db.users
+                .AsNoTracking()
+                .Where(x => x.user_id == userId)
+                .Select(x => x.phone_number)
+                .FirstOrDefaultAsync(ct);
+        }
     }
 }

@@ -1,5 +1,6 @@
 ﻿using AMMS.Infrastructure.Entities;
 using AMMS.Shared.DTOs.Common;
+using AMMS.Shared.DTOs.Orders;
 using AMMS.Shared.DTOs.Requests;
 
 namespace AMMS.Application.Interfaces
@@ -39,5 +40,8 @@ namespace AMMS.Application.Interfaces
         Task<string> UploadPrintReadyFileAsync(int requestId, int? estimateId, Stream fileStream, string fileName, string? contentType, CancellationToken ct = default);
         void QueueRelease(int orderId);
         Task ExecuteAsync(int orderId, CancellationToken ct = default);
+        Task<PagedResultLite<RequestSortedDto>> GetMyRequestsByJwtAsync(int page, int pageSize, CancellationToken ct = default);
+        Task<PagedResultLite<OrderListDto>> GetMyOrdersByJwtAsync(int page, int pageSize, CancellationToken ct = default);
+        Task<CustomerRequestOrderListDto> GetMyRequestsAndOrdersByJwtAsync(int requestPage, int requestPageSize, int orderPage, int orderPageSize, CancellationToken ct = default);
     }
 }

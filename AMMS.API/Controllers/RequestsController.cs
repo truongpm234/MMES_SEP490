@@ -7,7 +7,6 @@ using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Email;
 using AMMS.Shared.DTOs.PayOS;
 using AMMS.Shared.DTOs.Requests;
-using AMMS.Shared.DTOs.Requests.AMMS.Shared.DTOs.Requests;
 using AMMS.Shared.DTOs.Socket;
 using AMMS.Shared.Helpers;
 using Microsoft.AspNetCore.Authorization;
@@ -1121,6 +1120,26 @@ namespace AMMS.API.Controllers
                 return Ok("Customer confirm receive order");
             }
             return BadRequest();
+        }
+
+        [Authorize(Policy = "customer")]
+        [HttpGet("get-requests-and-order-by-login")]
+        public async Task<IActionResult> GetMyRequests(
+    [FromQuery] int page = 1,
+    [FromQuery] int pageSize = 10,
+    CancellationToken ct = default)
+        {
+            try
+            {
+                var request = await _service.GetMyRequestsByJwtAsync(page, pageSize, ct);
+                var order = await _service.GetMyOrdersByJwtAsync(page, pageSize, ct);
+
+                return Ok(new { requests = request, orders = order });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
         }
     }
 }
