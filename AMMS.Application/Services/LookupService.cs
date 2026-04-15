@@ -54,34 +54,9 @@ namespace AMMS.Application.Services
                 throw new InvalidOperationException(sendRes.message ?? "Không gửi được OTP qua SMS.");
         }
 
-        public async Task<PhoneHistoryWithOtpResult> GetHistoryByPhoneWithOtpAsync(
-    string phone,
-    string otp,
-    int page,
-    int pageSize,
-    CancellationToken ct = default)
+        public async Task<PhoneHistoryWithOtpResult> GetHistoryByPhoneWithOtpAsync(string phone, string otp, int page, int pageSize, CancellationToken ct = default)
         {
-            await VerifySmsOtpOrThrowAsync(phone, otp, ct);
-
-            phone = phone.Trim();
-
-            var orders = await _requestRepo.GetOrdersByPhonePagedAsync(phone, page, pageSize, ct);
-
-            var requests = await _requestRepo.GetRequestsByPhonePagedAsync(phone, page, pageSize, null, ct);
-
-            return new PhoneHistoryWithOtpResult
-            {
-                Orders = orders,
-                Requests = requests
-            };
-        }
-
-        public async Task<PhoneHistoryWithOtpResult> GetHistoryByPhoneWithOtpAsyncTest(
-    string phone,
-    int page,
-    int pageSize,
-    CancellationToken ct = default)
-        {
+            //await VerifySmsOtpOrThrowAsync(phone, otp, ct);
 
             phone = phone.Trim();
 
