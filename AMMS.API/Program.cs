@@ -143,16 +143,13 @@ builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("admin", policy =>
         policy.RequireClaim("roleid", "1"));
-
     options.AddPolicy("consultant", policy =>
         policy.RequireClaim("roleid", "2"));
-
     options.AddPolicy("manager", policy =>
         policy.RequireClaim("roleid", "3"));
-
     options.AddPolicy("warehouse_manager", policy =>
         policy.RequireClaim("roleid", "4"));
-    options.AddPolicy("user", policy =>
+    options.AddPolicy("customer", policy =>
         policy.RequireClaim("roleid", "5"));
     options.AddPolicy("staff", policy =>
         policy.RequireClaim("roleid", "6"));

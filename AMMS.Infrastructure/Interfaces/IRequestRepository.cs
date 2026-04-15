@@ -19,20 +19,10 @@ namespace AMMS.Infrastructure.Interfaces
         Task<RequestWithCostDto?> GetByIdWithCostAsync(int id, int? consultantUserId = null);
         Task<bool> AnyOrderLinkedAsync(int requestId);
         Task<bool> HasEnoughStockForRequestAsync(int requestId, CancellationToken ct = default);
-        Task<PagedResultLite<RequestSortedDto>> GetSortedByQuantityPagedAsync(
-            bool ascending, int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default);
-        Task<PagedResultLite<RequestSortedDto>> GetSortedByDatePagedAsync(
-            bool ascending, int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default);
-        Task<PagedResultLite<RequestSortedDto>> GetSortedByDeliveryDatePagedAsync(
-            bool nearestFirst, int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default);
         Task<PagedResultLite<RequestEmailStatsDto>> GetEmailsByAcceptedCountPagedAsync(
             int page, int pageSize, CancellationToken ct = default);
         Task<PagedResultLite<RequestStockCoverageDto>> GetSortedByStockCoveragePagedAsync(
             int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default);
-        Task<PagedResultLite<RequestSortedDto>> GetByOrderRequestDatePagedAsync(
-            DateOnly date, int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default);
-        Task<PagedResultLite<RequestSortedDto>> SearchPagedAsync(
-            string keyword, int page, int pageSize, int? consultantUserId = null, CancellationToken ct = default);
         Task<string?> GetEmailByPhoneAsync(string phone, CancellationToken ct = default);
         Task<PagedResultLite<OrderListDto>> GetOrdersByPhonePagedAsync(
             string phone, int page, int pageSize, CancellationToken ct = default);

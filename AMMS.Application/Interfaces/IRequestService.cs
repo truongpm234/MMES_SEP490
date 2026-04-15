@@ -14,20 +14,10 @@ namespace AMMS.Application.Interfaces
         Task<RequestPagedDto?> GetByOrderIdAsync(int orderId);
         Task<int> DeleteDesignFilePathByRequestIdAsync(int orderRequestId, CancellationToken ct = default);
         Task<ConvertRequestToOrderResponse> ConvertToOrderAsync(int requestId);
-        Task<PagedResultLite<RequestSortedDto>> GetSortedByQuantityPagedAsync(
-    bool ascending, int page, int pageSize, CancellationToken ct = default);
-        Task<PagedResultLite<RequestSortedDto>> GetSortedByDatePagedAsync(
-    bool ascending, int page, int pageSize, CancellationToken ct = default);
-        Task<PagedResultLite<RequestSortedDto>> GetSortedByDeliveryDatePagedAsync(
-    bool nearestFirst, int page, int pageSize, CancellationToken ct = default);
         Task<PagedResultLite<RequestEmailStatsDto>> GetEmailsByAcceptedCountPagedAsync(
    int page, int pageSize, CancellationToken ct = default);
         Task<PagedResultLite<RequestStockCoverageDto>> GetSortedByStockCoveragePagedAsync(
     int page, int pageSize, CancellationToken ct = default);
-        Task<PagedResultLite<RequestSortedDto>> GetByOrderRequestDatePagedAsync(
-    DateOnly date, int page, int pageSize, CancellationToken ct = default);
-        Task<PagedResultLite<RequestSortedDto>> SearchPagedAsync(
-    string keyword, int page, int pageSize, CancellationToken ct = default);
         Task<int> CreateOrderRequestAsync(CreateOrderRequestDto dto, CancellationToken ct = default);
         Task<OrderRequestDesignFileResponse?> GetDesignFileAsync(int orderRequestId, CancellationToken ct = default);
         Task UpdateDesignFilePathAsync(int orderRequestId, string designFilePath, CancellationToken ct = default);

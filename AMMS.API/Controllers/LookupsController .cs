@@ -50,6 +50,5 @@ namespace AMMS.API.Controllers
                 return BadRequest(new { message = ex.Message });
             }
         }
-
     }
 }
