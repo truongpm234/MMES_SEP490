@@ -119,7 +119,7 @@ namespace AMMS.Application.Services
                 assigned_at = now,
                 actual_consultant_user_id = null
             };
-
+            ApplyAssignedConsultant(entity, assignedConsultant, now);
             await _requestRepo.AddAsync(entity);
             await _requestRepo.SaveChangesAsync();
 
@@ -139,6 +139,7 @@ namespace AMMS.Application.Services
                 order_request_id = entity.order_request_id,
                 assigned_consultant = entity.assigned_consultant,
                 assigned_at = entity.assigned_at,
+                assign_name = entity.assign_name,
                 assigned_consultant_user = assignedConsultant
             };
         }
@@ -161,6 +162,7 @@ namespace AMMS.Application.Services
                 assigned_at = now,
                 actual_consultant_user_id = GetActualConsultantUserId()
             };
+            ApplyAssignedConsultant(entity, assignedConsultant, now);
 
             await _requestRepo.AddAsync(entity);
             await _requestRepo.SaveChangesAsync();
@@ -181,6 +183,7 @@ namespace AMMS.Application.Services
             {
                 order_request_id = entity.order_request_id,
                 assigned_consultant = entity.assigned_consultant,
+                assign_name = entity.assign_name,
                 assigned_at = entity.assigned_at,
                 assigned_consultant_user = assignedConsultant
             };
@@ -457,7 +460,7 @@ namespace AMMS.Application.Services
                 assigned_consultant = assignedConsultant.user_id,
                 assigned_at = now,
             };
-
+            ApplyAssignedConsultant(entity, assignedConsultant, now);
             await _requestRepo.AddAsync(entity);
             await _requestRepo.SaveChangesAsync();
 
@@ -644,6 +647,12 @@ namespace AMMS.Application.Services
 
             var clonedAssignedConsultantId = source.assigned_consultant ?? await _requestRepo.GetLeastLoadedConsultantUserIdAsync(ct);
 
+            AssignedConsultantSummaryDto? clonedAssignedConsultant = null;
+            if (clonedAssignedConsultantId.HasValue)
+            {
+                clonedAssignedConsultant = await _userRepo.GetAssignedConsultantSummaryAsync(clonedAssignedConsultantId.Value, ct);
+            }
+
             var clonedRequest = new order_request
             {
                 customer_name = source.customer_name,
@@ -678,7 +687,8 @@ namespace AMMS.Application.Services
                 consultant_note = source.consultant_note,
                 assigned_consultant = clonedAssignedConsultantId,
                 assigned_at = clonedAssignedConsultantId.HasValue ? now : null,
-                actual_consultant_user_id = GetActualConsultantUserId()
+                actual_consultant_user_id = GetActualConsultantUserId(),
+                assign_name = clonedAssignedConsultant?.username,
             };
 
             await _requestRepo.AddAsync(clonedRequest);
@@ -1557,6 +1567,15 @@ namespace AMMS.Application.Services
                 requests = await requestsTask,
                 orders = await ordersTask
             };
+        }
+
+        private static void ApplyAssignedConsultant(order_request entity, AssignedConsultantSummaryDto consultant, DateTime now)
+        {
+            entity.assigned_consultant = consultant.user_id;
+            entity.assign_name = string.IsNullOrWhiteSpace(consultant.username)
+                ? null
+                : consultant.username.Trim();
+            entity.assigned_at = now;
         }
 
         private async Task<(int userId, string phoneNumber)> GetCurrentCustomerPhoneAsync(CancellationToken ct = default)

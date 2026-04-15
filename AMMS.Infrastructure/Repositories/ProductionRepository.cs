@@ -6,6 +6,7 @@ using AMMS.Shared.DTOs.Exceptions;
 using AMMS.Shared.DTOs.Productions;
 using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace AMMS.Infrastructure.Repositories
 {
@@ -508,19 +509,40 @@ namespace AMMS.Infrastructure.Repositories
             var taskIds = tasks.Select(x => x.task_id).ToList();
 
             var logs = await _db.task_logs.AsNoTracking()
-                .Where(l => l.task_id != null && taskIds.Contains(l.task_id.Value))
-                .OrderBy(l => l.log_time)
-                .Select(l => new TaskLogDto
+    .Where(l => l.task_id != null && taskIds.Contains(l.task_id.Value))
+    .OrderBy(l => l.log_time)
+    .Select(l => new TaskLogDto
+    {
+        log_id = l.log_id,
+        task_id = l.task_id!.Value,
+        action_type = l.action_type,
+        qty_good = l.qty_good ?? 0,
+        log_time = l.log_time,
+        scanned_code = l.scanned_code,
+        scanned_by_user_id = l.scanned_by_user_id,
+        material_usage_json = l.material_usage_json
+    })
+    .ToListAsync(ct);
+
+            foreach (var log in logs)
+            {
+                if (!string.IsNullOrWhiteSpace(log.material_usage_json))
                 {
-                    log_id = l.log_id,
-                    task_id = l.task_id!.Value,
-                    action_type = l.action_type,
-                    qty_good = l.qty_good ?? 0,
-                    log_time = l.log_time,
-                    scanned_code = l.scanned_code,
-                    scanned_by_user_id = l.scanned_by_user_id
-                })
-                .ToListAsync(ct);
+                    try
+                    {
+                        log.material_usages = JsonSerializer.Deserialize<List<TaskMaterialUsageLogItemDto>>(
+                            log.material_usage_json) ?? new List<TaskMaterialUsageLogItemDto>();
+                    }
+                    catch
+                    {
+                        log.material_usages = new List<TaskMaterialUsageLogItemDto>();
+                    }
+                }
+                else
+                {
+                    log.material_usages = new List<TaskMaterialUsageLogItemDto>();
+                }
+            }
 
             var ptId = header.pr.product_type_id;
             List<ProductTypeProcessStepDto> steps = new();
@@ -602,7 +624,6 @@ namespace AMMS.Infrastructure.Repositories
                     start_time = task?.start_time,
                     end_time = task?.end_time,
                     qty_good = qtyGood,
-                    qty_bad = qtyBad,
                     waste_percent = wastePct,
                     last_scan_time = stageLogs.Count == 0 ? null : stageLogs.Max(x => x.log_time),
                     logs = stageLogs,
@@ -699,16 +720,12 @@ namespace AMMS.Infrastructure.Repositories
             }
 
             var totalGood = stageRows.Sum(x => (decimal)x.qty_good);
-            var totalBad = stageRows.Sum(x => (decimal)x.qty_bad);
-            var totalDenom = totalGood + totalBad;
-            var totalWastePct = totalDenom <= 0 ? 0m : Math.Round((totalBad * 100m) / totalDenom, 2);
+            var totalDenom = totalGood;
 
             return new ProductionWasteReportDto
             {
                 prod_id = prodId,
                 total_good = totalGood,
-                total_bad = totalBad,
-                total_waste_percent = totalWastePct,
                 stages = stageRows.OrderBy(x => x.seq_num).ToList()
             };
         }
@@ -949,14 +966,14 @@ namespace AMMS.Infrastructure.Repositories
             if (code == "RALO")
             {
                 inputs.Add(ProductionSHelper.BuildStageMaterial(
-                    name: "Cuộn kẽm",
-                    code: "PLATE_INPUT",
-                    estimatedQty: 1m,
-                    actualQty: null,
-                    unit: "cuộn"));
+                    name: "Bản kẽm thô",
+                    code: "PLATE",
+                    estimatedQty: stageEstimatedQty,
+                    actualQty: stageActualQty,
+                    unit: "bản"));
 
                 var output = ProductionSHelper.BuildStageMaterial(
-                    name: "Bản kẽm",
+                    name: "Bản kẽm đã ralo",
                     code: "RALO",
                     estimatedQty: stageEstimatedQty,
                     actualQty: stageActualQty,

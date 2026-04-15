@@ -84,6 +84,8 @@ public partial class order_request
 
     public int? actual_consultant_user_id { get; set; }
 
+    public string? assign_name { get; set; }
+
     public string? delivery_date_change_reason { get; set; }
 
     [ForeignKey(nameof(assigned_consultant))]

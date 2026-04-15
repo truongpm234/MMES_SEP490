@@ -86,7 +86,7 @@ namespace AMMS.Infrastructure.Repositories
                 process_status = request.process_status,
                 product_type = request.product_type,
                 number_of_plates = request.number_of_plates,
-
+                assign_name = request.assign_name,
                 paper_code = displayPaperCode,
                 paper_name = displayPaperName,
                 wave_type = displayWaveType,
@@ -289,7 +289,7 @@ namespace AMMS.Infrastructure.Repositories
                     wave_sheets_used = ce != null ? ce.wave_sheets_used : null,
                     paper_alternative = ce != null ? ce.paper_alternative : null,
                     wave_alternative = ce != null ? ce.wave_alternative : null,
-
+                    assign_name = r.assign_name,
                 }
             )
             .Skip(skip)
@@ -403,6 +403,7 @@ namespace AMMS.Infrastructure.Repositories
                     wave_sheets_used = ce != null ? ce.wave_sheets_used : null,
                     paper_alternative = ce != null ? ce.paper_alternative : null,
                     wave_alternative = ce != null ? ce.wave_alternative : null,
+                    assign_name = r.assign_name,
                 }
             ).FirstOrDefaultAsync();
         }
@@ -668,7 +669,7 @@ namespace AMMS.Infrastructure.Repositories
                     actual_consultant_user_id = r.actual_consultant_user_id,
                     delivery_date_change_reason = r.delivery_date_change_reason,
                     estimate_finish_date = r.estimate_finish_date,
-
+                    assign_name = r.assign_name,
                     // ===== cost_estimate =====
                     estimate_id = ce != null ? ce.estimate_id : null,
                     estimate_order_request_id = ce != null ? ce.order_request_id : null,
@@ -846,7 +847,8 @@ namespace AMMS.Infrastructure.Repositories
                 quote_expires_at = request.quote_expires_at,
                 message_to_customer = SafeText(request.message_to_customer),
                 printer_ready_file_path = SafeText(request.print_ready_file),
-                actual_consultant_user_id = request.assigned_consultant,
+                actual_consultant_user_id = request.actual_consultant_user_id,
+                assign_name = SafeText(request.assign_name),
                 cost_estimate = estimates.Select(ce =>
                 {
                     var discountAmount = ce.discount_amount < 0m ? 0m : ce.discount_amount;
@@ -957,6 +959,7 @@ namespace AMMS.Infrastructure.Repositories
                     print_length_mm = r.print_length_mm,
                     is_send_design = r.is_send_design,
                     message_to_customer = r.message_to_customer,
+                    assign_name = r.assign_name,
                 })
                 .FirstOrDefaultAsync(ct);
 

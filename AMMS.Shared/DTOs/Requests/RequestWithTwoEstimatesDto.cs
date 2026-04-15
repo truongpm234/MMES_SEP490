@@ -10,6 +10,7 @@ namespace AMMS.Shared.DTOs.Requests
     public class RequestWithTwoEstimatesDto
     {
         public int order_request_id { get; set; }
+        public string? assign_name { get; set; }
         public string customer_name { get; set; } = "";
         public string customer_phone { get; set; } = "";
         public string? customer_email { get; set; }

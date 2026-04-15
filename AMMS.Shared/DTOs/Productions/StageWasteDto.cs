@@ -14,7 +14,6 @@ namespace AMMS.Shared.DTOs.Productions
         public string? process_code { get; set; }
 
         public int qty_good { get; set; }
-        public int qty_bad { get; set; }
         public decimal waste_percent { get; set; }
 
         public DateTime? first_scan { get; set; }

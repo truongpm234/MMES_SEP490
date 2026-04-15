@@ -13,7 +13,7 @@ namespace AMMS.Shared.DTOs.Requests
         public int order_request_id { get; set; }
         public int? assigned_consultant { get; set; }
         public DateTime? assigned_at { get; set; }
-
+        public string? assign_name { get; set; }
         public AssignedConsultantSummaryDto? assigned_consultant_user { get; set; }
     }
 }

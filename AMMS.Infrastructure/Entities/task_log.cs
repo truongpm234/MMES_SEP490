@@ -21,6 +21,9 @@ public partial class task_log
 
     public DateTime? log_time { get; set; }
 
+    [Column(TypeName = "jsonb")]
+    public string? material_usage_json { get; set; }
+
     [ForeignKey(nameof(task_id))]
     public virtual task? task { get; set; }
 }

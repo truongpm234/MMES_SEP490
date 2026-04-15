@@ -47,7 +47,6 @@ namespace AMMS.Application.Services
                     $"Chỉ task đang ở trạng thái Unassigned mới được bấm Ready. Hiện tại: {current.status}");
             }
 
-            // Nếu không phải RALO/CAT thì bắt buộc toàn bộ task trước đó đã Finished
             if (!isInitialParallel)
             {
                 var currentSeq = currentFlow.seq_num ?? int.MaxValue;

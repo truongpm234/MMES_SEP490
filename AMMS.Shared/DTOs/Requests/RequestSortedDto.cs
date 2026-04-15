@@ -48,6 +48,7 @@ namespace AMMS.Shared.DTOs.Requests
         public int? actual_consultant_user_id { get; set; }
         public string? delivery_date_change_reason { get; set; }
         public DateTime? estimate_finish_date { get; set; }
+        public string? assign_name { get; set; }
 
         // ===== cost_estimate =====
         public int? estimate_id { get; set; }

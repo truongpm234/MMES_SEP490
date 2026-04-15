@@ -402,6 +402,8 @@ public partial class AppDbContext : DbContext
             entity.HasOne(d => d.task).WithMany(p => p.task_logs)
                 .HasForeignKey(d => d.task_id)
                 .HasConstraintName("task_logs_task_id_fkey");
+            entity.Property(e => e.material_usage_json)
+                .HasColumnType("jsonb");
         });
 
         modelBuilder.Entity<user>(entity =>

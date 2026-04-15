@@ -93,6 +93,7 @@ public class TasksController : ControllerBase
 
         var token = _tokenSvc.CreateToken(req.task_id, qtyGood, ttl);
         var expiresAt = DateTimeOffset.UtcNow.Add(ttl).ToUnixTimeSeconds();
+        var qrMaterialBundle = await _scanSvc.GetTaskQrMaterialBundleAsync(req.task_id, ct);
 
         return new TaskQrResponse
         {
@@ -106,7 +107,10 @@ public class TasksController : ControllerBase
             suggested_qty = policy.suggested_qty,
             qty_unit = policy.qty_unit,
             process_code = policy.process_code,
-            process_name = policy.process_name
+            process_name = policy.process_name,
+
+            consumable_materials = qrMaterialBundle.consumable_materials,
+            reference_inputs = qrMaterialBundle.reference_inputs
         };
     }
 

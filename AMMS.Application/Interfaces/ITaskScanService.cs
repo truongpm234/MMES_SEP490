@@ -11,5 +11,7 @@ namespace AMMS.Application.Interfaces
     {
         Task<ScanTaskResult> ScanFinishAsync(ScanTaskRequest req, int? scannedByUserId, CancellationToken ct = default);
         Task<int> SuggestQtyGoodAsync(int taskId, CancellationToken ct = default);
+        Task<List<TaskConsumableMaterialDto>> GetConsumableMaterialsForTaskPublicAsync(int taskId, CancellationToken ct = default);
+        Task<TaskQrMaterialBundleDto> GetTaskQrMaterialBundleAsync(int taskId, CancellationToken ct = default);
     }
 }

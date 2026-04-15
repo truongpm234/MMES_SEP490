@@ -25,7 +25,7 @@
         public string detail_address { get; set; } = "";
         public string product_type { get; set; } = "";
         public int? number_of_plates { get; set; }
-
+        public string? assign_name { get; set; }
         public string production_processes { get; set; } = "";
         public string coating_type { get; set; } = "";
         public string paper_code { get; set; } = "";

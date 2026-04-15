@@ -28,7 +28,6 @@ namespace AMMS.Shared.DTOs.Productions
 
         // Sản lượng/hao phí từ logs
         public int qty_good { get; set; }
-        public int qty_bad { get; set; }
         public decimal waste_percent { get; set; }
         public DateTime? last_scan_time { get; set; }
         public decimal estimated_output_quantity { get; set; }
