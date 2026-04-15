@@ -8,7 +8,10 @@ using AMMS.Shared.DTOs.Socket;
 using AMMS.Shared.Helpers;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace AMMS.Application.Services
 {
@@ -304,28 +307,78 @@ namespace AMMS.Application.Services
             return new TaskQrMaterialBundleDto
             {
                 consumable_materials = await BuildConsumableMaterialsAsync(ctx, ct),
-                reference_inputs = BuildReferenceInputs(ctx)
+                reference_inputs = await BuildReferenceInputsAsync(ctx, ct)
             };
         }
 
-        private static string NormalizeMaterialCode(string? code)
+        private static string RemoveDiacritics(string? text)
         {
-            var c = (code ?? "").Trim().ToUpperInvariant()
-                .Replace(" ", "_");
+            if (string.IsNullOrWhiteSpace(text))
+                return "";
 
-            return c switch
+            var normalized = text.Normalize(NormalizationForm.FormD);
+            var sb = new StringBuilder();
+
+            foreach (var ch in normalized)
             {
+                var uc = CharUnicodeInfo.GetUnicodeCategory(ch);
+                if (uc != UnicodeCategory.NonSpacingMark)
+                    sb.Append(ch);
+            }
+
+            return sb.ToString().Normalize(NormalizationForm.FormC);
+        }
+
+        private static string NormalizeMaterialCode(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return "";
+
+            var s = RemoveDiacritics(raw)
+                .Trim()
+                .ToUpperInvariant();
+
+            s = s.Replace("Đ", "D");
+            s = Regex.Replace(s, @"[^A-Z0-9]+", "_");
+            s = Regex.Replace(s, @"_+", "_").Trim('_');
+
+            return s switch
+            {
+                // Kẽm
+                "KEM_THO" => "PLATE",
+                "BAN_KEM_THO" => "PLATE",
+                "BAN_KEM" => "PLATE",
+                "BAN_KEM_IN" => "PLATE",
+                "PLATE_INPUT" => "PLATE",
+
+                // Mực
+                "MUC" => "INK",
+                "MUC_IN" => "INK",
+                "MUC_TONG_HOP" => "INK",
+                "INK_TYPES" => "INK",
+
+                // Keo phủ
                 "KEO_NUOC" => "KEO_PHU_NUOC",
+                "KEO_PHU_NUOC" => "KEO_PHU_NUOC",
                 "KEO_DAU" => "KEO_PHU_DAU",
+                "KEO_PHU_DAU" => "KEO_PHU_DAU",
                 "UV" => "KEO_PHU_UV",
                 "KEO_UV" => "KEO_PHU_UV",
                 "PHU_UV" => "KEO_PHU_UV",
+                "KEO_PHU_UV" => "KEO_PHU_UV",
 
+                // Màng
                 "CAN_MANG" => "MANG_12MIC",
                 "MANG_CAN" => "MANG_12MIC",
+                "MANG" => "MANG_12MIC",
                 "LAMINATION" => "MANG_12MIC",
+                "MANG_12_MIC" => "MANG_12MIC",
 
-                _ => c
+                // Keo bồi
+                "MOUNTING_GLUE" => "KEO_BOI",
+                "KEO_BOI" => "KEO_BOI",
+
+                _ => s
             };
         }
 
@@ -341,19 +394,22 @@ namespace AMMS.Application.Services
             var result = new List<TaskConsumableMaterialDto>();
 
             async Task AddMaterialAsync(
-                decimal estimatedQty,
-                string fallbackCode,
-                string fallbackName,
-                string unit,
-                material? resolvedMaterial)
+    decimal estimatedQty,
+    string fallbackCode,
+    string fallbackName,
+    string unit,
+    material? resolvedMaterial)
             {
                 if (estimatedQty <= 0)
                     return;
 
+                var normalizedFallbackCode = NormalizeMaterialCode(
+                    !string.IsNullOrWhiteSpace(fallbackCode) ? fallbackCode : fallbackName);
+
                 result.Add(new TaskConsumableMaterialDto
                 {
                     material_id = resolvedMaterial?.material_id,
-                    material_code = resolvedMaterial?.code ?? fallbackCode,
+                    material_code = resolvedMaterial?.code ?? normalizedFallbackCode,
                     material_name = resolvedMaterial?.name ?? fallbackName,
                     unit = resolvedMaterial?.unit ?? unit,
                     estimated_input_qty = Math.Round(estimatedQty, 4),
@@ -477,57 +533,33 @@ namespace AMMS.Application.Services
             return result;
         }
 
-        private List<TaskReferenceInputDto> BuildReferenceInputs(TaskEstimateContext ctx)
+        private async Task<List<TaskReferenceInputDto>> BuildReferenceInputsAsync(
+    TaskEstimateContext ctx,
+    CancellationToken ct = default)
         {
             var t = ctx.Task;
-            var req = ctx.Request;
-            var est = ctx.Estimate;
+            var currentCode = ProductionFlowHelper.Norm(t.process?.process_code);
 
-            var processCode = (t.process?.process_code ?? "").Trim().ToUpperInvariant();
+            var previousProcessCode = await GetPreviousProcessCodeAsync(t, ct);
+            if (string.IsNullOrWhiteSpace(previousProcessCode))
+                return new List<TaskReferenceInputDto>();
+
+            var (unit, qty) = ResolveReferenceInputShape(previousProcessCode, ctx);
+
             var result = new List<TaskReferenceInputDto>();
 
-            decimal sheetQty = est.sheets_total > 0 ? est.sheets_total : est.sheets_required;
-            decimal productQty = req.quantity ?? 0;
-
-            switch (processCode)
+            switch (currentCode)
             {
                 case "IN":
-                    result.Add(new TaskReferenceInputDto
-                    {
-                        input_code = "PRESS_SHEET",
-                        input_name = "Giấy đã cắt",
-                        unit = "tờ",
-                        estimated_qty = Math.Round(sheetQty, 4)
-                    });
-                    break;
-
                 case "BE":
-                    result.Add(new TaskReferenceInputDto
-                    {
-                        input_code = "PREV_SEMI",
-                        input_name = "Bán thành phẩm công đoạn trước",
-                        unit = "tờ",
-                        estimated_qty = Math.Round(sheetQty, 4)
-                    });
-                    break;
-
                 case "DUT":
-                    result.Add(new TaskReferenceInputDto
-                    {
-                        input_code = "PREV_SEMI",
-                        input_name = "Bán thành phẩm công đoạn trước",
-                        unit = "sp",
-                        estimated_qty = Math.Round(productQty, 4)
-                    });
-                    break;
-
                 case "DAN":
                     result.Add(new TaskReferenceInputDto
                     {
-                        input_code = "PREV_SEMI",
-                        input_name = "Bán thành phẩm công đoạn trước",
-                        unit = "sp",
-                        estimated_qty = Math.Round(productQty, 4)
+                        input_code = previousProcessCode,
+                        input_name = $"Bán thành phẩm từ công đoạn {previousProcessCode}",
+                        unit = unit,
+                        estimated_qty = Math.Round(qty, 4)
                     });
                     break;
             }
@@ -631,40 +663,38 @@ namespace AMMS.Application.Services
     IEnumerable<string?> codeCandidates,
     IEnumerable<string?>? nameCandidates = null)
         {
-            var codes = codeCandidates
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Select(NormalizeMaterialCode)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            var aliases = new List<string>();
 
-            if (codes.Count > 0)
+            aliases.AddRange(
+                codeCandidates
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(NormalizeMaterialCode));
+
+            if (nameCandidates != null)
             {
-                var mats = await _db.materials
-                    .AsNoTracking()
-                    .Where(x => codes.Contains(x.code))
-                    .ToListAsync(ct);
-
-                foreach (var code in codes)
-                {
-                    var matched = mats.FirstOrDefault(x =>
-                        string.Equals(x.code, code, StringComparison.OrdinalIgnoreCase));
-
-                    if (matched != null)
-                        return matched;
-                }
+                aliases.AddRange(
+                    nameCandidates
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .Select(NormalizeMaterialCode));
             }
 
-            var names = (nameCandidates ?? Enumerable.Empty<string?>())
+            aliases = aliases
                 .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Select(x => x!.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            foreach (var name in names)
+            if (aliases.Count == 0)
+                return null;
+
+            var allMaterials = await _db.materials
+                .AsNoTracking()
+                .ToListAsync(ct);
+
+            foreach (var alias in aliases)
             {
-                var matched = await _db.materials
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(x => x.name == name, ct);
+                var matched = allMaterials.FirstOrDefault(m =>
+                    string.Equals(NormalizeMaterialCode(m.code), alias, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(NormalizeMaterialCode(m.name), alias, StringComparison.OrdinalIgnoreCase));
 
                 if (matched != null)
                     return matched;
@@ -949,6 +979,75 @@ namespace AMMS.Application.Services
                 Production = prod,
                 Request = req,
                 Estimate = est
+            };
+        }
+
+        private async Task<string?> GetPreviousProcessCodeAsync(task currentTask, CancellationToken ct = default)
+        {
+            if (!currentTask.prod_id.HasValue)
+                return null;
+
+            var flow = await _db.tasks
+                .AsNoTracking()
+                .Include(x => x.process)
+                .Where(x => x.prod_id == currentTask.prod_id.Value)
+                .OrderBy(x => x.seq_num)
+                .ThenBy(x => x.task_id)
+                .Select(x => new TaskFlowRefItem
+                {
+                    task_id = x.task_id,
+                    seq_num = x.seq_num,
+                    process_code = x.process != null ? x.process.process_code : null,
+                    process_name = x.process != null ? x.process.process_name : null
+                })
+                .ToListAsync(ct);
+
+            if (flow.Count == 0)
+                return null;
+
+            var currentIndex = flow.FindIndex(x => x.task_id == currentTask.task_id);
+            if (currentIndex <= 0)
+                return null;
+
+            var prev = flow[currentIndex - 1];
+            return ProductionFlowHelper.Norm(prev.process_code);
+        }
+
+        private sealed class TaskFlowRefItem
+        {
+            public int task_id { get; init; }
+            public int? seq_num { get; init; }
+            public string? process_code { get; init; }
+            public string? process_name { get; init; }
+        }
+
+        private static (string unit, decimal qty) ResolveReferenceInputShape(
+    string? previousProcessCode,
+    TaskEstimateContext ctx)
+        {
+            var prevCode = ProductionFlowHelper.Norm(previousProcessCode);
+
+            var req = ctx.Request;
+            var est = ctx.Estimate;
+
+            decimal sheetQty = est.sheets_total > 0
+                ? est.sheets_total
+                : est.sheets_required > 0 ? est.sheets_required : 1;
+
+            decimal productQty = req.quantity.HasValue && req.quantity.Value > 0
+                ? req.quantity.Value
+                : 1;
+
+            decimal plateQty = req.number_of_plates.HasValue && req.number_of_plates.Value > 0
+                ? req.number_of_plates.Value
+                : 1;
+
+            return prevCode switch
+            {
+                "RALO" => ("bản", plateQty),
+                "DUT" => ("sp", productQty),
+                "DAN" => ("sp", productQty),
+                _ => ("tờ", sheetQty)
             };
         }
 
