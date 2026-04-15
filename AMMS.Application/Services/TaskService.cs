@@ -1,16 +1,20 @@
 ﻿using AMMS.Application.Interfaces;
+using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.Helpers;
+using Microsoft.EntityFrameworkCore;
 
 namespace AMMS.Application.Services
 {
     public class TaskService : ITaskService
     {
         private readonly ITaskRepository _taskRepo;
+        private readonly AppDbContext _db;
 
-        public TaskService(ITaskRepository taskRepo)
+        public TaskService(ITaskRepository taskRepo, AppDbContext db)
         {
             _taskRepo = taskRepo;
+            _db = db;
         }
 
         public async Task<bool> SetTaskReadyAsync(int taskId, CancellationToken ct = default)
@@ -21,6 +25,30 @@ namespace AMMS.Application.Services
 
             if (!current.prod_id.HasValue || !current.seq_num.HasValue)
                 throw new InvalidOperationException("Task thiếu prod_id hoặc seq_num.");
+
+            // validate production/order readiness
+            var prod = await _db.productions
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.prod_id == current.prod_id.Value, ct);
+
+            if (prod == null)
+                throw new InvalidOperationException("Không tìm thấy production của task.");
+
+            if (!prod.order_id.HasValue)
+                throw new InvalidOperationException("Production chưa gắn với order.");
+
+            var order = await _db.orders
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.order_id == prod.order_id.Value, ct);
+
+            if (order == null)
+                throw new InvalidOperationException("Không tìm thấy order của production.");
+
+            if (!order.layout_confirmed)
+                throw new InvalidOperationException("Order chưa xác nhận layout, không thể bắt đầu công đoạn.");
+
+            if (!order.is_production_ready)
+                throw new InvalidOperationException("Order chưa được xác nhận sẵn sàng sản xuất, không thể bắt đầu công đoạn.");
 
             if (string.Equals(current.status, "Finished", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Task đã Finished, không thể chuyển lại Ready.");
