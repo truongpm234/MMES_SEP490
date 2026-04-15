@@ -129,20 +129,6 @@ public class TasksController : ControllerBase
     [HttpPut("ready")]
     public async Task<IActionResult> SetTaskReady([FromBody] SetTaskReadyRequest req, CancellationToken ct)
     {
-        if (req == null || req.task_id <= 0)
-            return BadRequest(new { message = "task_id is required" });
-        var prevTask = await _db.tasks.FirstOrDefaultAsync(t => t.task_id == (req.task_id - 1));
-        var currentTask = await _db.tasks.FirstOrDefaultAsync(t => t.task_id == req.task_id);
-        if (prevTask != null && currentTask != null)
-        {
-            if (prevTask.prod_id == currentTask.prod_id)
-            {
-                if (prevTask.status != "Finished")
-                {
-                    return BadRequest("Không thể bắt đầu, công đoạn trước chưa được hoàn thành");
-                }
-            }
-        }
         try
         {
             var ok = await _taskService.SetTaskReadyAsync(req.task_id, ct);
