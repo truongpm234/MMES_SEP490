@@ -11,15 +11,15 @@ namespace AMMS.Application.Helpers
             if (est == null) throw new ArgumentNullException(nameof(est));
             if (paymentTerms == null) throw new ArgumentNullException(nameof(paymentTerms));
 
-            var finalTotalRaw = NormalizeMoneyToInt(est.final_total_cost);
+            var finalTotal = NormalizeMoneyToInt(est.final_total_cost);
             var depositPercent = NormalizePercent(paymentTerms.deposit_percent);
 
-            var depositRaw = Convert.ToInt32(Math.Round(
-                finalTotalRaw * depositPercent / 100m,
+            var depositActual = Convert.ToInt32(Math.Round(
+                finalTotal * depositPercent / 100m,
                 0,
                 MidpointRounding.AwayFromZero));
 
-            return depositRaw / 100;
+            return depositActual;
         }
 
         public static int GetRemainingAmount(cost_estimate est, PaymentTermsConfig paymentTerms)
@@ -27,15 +27,15 @@ namespace AMMS.Application.Helpers
             if (est == null) throw new ArgumentNullException(nameof(est));
             if (paymentTerms == null) throw new ArgumentNullException(nameof(paymentTerms));
 
-            var finalTotalRaw = NormalizeMoneyToInt(est.final_total_cost);
+            var finalTotal = NormalizeMoneyToInt(est.final_total_cost);
             var depositPercent = NormalizePercent(paymentTerms.deposit_percent);
 
-            var depositRaw = Convert.ToInt32(Math.Round(
-                finalTotalRaw * depositPercent / 100m,
+            var depositActual = Convert.ToInt32(Math.Round(
+                finalTotal * depositPercent / 100m,
                 0,
                 MidpointRounding.AwayFromZero));
 
-            var remaining = (finalTotalRaw - depositRaw) / 100;
+            var remaining = finalTotal - depositActual;
             return remaining > 0 ? remaining : 0;
         }
 

@@ -27,12 +27,14 @@ namespace AMMS.Application.Services
         private readonly ILogger<PaymentsService> _logger;
         private readonly IConfiguration _config;
         private readonly IWebHostEnvironment _env;
+        private readonly IBaseConfigRepository _baseconfigRepo;
+
         public PaymentsService(
             AppDbContext db,
             IRequestService requestService,
             IDealService dealService,
             IPaymentRepository paymentRepo,
-            ILogger<PaymentsService> logger, IConfiguration config, IWebHostEnvironment env)
+            ILogger<PaymentsService> logger, IConfiguration config, IWebHostEnvironment env, IBaseConfigRepository baseconfigRepo)
         {
             _db = db;
             _requestService = requestService;
@@ -41,6 +43,7 @@ namespace AMMS.Application.Services
             _logger = logger;
             _config = config;
             _env = env;
+            _baseconfigRepo = baseconfigRepo;
         }
 
         public Task<payment?> GetPaidByProviderOrderCodeAsync(string provider, long orderCode, CancellationToken ct = default)
@@ -267,15 +270,22 @@ namespace AMMS.Application.Services
 
                 await _db.SaveChangesAsync(ct);
 
+                var paymentTerms = await _baseconfigRepo.GetPaymentTermsAsync(ct);
+
+                decimal actualDepositAmount =
+                    (currentPayment?.amount).GetValueOrDefault() > 0
+                        ? currentPayment!.amount
+                        : PaymentAmountHelper.GetDepositAmount(est, paymentTerms);
+
                 await UpsertPaidPaymentRowAsync(
-                    orderRequestId,
-                    orderCode,
-                    amount,
-                    paymentLinkId,
-                    transactionId,
-                    rawJson,
-                    resolvedEstimateId,
-                    resolvedQuoteId > 0 ? resolvedQuoteId : null,
+                    orderRequestId: orderRequestId,
+                    orderCode: orderCode,
+                    actualAmount: actualDepositAmount,
+                    paymentLinkId: paymentLinkId,
+                    transactionId: transactionId,
+                    rawJson: rawJson,
+                    estimateIdFromQuery: resolvedEstimateId,
+                    quoteIdFromQuery: resolvedQuoteId > 0 ? resolvedQuoteId : null,
                     paymentType: "Deposit",
                     ct: ct);
 
@@ -362,13 +372,46 @@ namespace AMMS.Application.Services
             });
         }
 
+        private async Task<cost_estimate?> ResolveEstimateForPaymentAsync(
+    order_request req,
+    int? estimateId,
+    CancellationToken ct = default)
+        {
+            if (estimateId.HasValue && estimateId.Value > 0)
+            {
+                var byPaymentEstimate = await _db.cost_estimates
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.estimate_id == estimateId.Value, ct);
+
+                if (byPaymentEstimate != null)
+                    return byPaymentEstimate;
+            }
+
+            if (req.accepted_estimate_id.HasValue && req.accepted_estimate_id.Value > 0)
+            {
+                var accepted = await _db.cost_estimates
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.estimate_id == req.accepted_estimate_id.Value, ct);
+
+                if (accepted != null)
+                    return accepted;
+            }
+
+            return await _db.cost_estimates
+                .AsNoTracking()
+                .Where(x => x.order_request_id == req.order_request_id)
+                .OrderByDescending(x => x.is_active)
+                .ThenByDescending(x => x.estimate_id)
+                .FirstOrDefaultAsync(ct);
+        }
+
         private async Task<(bool ok, string message)> ProcessRemainingPaidAsync(
-            long orderCode,
-            long amount,
-            string? paymentLinkId,
-            string? transactionId,
-            string rawJson,
-            CancellationToken ct)
+    long orderCode,
+    long amount,
+    string? paymentLinkId,
+    string? transactionId,
+    string rawJson,
+    CancellationToken ct)
         {
             var strategy = _db.Database.CreateExecutionStrategy();
 
@@ -387,23 +430,7 @@ namespace AMMS.Application.Services
 
                 var now = AppTime.NowVnUnspecified();
 
-                existing.status = "PAID";
-                existing.payment_type = "Remaining";
-                existing.paid_at ??= now;
-                existing.updated_at = now;
-
-                if (existing.amount <= 0 && amount > 0)
-                    existing.amount = (decimal)amount;
-
-                if (!string.IsNullOrWhiteSpace(paymentLinkId))
-                    existing.payos_payment_link_id = paymentLinkId;
-
-                if (!string.IsNullOrWhiteSpace(transactionId))
-                    existing.payos_transaction_id = transactionId;
-
-                if (!string.IsNullOrWhiteSpace(rawJson))
-                    existing.payos_raw = rawJson;
-
+                // PHẢI lấy req trước rồi mới dùng req
                 var req = await _requestService.GetRequestForUpdateAsync(existing.order_request_id, ct);
                 if (req == null)
                 {
@@ -416,6 +443,38 @@ namespace AMMS.Application.Services
                     await tx.RollbackAsync(ct);
                     return (false, "Order has not been created for remaining payment");
                 }
+
+                var est = await ResolveEstimateForPaymentAsync(req, existing.estimate_id, ct);
+                if (est == null)
+                {
+                    await tx.RollbackAsync(ct);
+                    return (false, "Accepted estimate not found for remaining payment");
+                }
+
+                var paymentTerms = await _baseconfigRepo.GetPaymentTermsAsync(ct);
+
+                var actualRemainingAmount =
+                    existing.amount > 0
+                        ? existing.amount
+                        : PaymentAmountHelper.GetRemainingAmount(est, paymentTerms);
+
+                // chỉ gán 1 lần
+                existing.status = "PAID";
+                existing.payment_type = "Remaining";
+                existing.paid_at ??= now;
+                existing.updated_at = now;
+
+                // LUÔN LƯU SỐ THẬT, KHÔNG DÙNG amount callback đã chia 100
+                existing.amount = actualRemainingAmount;
+
+                if (!string.IsNullOrWhiteSpace(paymentLinkId))
+                    existing.payos_payment_link_id = paymentLinkId;
+
+                if (!string.IsNullOrWhiteSpace(transactionId))
+                    existing.payos_transaction_id = transactionId;
+
+                if (!string.IsNullOrWhiteSpace(rawJson))
+                    existing.payos_raw = rawJson;
 
                 var ord = await _db.orders.FirstOrDefaultAsync(x => x.order_id == req.order_id.Value, ct);
                 if (ord == null)
@@ -444,16 +503,16 @@ namespace AMMS.Application.Services
         }
 
         private async Task UpsertPaidPaymentRowAsync(
-            int orderRequestId,
-            long orderCode,
-            long amount,
-            string? paymentLinkId,
-            string? transactionId,
-            string rawJson,
-            int? estimateIdFromQuery,
-            int? quoteIdFromQuery,
-            string paymentType,
-            CancellationToken ct)
+    int orderRequestId,
+    long orderCode,
+    decimal actualAmount,
+    string? paymentLinkId,
+    string? transactionId,
+    string rawJson,
+    int? estimateIdFromQuery,
+    int? quoteIdFromQuery,
+    string paymentType,
+    CancellationToken ct)
         {
             var now = AppTime.NowVnUnspecified();
 
@@ -466,8 +525,9 @@ namespace AMMS.Application.Services
                 existing.payment_type = paymentType;
                 existing.paid_at ??= now;
 
-                if (existing.amount <= 0 && amount > 0)
-                    existing.amount = (decimal)amount;
+                // LUÔN GHI SỐ THẬT
+                if (actualAmount > 0)
+                    existing.amount = actualAmount;
 
                 if (!string.IsNullOrWhiteSpace(paymentLinkId))
                     existing.payos_payment_link_id = paymentLinkId;
@@ -502,7 +562,7 @@ namespace AMMS.Application.Services
                 provider = "PAYOS",
                 payment_type = paymentType,
                 order_code = orderCode,
-                amount = (decimal)amount,
+                amount = actualAmount,
                 currency = "VND",
                 status = "PAID",
                 estimate_id = (estimateIdFromQuery.HasValue && estimateIdFromQuery.Value > 0)
@@ -671,8 +731,8 @@ namespace AMMS.Application.Services
 
                 total_order_value = totalOrderValue,
                 deposit_required = depositRequired,
-                amount_received = amountReceived * 100,
-                amount_received_in_words = VietnameseMoneyTextHelper.ToVietnameseText(amountReceived * 100),
+                amount_received = amountReceived,
+                amount_received_in_words = VietnameseMoneyTextHelper.ToVietnameseText(amountReceived),
                 paid_before_this_receipt = paidBeforeThisReceipt,
                 cumulative_paid = cumulativePaid,
                 remaining_after_this_receipt = remainingAfterThisReceipt
