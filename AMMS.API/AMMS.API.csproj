@@ -24,6 +24,10 @@
 		<None Update="Templates\HopDongTemplate.docx">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>
+		<Content Include="Templates\**\*">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</Content>
 	</ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\AMMS.Application\AMMS.Application.csproj" />

@@ -525,7 +525,6 @@ namespace AMMS.Application.Services
                 existing.payment_type = paymentType;
                 existing.paid_at ??= now;
 
-                // LUÔN GHI SỐ THẬT
                 if (actualAmount > 0)
                     existing.amount = actualAmount;
 
