@@ -882,16 +882,10 @@ namespace AMMS.Application.Services
             // tạo docx
             var generatedDocxBytes = PaymentReceiptDocxHelper.GenerateDocx(templateBytes, placeholders);
 
-            // convert ppdf
-            var pdfBytes = await LibreOfficePdfConverter.ConvertDocxBytesToPdfAsync(
-                generatedDocxBytes,
-                _logger,
-                ct);
+            var fileName = $"phieu-thu-{payment.order_code}.docx";
+            var contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-            var fileName = $"phieu-thu-{payment.order_code}.pdf";
-            var contentType = "application/pdf";
-
-            return (pdfBytes, fileName, contentType);
+            return (generatedDocxBytes, fileName, contentType);
         }
 
         private string ResolveReceiptTemplatePath()
