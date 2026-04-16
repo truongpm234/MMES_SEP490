@@ -1,9 +1,13 @@
-﻿using AMMS.Application.Interfaces;
+﻿using AMMS.Application.Helpers;
+using AMMS.Application.Interfaces;
 using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
+using AMMS.Shared.Constants;
+using AMMS.Shared.DTOs.Payments;
 using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
@@ -20,18 +24,20 @@ namespace AMMS.Application.Services
         private readonly IDealService _dealService;
         private readonly IPaymentRepository _paymentRepo;
         private readonly ILogger<PaymentsService> _logger;
+        private readonly IConfiguration _config;
         public PaymentsService(
             AppDbContext db,
             IRequestService requestService,
             IDealService dealService,
             IPaymentRepository paymentRepo,
-            ILogger<PaymentsService> logger)
+            ILogger<PaymentsService> logger, IConfiguration config)
         {
             _db = db;
             _requestService = requestService;
             _dealService = dealService;
             _paymentRepo = paymentRepo;
             _logger = logger;
+            _config = config;
         }
 
         public Task<payment?> GetPaidByProviderOrderCodeAsync(string provider, long orderCode, CancellationToken ct = default)
@@ -512,6 +518,178 @@ namespace AMMS.Application.Services
 
             await _db.payments.AddAsync(newPayment, ct);
             await _db.SaveChangesAsync(ct);
+        }
+
+        public async Task<PaymentReceiptResponseDto?> GetReceiptByOrderCodeAsync(long orderCode, CancellationToken ct = default)
+        {
+            if (orderCode <= 0)
+                return null;
+
+            var payment = await _db.payments
+                .AsNoTracking()
+                .Where(x => x.provider == "PAYOS" && x.order_code == orderCode)
+                .OrderByDescending(x => x.payment_id)
+                .FirstOrDefaultAsync(ct);
+
+            if (payment == null)
+                return null;
+
+            var req = await _db.order_requests
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.order_request_id == payment.order_request_id, ct);
+
+            if (req == null)
+                return null;
+
+            order? ord = null;
+            if (req.order_id.HasValue && req.order_id.Value > 0)
+            {
+                ord = await _db.orders
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.order_id == req.order_id.Value, ct);
+            }
+
+            int? resolvedEstimateId = payment.estimate_id ?? req.accepted_estimate_id;
+            if ((!resolvedEstimateId.HasValue || resolvedEstimateId.Value <= 0) && req.order_request_id > 0)
+            {
+                resolvedEstimateId = await _db.cost_estimates
+                    .AsNoTracking()
+                    .Where(x => x.order_request_id == req.order_request_id)
+                    .OrderByDescending(x => x.is_active)
+                    .ThenByDescending(x => x.estimate_id)
+                    .Select(x => (int?)x.estimate_id)
+                    .FirstOrDefaultAsync(ct);
+            }
+
+            cost_estimate? est = null;
+            if (resolvedEstimateId.HasValue && resolvedEstimateId.Value > 0)
+            {
+                est = await _db.cost_estimates
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.estimate_id == resolvedEstimateId.Value, ct);
+            }
+
+            int? resolvedQuoteId = payment.quote_id ?? req.quote_id;
+
+            var paidPayments = await _db.payments
+                .AsNoTracking()
+                .Where(x =>
+                    x.order_request_id == payment.order_request_id &&
+                    x.provider == "PAYOS" &&
+                    (x.status == "PAID" || x.status == "SUCCESS"))
+                .ToListAsync(ct);
+
+            static DateTime GetSortTime(payment x)
+                => (DateTime)x.paid_at;
+
+            var orderedPaidPayments = paidPayments
+                .OrderBy(GetSortTime)
+                .ThenBy(x => x.payment_id)
+                .ToList();
+
+            decimal paidBeforeThisReceipt = 0m;
+            foreach (var item in orderedPaidPayments)
+            {
+                if (item.payment_id == payment.payment_id)
+                    break;
+
+                paidBeforeThisReceipt += item.amount;
+            }
+
+            var amountReceived = payment.amount;
+            var cumulativePaid = paidBeforeThisReceipt + amountReceived;
+
+            var totalOrderValue = est?.final_total_cost
+                                  ?? ord?.total_amount
+                                  ?? amountReceived;
+
+            var depositRequired = est?.deposit_amount ?? 0m;
+
+            var remainingAfterThisReceipt = totalOrderValue - cumulativePaid;
+            if (remainingAfterThisReceipt < 0)
+                remainingAfterThisReceipt = 0m;
+
+            var paymentTypeDisplay = string.Equals(payment.payment_type, PaymentTypes.Remaining, StringComparison.OrdinalIgnoreCase)
+                ? "Thanh toán phần còn lại"
+                : "Thanh toán tiền đặt cọc";
+
+            var orderDisplayCode = !string.IsNullOrWhiteSpace(ord?.code)
+                ? ord!.code
+                : $"AM{req.order_request_id:D6}";
+
+            var receiptDate = payment.paid_at;
+            var receiptNo = $"PT-{receiptDate:yyyyMMdd}-{payment.payment_id:D6}";
+
+            var receiptContent = string.Equals(payment.payment_type, PaymentTypes.Remaining, StringComparison.OrdinalIgnoreCase)
+                ? $"Thu tiền thanh toán phần còn lại của đơn hàng {orderDisplayCode}"
+                : $"Thu tiền đặt cọc của đơn hàng {orderDisplayCode}";
+
+            var collectedBy = !string.IsNullOrWhiteSpace(req.assign_name)
+                ? req.assign_name
+                : "Hệ thống AMMS";
+
+            var dto = new PaymentReceiptResponseDto
+            {
+                company_info = BuildReceiptCompanyInfo(),
+
+                receipt_no = receiptNo,
+                receipt_date = (DateTime)receiptDate,
+
+                payment_id = payment.payment_id,
+                provider = payment.provider,
+                payment_type = payment.payment_type ?? "",
+                payment_type_display = paymentTypeDisplay,
+                payment_status = payment.status,
+                currency = payment.currency,
+
+                payos_order_code = payment.order_code,
+                payos_payment_link_id = payment.payos_payment_link_id,
+                payos_transaction_id = payment.payos_transaction_id,
+
+                order_request_id = req.order_request_id,
+                order_id = req.order_id,
+                business_order_code = ord?.code,
+                quote_id = resolvedQuoteId,
+                estimate_id = resolvedEstimateId,
+
+                customer_name = req.customer_name,
+                customer_phone = req.customer_phone,
+                customer_email = req.customer_email,
+                customer_address = req.detail_address,
+
+                product_name = req.product_name,
+                quantity = req.quantity,
+
+                receipt_content = receiptContent,
+                collected_by = collectedBy,
+                note = string.Equals(payment.payment_type, PaymentTypes.Remaining, StringComparison.OrdinalIgnoreCase)
+                    ? "Phiếu thu thanh toán phần còn lại"
+                    : "Phiếu thu thanh toán tiền đặt cọc",
+
+                total_order_value = totalOrderValue,
+                deposit_required = depositRequired,
+                amount_received = depositRequired,
+                amount_received_in_words = VietnameseMoneyTextHelper.ToVietnameseText(depositRequired),
+                paid_before_this_receipt = paidBeforeThisReceipt,
+                cumulative_paid = cumulativePaid,
+                remaining_after_this_receipt = remainingAfterThisReceipt
+            };
+
+            return dto;
+        }
+
+        private PaymentReceiptCompanyDto BuildReceiptCompanyInfo()
+        {
+            return new PaymentReceiptCompanyDto
+            {
+                company_name = _config["Receipt:CompanyName"] ?? "CÔNG TY TNHH THƯƠNG MẠI DỊCH VỤ IN BAO BÌ ĐẠI PHÚC HẢI",
+                address = _config["Receipt:Address"] ?? "Số 75 Nguyễn Công Trứ, Phường Lê Chân, Thành phố Hải Phòng, Việt Nam",
+                phone = _config["Receipt:Phone"] ?? "02253250855",
+                email = _config["Receipt:Email"] ?? "amms.printing@gmail.com",
+                tax_code = _config["Receipt:TaxCode"] ?? "0201173299",
+                bank_account = _config["Receipt:BankAccount"] ?? "123456789",
+                bank_name = _config["Receipt:BankName"] ?? "BIDV - CN TP.HCM"
+            };
         }
     }
 }

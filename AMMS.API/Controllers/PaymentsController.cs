@@ -1,0 +1,56 @@
+﻿using AMMS.Application.Interfaces;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+
+namespace AMMS.API.Controllers
+{
+    [Route("api/[controller]")]
+    [ApiController]
+    public class PaymentsController : ControllerBase
+    {
+        private readonly IPaymentsService _paymentsService;
+
+        public PaymentsController(IPaymentsService paymentsService)
+        {
+            _paymentsService = paymentsService;
+        }
+
+        [AllowAnonymous]
+        [HttpGet("receipt/{orderCode:long}")]
+        public async Task<IActionResult> GetReceiptByOrderCode(long orderCode, CancellationToken ct)
+        {
+            if (orderCode <= 0)
+            {
+                return BadRequest(new
+                {
+                    message = "orderCode must be greater than 0"
+                });
+            }
+
+            var receipt = await _paymentsService.GetReceiptByOrderCodeAsync(orderCode, ct);
+
+            if (receipt == null)
+            {
+                return NotFound(new
+                {
+                    message = "Payment receipt not found",
+                    order_code = orderCode
+                });
+            }
+
+            if (!string.Equals(receipt.payment_status, "PAID", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(receipt.payment_status, "SUCCESS", StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new
+                {
+                    message = "Payment is not completed yet",
+                    order_code = orderCode,
+                    status = receipt.payment_status
+                });
+            }
+
+            return Ok(receipt);
+        }
+    }
+}

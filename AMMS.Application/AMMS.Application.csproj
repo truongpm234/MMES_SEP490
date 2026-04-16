@@ -17,6 +17,9 @@
     <PackageReference Include="SendGrid" Version="9.29.3" />
     <PackageReference Include="Twilio" Version="7.14.1" />
 	<PackageReference Include="Microsoft.Extensions.Http.Polly" Version="8.0.8" />
+	  <PackageReference Include="Tesseract" Version="5.2.0" />
+	  <PackageReference Include="OpenCvSharp4" Version="4.10.0.20241024" />
+	  <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.10.0.20241024" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -1,4 +1,5 @@
 ﻿using AMMS.Infrastructure.Entities;
+using AMMS.Shared.DTOs.Payments;
 
 namespace AMMS.Application.Interfaces
 {
@@ -24,5 +25,6 @@ namespace AMMS.Application.Interfaces
             int? estimateIdFromQuery,
             int? quoteIdFromQuery,
             CancellationToken ct = default);
+        Task<PaymentReceiptResponseDto?> GetReceiptByOrderCodeAsync(long orderCode, CancellationToken ct = default);
     }
 }
