@@ -608,7 +608,7 @@ namespace AMMS.Application.Services
             await using var docxStream = new MemoryStream(generatedBytes);
 
             var safeFileName = $"contract_request_{requestId}_estimate_{estimateId}.docx";
-            var publicId = $"contracts/request_{requestId}/estimate_{estimateId}/consultant_auto";
+            var publicId = $"contracts/request_{requestId}/estimate_{estimateId}/contract";
 
             var url = await _cloudinaryStorage.UploadRawWithPublicIdAsync(
                 docxStream,

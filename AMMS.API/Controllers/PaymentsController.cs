@@ -1,4 +1,5 @@
 ﻿using AMMS.Application.Interfaces;
+using AMMS.Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -51,6 +52,61 @@ namespace AMMS.API.Controllers
             }
 
             return Ok(receipt);
+        }
+
+        [AllowAnonymous]
+        [HttpGet("payment-receipt-docx/{orderCode:long}")]
+        public async Task<IActionResult> GeneratePaymentReceiptDocx(
+    [FromRoute] long orderCode,
+    CancellationToken ct)
+        {
+            try
+            {
+                if (orderCode <= 0)
+                {
+                    return BadRequest(new
+                    {
+                        message = "orderCode must be greater than 0"
+                    });
+                }
+
+                var result = await _paymentsService.GenerateReceiptDocxByOrderCodeAsync(orderCode, ct);
+
+                if (result == null)
+                {
+                    return NotFound(new
+                    {
+                        message = "Payment not found",
+                        order_code = orderCode
+                    });
+                }
+
+                return File(result.Value.FileBytes, result.Value.ContentType, result.Value.FileName);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new
+                {
+                    message = ex.Message,
+                    order_code = orderCode
+                });
+            }
+            catch (FileNotFoundException ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Receipt template file not found",
+                    detail = ex.Message
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Generate payment receipt failed",
+                    detail = ex.Message
+                });
+            }
         }
     }
 }

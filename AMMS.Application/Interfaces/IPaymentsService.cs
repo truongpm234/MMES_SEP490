@@ -26,5 +26,8 @@ namespace AMMS.Application.Interfaces
             int? quoteIdFromQuery,
             CancellationToken ct = default);
         Task<PaymentReceiptResponseDto?> GetReceiptByOrderCodeAsync(long orderCode, CancellationToken ct = default);
+        Task<(byte[] FileBytes, string FileName, string ContentType)?> GenerateReceiptDocxByOrderCodeAsync(
+    long orderCode,
+    CancellationToken ct = default);
     }
 }

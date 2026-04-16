@@ -14,6 +14,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 
 namespace AMMS.Application.Services
 {
@@ -25,12 +26,13 @@ namespace AMMS.Application.Services
         private readonly IPaymentRepository _paymentRepo;
         private readonly ILogger<PaymentsService> _logger;
         private readonly IConfiguration _config;
+        private readonly IWebHostEnvironment _env;
         public PaymentsService(
             AppDbContext db,
             IRequestService requestService,
             IDealService dealService,
             IPaymentRepository paymentRepo,
-            ILogger<PaymentsService> logger, IConfiguration config)
+            ILogger<PaymentsService> logger, IConfiguration config, IWebHostEnvironment env)
         {
             _db = db;
             _requestService = requestService;
@@ -38,6 +40,7 @@ namespace AMMS.Application.Services
             _paymentRepo = paymentRepo;
             _logger = logger;
             _config = config;
+            _env = env;
         }
 
         public Task<payment?> GetPaidByProviderOrderCodeAsync(string provider, long orderCode, CancellationToken ct = default)
@@ -668,8 +671,8 @@ namespace AMMS.Application.Services
 
                 total_order_value = totalOrderValue,
                 deposit_required = depositRequired,
-                amount_received = depositRequired,
-                amount_received_in_words = VietnameseMoneyTextHelper.ToVietnameseText(depositRequired),
+                amount_received = amountReceived * 100,
+                amount_received_in_words = VietnameseMoneyTextHelper.ToVietnameseText(amountReceived * 100),
                 paid_before_this_receipt = paidBeforeThisReceipt,
                 cumulative_paid = cumulativePaid,
                 remaining_after_this_receipt = remainingAfterThisReceipt
@@ -690,6 +693,155 @@ namespace AMMS.Application.Services
                 bank_account = _config["Receipt:BankAccount"] ?? "123456789",
                 bank_name = _config["Receipt:BankName"] ?? "BIDV - CN TP.HCM"
             };
+        }
+
+        public async Task<(byte[] FileBytes, string FileName, string ContentType)?> GenerateReceiptDocxByOrderCodeAsync(
+    long orderCode,
+    CancellationToken ct = default)
+        {
+            if (orderCode <= 0)
+                return null;
+
+            var payment = await _db.payments
+                .AsNoTracking()
+                .Where(x => x.provider == "PAYOS" && x.order_code == orderCode)
+                .OrderByDescending(x => x.payment_id)
+                .FirstOrDefaultAsync(ct);
+
+            if (payment == null)
+                return null;
+
+            if (!string.Equals(payment.status, "PAID", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(payment.status, "SUCCESS", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Payment has not been completed yet.");
+            }
+
+            var request = await _db.order_requests
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.order_request_id == payment.order_request_id, ct);
+
+            if (request == null)
+                throw new InvalidOperationException("Order request not found.");
+
+            order? order = null;
+            if (request.order_id.HasValue && request.order_id.Value > 0)
+            {
+                order = await _db.orders
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.order_id == request.order_id.Value, ct);
+            }
+
+            int? resolvedEstimateId = payment.estimate_id ?? request.accepted_estimate_id;
+            cost_estimate? estimate = null;
+
+            if (resolvedEstimateId.HasValue && resolvedEstimateId.Value > 0)
+            {
+                estimate = await _db.cost_estimates
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.estimate_id == resolvedEstimateId.Value, ct);
+            }
+
+            if (estimate == null)
+            {
+                estimate = await _db.cost_estimates
+                    .AsNoTracking()
+                    .Where(x => x.order_request_id == request.order_request_id)
+                    .OrderByDescending(x => x.is_active)
+                    .ThenByDescending(x => x.estimate_id)
+                    .FirstOrDefaultAsync(ct);
+            }
+
+            var allPaidPayments = await _db.payments
+                .AsNoTracking()
+                .Where(x =>
+                    x.order_request_id == request.order_request_id &&
+                    x.provider == "PAYOS" &&
+                    (x.status == "PAID" || x.status == "SUCCESS"))
+                .ToListAsync(ct);
+
+            static DateTime GetSortTime(payment x)
+                => (DateTime)x.paid_at;
+
+            var orderedPaidPayments = allPaidPayments
+                .OrderBy(GetSortTime)
+                .ThenBy(x => x.payment_id)
+                .ToList();
+
+            decimal paidBeforeThisReceipt = 0m;
+            foreach (var item in orderedPaidPayments)
+            {
+                if (item.payment_id == payment.payment_id)
+                    break;
+
+                paidBeforeThisReceipt += item.amount;
+            }
+
+            var totalOrderValue = estimate?.final_total_cost
+                                  ?? order?.total_amount
+                                  ?? payment.amount;
+
+            var cumulativePaid = paidBeforeThisReceipt + payment.amount;
+            var remainingAfterThisReceipt = totalOrderValue - cumulativePaid;
+            if (remainingAfterThisReceipt < 0m)
+                remainingAfterThisReceipt = 0m;
+
+            var consultantName = string.IsNullOrWhiteSpace(request.assign_name)
+                ? "Tư vấn viên lập phiếu"
+                : request.assign_name.Trim();
+
+            var receiptDate = (DateTime)payment.paid_at;
+            var receiptNo = $"PT-{receiptDate:yyyyMMdd}-{payment.payment_id:D6}";
+
+            var company = new ReceiptCompanyInfo
+            {
+                CompanyName = _config["Receipt:CompanyName"] ?? "CÔNG TY TNHH THƯƠNG MẠI DỊCH VỤ IN BAO BÌ ĐẠI PHÚC HẢI",
+                Address = _config["Receipt:Address"] ?? "",
+                Phone = _config["Receipt:Phone"] ?? "",
+                Email = _config["Receipt:Email"] ?? "",
+                TaxCode = _config["Receipt:TaxCode"] ?? "",
+                BankAccount = _config["Receipt:BankAccount"] ?? "",
+                BankName = _config["Receipt:BankName"] ?? ""
+            };
+
+            var templatePath = ResolveReceiptTemplatePath();
+
+            var placeholders = PaymentReceiptDocxHelper.BuildPlaceholders(
+                request,
+                payment,
+                order,
+                estimate,
+                company,
+                receiptDate,
+                receiptNo,
+                consultantName,
+                paidBeforeThisReceipt,
+                remainingAfterThisReceipt);
+
+            var templateBytes = await File.ReadAllBytesAsync(templatePath, ct);
+            var generatedBytes = PaymentReceiptDocxHelper.GenerateDocx(templateBytes, placeholders);
+            var fileName = $"phieu-thu-{payment.order_code}.docx";
+            var contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+            return (generatedBytes, fileName, contentType);
+        }
+
+        private string ResolveReceiptTemplatePath()
+        {
+            var candidates = new[]
+            {
+        Path.Combine(_env.ContentRootPath, "Templates", "PhieuThuTemplate.docx"),
+        Path.Combine(AppContext.BaseDirectory, "Templates", "PhieuThuTemplate.docx")
+    };
+
+            foreach (var path in candidates)
+            {
+                if (File.Exists(path))
+                    return path;
+            }
+
+            throw new FileNotFoundException(
+                "Receipt template not found. Checked paths: " + string.Join(" | ", candidates));
         }
     }
 }
