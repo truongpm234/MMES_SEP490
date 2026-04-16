@@ -754,7 +754,7 @@ namespace AMMS.Application.Services
             };
         }
 
-        public async Task<(byte[] FileBytes, string FileName, string ContentType)?> GenerateReceiptDocxByOrderCodeAsync(
+        public async Task<(byte[] FileBytes, string FileName, string ContentType)?> GenerateReceiptPdfByOrderCodeAsync(
     long orderCode,
     CancellationToken ct = default)
         {
@@ -878,11 +878,20 @@ namespace AMMS.Application.Services
                 remainingAfterThisReceipt);
 
             var templateBytes = await File.ReadAllBytesAsync(templatePath, ct);
-            var generatedBytes = PaymentReceiptDocxHelper.GenerateDocx(templateBytes, placeholders);
-            var fileName = $"phieu-thu-{payment.order_code}.docx";
-            var contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-            return (generatedBytes, fileName, contentType);
+            // tạo docx
+            var generatedDocxBytes = PaymentReceiptDocxHelper.GenerateDocx(templateBytes, placeholders);
+
+            // convert ppdf
+            var pdfBytes = await LibreOfficePdfConverter.ConvertDocxBytesToPdfAsync(
+                generatedDocxBytes,
+                _logger,
+                ct);
+
+            var fileName = $"phieu-thu-{payment.order_code}.pdf";
+            var contentType = "application/pdf";
+
+            return (pdfBytes, fileName, contentType);
         }
 
         private string ResolveReceiptTemplatePath()

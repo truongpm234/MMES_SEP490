@@ -19,8 +19,21 @@ RUN dotnet build -c Release -o /app/build
 FROM build AS publish
 RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
 
+# Stage 3: Runtime
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    libreoffice \
+    libreoffice-writer \
+    fontconfig \
+    fonts-dejavu \
+    fonts-liberation \
+    locales \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 
 COPY --from=publish /app/publish .
 

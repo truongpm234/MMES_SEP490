@@ -70,7 +70,7 @@ namespace AMMS.API.Controllers
                     });
                 }
 
-                var result = await _paymentsService.GenerateReceiptDocxByOrderCodeAsync(orderCode, ct);
+                var result = await _paymentsService.GenerateReceiptPdfByOrderCodeAsync(orderCode, ct);
 
                 if (result == null)
                 {

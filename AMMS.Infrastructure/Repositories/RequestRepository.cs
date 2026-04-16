@@ -195,7 +195,7 @@ namespace AMMS.Infrastructure.Repositories
 
             return (
                 from r in requestQuery
-                join ce in _db.cost_estimates.AsNoTracking()
+                join ce in _db.cost_estimates.AsNoTracking().Where(x=>x.is_active == true)
                     on r.order_request_id equals ce.order_request_id into ceJoin
                 from ce in ceJoin
                     .OrderByDescending(x => x.estimate_id)
