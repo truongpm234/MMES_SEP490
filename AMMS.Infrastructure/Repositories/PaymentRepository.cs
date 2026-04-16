@@ -16,8 +16,7 @@ namespace AMMS.Infrastructure.Repositories
 
         public async Task GetByRequestIdAsync(int orderRequestId, CancellationToken ct = default)
             => await _db.payments.AsNoTracking()
-                .Where(x => x.order_request_id == orderRequestId)
-                .ToListAsync(ct);   
+                .FirstOrDefaultAsync(x => x.order_request_id == orderRequestId, ct);
 
         public Task<payment?> GetPaidByProviderOrderCodeAsync(string provider, long orderCode, CancellationToken ct = default)
             => _db.payments.AsNoTracking()

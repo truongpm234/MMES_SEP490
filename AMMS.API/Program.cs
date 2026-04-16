@@ -86,7 +86,8 @@ var feOrigins = new[]
 {
     "http://localhost:3000",
     "http://192.168.2.220:3000",
-    "https://sep490-fe.vercel.app"
+    "https://sep490-fe.vercel.app",
+    "https://daiphuchai.vercel.app"
 };
 
 builder.Services.AddCors(options =>
