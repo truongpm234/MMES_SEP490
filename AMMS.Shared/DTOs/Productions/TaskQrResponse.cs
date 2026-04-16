@@ -22,6 +22,7 @@ namespace AMMS.Shared.DTOs.Productions
         public string qty_unit { get; set; } = "sp";
         public string? process_code { get; set; }
         public string? process_name { get; set; }
+        public int embedded_material_count { get; set; }
         public List<TaskConsumableMaterialDto> consumable_materials { get; set; } = new();
         public List<TaskReferenceInputDto> reference_inputs { get; set; } = new();
     }

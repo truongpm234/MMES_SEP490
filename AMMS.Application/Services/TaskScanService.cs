@@ -52,17 +52,22 @@ namespace AMMS.Application.Services
             _db = db;
         }
 
-        public async Task<ScanTaskResult> ScanFinishAsync(ScanTaskRequest req, int? scannedByUserId, CancellationToken ct = default)
+        public async Task<ScanTaskResult> ScanFinishAsync(
+    ScanTaskRequest req,
+    int? scannedByUserId,
+    CancellationToken ct = default)
         {
-            if (!_tokenSvc.TryValidate(req.token, out var taskId, out var qtyGood, out var reason))
+            if (!_tokenSvc.TryValidate(req.token, out TaskQrTokenPayloadDto payload, out var reason))
                 throw new ArgumentException(reason);
 
-            var expectedMaterials = await GetConsumableMaterialsForTaskAsync(taskId, ct);
-            ValidateMaterialUsageInput(expectedMaterials, req.materials ?? new List<TaskMaterialUsageInputDto>());
+            var taskId = payload.task_id;
+            var qtyGood = payload.qty_good;
+            var qrMaterials = NormalizeMaterialUsageInputs(payload.materials);
 
-            var materialUsageSnapshot = BuildMaterialUsageSnapshot(
-                expectedMaterials,
-                req.materials ?? new List<TaskMaterialUsageInputDto>());
+            var expectedMaterials = await GetConsumableMaterialsForTaskAsync(taskId, ct);
+            ValidateMaterialUsageInput(expectedMaterials, qrMaterials);
+
+            var materialUsageSnapshot = BuildMaterialUsageSnapshot(expectedMaterials, qrMaterials);
 
             var materialUsageJson = materialUsageSnapshot.Count == 0
                 ? null
@@ -133,8 +138,8 @@ namespace AMMS.Application.Services
                 };
                 await _logRepo.AddAsync(finishLog);
 
-                // log từng NVL
-                foreach (var item in req.materials ?? new List<TaskMaterialUsageInputDto>())
+                // hoàn kho từ dữ liệu đã nhúng trong QR
+                foreach (var item in materialUsageSnapshot)
                 {
                     if (item.quantity_left > 0 && item.is_stock)
                     {
@@ -181,31 +186,35 @@ namespace AMMS.Application.Services
                         !string.Equals(ord.status, "Importing", StringComparison.OrdinalIgnoreCase))
                     {
                         ord.status = "Importing";
-                        var request = await _db.order_requests.FirstOrDefaultAsync(o => o.order_id == ord.order_id);
+                        var request = await _db.order_requests.FirstOrDefaultAsync(o => o.order_id == ord.order_id, innerCt);
+
                         await _hub.Clients.All.SendAsync("finishedProduction",
-                        new { message = $"Đơn hàng {prod.order_id} đã được sản xuất xong" });
+                            new { message = $"Đơn hàng {prod.order_id} đã được sản xuất xong" }, innerCt);
+
                         if (request != null)
                         {
-                            await _hub.Clients.Group(RealtimeGroups.ByRole("warehouse manager")).SendAsync("Importing", new { message = $"Đơn hàng {ord.order_id} đã được sản xuất xong, chờ nhập kho" });
-                            await _noti.CreateNotfi(4, $"Đơn hàng {ord.order_id} đã được sản xuất xong, chờ nhập kho", null, request.order_request_id, "Importing");
+                            await _hub.Clients.Group(RealtimeGroups.ByRole("warehouse manager")).SendAsync(
+                                "Importing",
+                                new { message = $"Đơn hàng {ord.order_id} đã được sản xuất xong, chờ nhập kho" },
+                                innerCt);
+
+                            await _noti.CreateNotfi(
+                                4,
+                                $"Đơn hàng {ord.order_id} đã được sản xuất xong, chờ nhập kho",
+                                null,
+                                request.order_request_id,
+                                "Importing");
                         }
                     }
 
                     if (ord != null)
                     {
-                        await _orderRequestRepo.MarkProcessStatusImportingByOrderAsync(
-                            ord.order_id,
-                            ord.quote_id,
-                            innerCt);
-
-                        await _orderRequestRepo.MarkProcessStatusImportingByOrderAsync(
-                            ord.order_id,
-                            null,
-                            innerCt);
+                        await _orderRequestRepo.MarkProcessStatusImportingByOrderAsync(ord.order_id, ord.quote_id, innerCt);
+                        await _orderRequestRepo.MarkProcessStatusImportingByOrderAsync(ord.order_id, null, innerCt);
                     }
                 }
 
-                await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" });
+                await _hub.Clients.All.SendAsync("update-ui", new { message = "update UI" }, innerCt);
 
                 return new ScanTaskResult
                 {
@@ -221,7 +230,7 @@ namespace AMMS.Application.Services
                 if (prod?.order_id != null)
                 {
                     await _hub.Clients.All.SendAsync("finishedProduction",
-                        new { message = $"Đơn hàng {prod.order_id} đã được sản xuất xong" });
+                        new { message = $"Đơn hàng {prod.order_id} đã được sản xuất xong" }, ct);
                 }
             }
 
@@ -1054,6 +1063,30 @@ namespace AMMS.Application.Services
         public async Task<List<TaskConsumableMaterialDto>> GetConsumableMaterialsForTaskPublicAsync(int taskId, CancellationToken ct = default)
         {
             return await GetConsumableMaterialsForTaskAsync(taskId, ct);
+        }
+        public async Task ValidateMaterialUsageForQrAsync(
+    int taskId,
+    List<TaskMaterialUsageInputDto> materials,
+    CancellationToken ct = default)
+        {
+            var normalized = NormalizeMaterialUsageInputs(materials);
+
+            var expectedMaterials = await GetConsumableMaterialsForTaskAsync(taskId, ct);
+            ValidateMaterialUsageInput(expectedMaterials, normalized);
+        }
+
+        private static List<TaskMaterialUsageInputDto> NormalizeMaterialUsageInputs(
+    List<TaskMaterialUsageInputDto>? inputMaterials)
+        {
+            return (inputMaterials ?? new List<TaskMaterialUsageInputDto>())
+                .Select(x => new TaskMaterialUsageInputDto
+                {
+                    material_id = x.material_id,
+                    quantity_used = Math.Round(x.quantity_used, 4),
+                    quantity_left = Math.Round(x.quantity_left, 4),
+                    is_stock = x.is_stock
+                })
+                .ToList();
         }
     }
 }

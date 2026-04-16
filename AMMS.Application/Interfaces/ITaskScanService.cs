@@ -13,5 +13,9 @@ namespace AMMS.Application.Interfaces
         Task<int> SuggestQtyGoodAsync(int taskId, CancellationToken ct = default);
         Task<List<TaskConsumableMaterialDto>> GetConsumableMaterialsForTaskPublicAsync(int taskId, CancellationToken ct = default);
         Task<TaskQrMaterialBundleDto> GetTaskQrMaterialBundleAsync(int taskId, CancellationToken ct = default);
+        Task ValidateMaterialUsageForQrAsync(
+            int taskId,
+            List<TaskMaterialUsageInputDto> materials,
+            CancellationToken ct = default);
     }
 }

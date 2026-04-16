@@ -40,6 +40,29 @@ public class TasksController : ControllerBase
         return int.TryParse(raw, out var userId) ? userId : null;
     }
 
+    [HttpGet("qr-prepare/{taskId:int}")]
+    public async Task<IActionResult> GetQrPrepare(int taskId, CancellationToken ct)
+    {
+        var t = await _taskRepo.GetByIdAsync(taskId);
+        if (t == null) return NotFound(new { message = "Task not found", task_id = taskId });
+
+        var policy = await _taskRepo.GetQtyPolicyAsync(taskId, ct);
+        var bundle = await _scanSvc.GetTaskQrMaterialBundleAsync(taskId, ct);
+
+        return Ok(new
+        {
+            task_id = taskId,
+            process_code = policy?.process_code,
+            process_name = policy?.process_name,
+            qty_unit = policy?.qty_unit,
+            min_allowed = policy?.min_allowed,
+            max_allowed = policy?.max_allowed,
+            suggested_qty = policy?.suggested_qty,
+            consumable_materials = bundle.consumable_materials,
+            reference_inputs = bundle.reference_inputs
+        });
+    }
+
     [HttpPost("qr")]
     public async Task<ActionResult<TaskQrResponse>> CreateQr([FromBody] CreateTaskQrRequest req, CancellationToken ct)
     {
@@ -73,7 +96,7 @@ public class TasksController : ControllerBase
             {
                 return BadRequest(new
                 {
-                    message = $"Số lượng báo cáo không hợp lệ. Công đoạn [{policy.process_code} - {policy.process_name}] chỉ cho phép trong khoảng 1 ---> {policy.max_allowed} {policy.qty_unit}.",
+                    message = $"Số lượng báo cáo không hợp lệ. Công đoạn [{policy.process_code} - {policy.process_name}] chỉ cho phép trong khoảng {policy.min_allowed} ---> {policy.max_allowed} {policy.qty_unit}.",
                     task_id = req.task_id,
                     process_code = policy.process_code,
                     process_name = policy.process_name,
@@ -91,8 +114,14 @@ public class TasksController : ControllerBase
             }
         }
 
-        var token = _tokenSvc.CreateToken(req.task_id, qtyGood, ttl);
+        var inputMaterials = NormalizeQrMaterials(req.materials);
+
+        // validate vật tư ngay lúc tạo QR
+        await _scanSvc.ValidateMaterialUsageForQrAsync(req.task_id, inputMaterials, ct);
+
+        var token = _tokenSvc.CreateToken(req.task_id, qtyGood, inputMaterials, ttl);
         var expiresAt = DateTimeOffset.UtcNow.Add(ttl).ToUnixTimeSeconds();
+
         var qrMaterialBundle = await _scanSvc.GetTaskQrMaterialBundleAsync(req.task_id, ct);
 
         return new TaskQrResponse
@@ -108,7 +137,7 @@ public class TasksController : ControllerBase
             qty_unit = policy.qty_unit,
             process_code = policy.process_code,
             process_name = policy.process_name,
-
+            embedded_material_count = inputMaterials.Count,
             consumable_materials = qrMaterialBundle.consumable_materials,
             reference_inputs = qrMaterialBundle.reference_inputs
         };
@@ -151,5 +180,18 @@ public class TasksController : ControllerBase
                 task_id = req.task_id
             });
         }
+    }
+
+    private static List<TaskMaterialUsageInputDto> NormalizeQrMaterials(List<TaskMaterialUsageInputDto>? materials)
+    {
+        return (materials ?? new List<TaskMaterialUsageInputDto>())
+            .Select(x => new TaskMaterialUsageInputDto
+            {
+                material_id = x.material_id,
+                quantity_used = Math.Round(x.quantity_used, 4),
+                quantity_left = Math.Round(x.quantity_left, 4),
+                is_stock = x.is_stock
+            })
+            .ToList();
     }
 }

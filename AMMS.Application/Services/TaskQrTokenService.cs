@@ -1,207 +1,171 @@
-﻿using AMMS.Application.Interfaces;
-using Microsoft.Extensions.Configuration;
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using AMMS.Application.Interfaces;
+using AMMS.Shared.DTOs.Productions;
+using Microsoft.Extensions.Configuration;
 
-public class TaskQrTokenService : ITaskQrTokenService
+namespace AMMS.Application.Services
 {
-    private readonly byte[] _secret;
-    private const int PayloadLen = 8;
-
-    // signature truncated
-    private const int SigLen = 4;
-    private const int TotalLen = PayloadLen + SigLen;
-
-    private static readonly DateTimeOffset Epoch2020 =
-        new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
-
-    public TaskQrTokenService(IConfiguration config)
+    public class TaskQrTokenService : ITaskQrTokenService
     {
-        var s = config["Qr:Secret"] ?? throw new Exception("Missing Qr:Secret");
-        _secret = Encoding.UTF8.GetBytes(s);
-    }
+        private readonly byte[] _secretBytes;
 
-    public string CreateToken(int taskId, int qtyGood, TimeSpan ttl)
-    {
-        // 2 bytes
-        if (taskId < 0 || taskId > 0xFFFF)
-            throw new ArgumentOutOfRangeException(nameof(taskId), "taskId must be <= 65535");
-
-        // 2 bytes
-        if (qtyGood < 0 || qtyGood > 0xFFFF)
-            throw new ArgumentOutOfRangeException(nameof(qtyGood), "qtyGood must be <= 65535");
-
-        // ttl stored in minutes (1 byte)
-        var ttlMin = (int)Math.Ceiling(ttl.TotalMinutes);
-        if (ttlMin <= 0) ttlMin = 1;
-        if (ttlMin > 255)
-            throw new ArgumentOutOfRangeException(nameof(ttl), "ttl must be <= 255 minutes for 20-char token");
-
-        var issuedMin = (int)((DateTimeOffset.UtcNow - Epoch2020).TotalMinutes);
-        if (issuedMin < 0 || issuedMin > 0xFFFFFF)
-            throw new InvalidOperationException("issuedMin overflow - epoch too old/new");
-
-        Span<byte> payload = stackalloc byte[PayloadLen];
-
-        // [0..1] taskId
-        WriteUInt16BE(payload, 0, (ushort)taskId);
-
-        // [2..4] issuedMin
-        WriteUInt24BE(payload, 2, issuedMin);
-
-        // [5] ttlMin
-        payload[5] = (byte)ttlMin;
-
-        // [6..7] qtyGood
-        WriteUInt16BE(payload, 6, (ushort)qtyGood);
-
-        var sigFull = HmacSha256(payload);
-        Span<byte> sig = stackalloc byte[SigLen];
-        sigFull.AsSpan(0, SigLen).CopyTo(sig);
-
-        Span<byte> tokenBytes = stackalloc byte[TotalLen];
-        payload.CopyTo(tokenBytes);
-        sig.CopyTo(tokenBytes.Slice(PayloadLen));
-
-        return Base32Crockford.Encode(tokenBytes.ToArray());
-    }
-
-    public bool TryValidate(string token, out int taskId, out int qtyGood, out string reason)
-    {
-        taskId = 0;
-        qtyGood = 0;
-        reason = "";
-
-        byte[] raw;
-        try { raw = Base32Crockford.Decode(token); }
-        catch { reason = "Invalid token encoding"; return false; }
-
-        if (raw.Length != TotalLen)
+        private static readonly JsonSerializerOptions _jsonOptions = new()
         {
-            reason = "Invalid token length";
-            return false;
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+
+        public TaskQrTokenService(IConfiguration config)
+        {
+            var secret = config["TaskQr:Secret"];
+            if (string.IsNullOrWhiteSpace(secret))
+                throw new InvalidOperationException("Missing config: TaskQr:Secret");
+
+            _secretBytes = Encoding.UTF8.GetBytes(secret);
         }
 
-        var payload = raw.AsSpan(0, PayloadLen);
-        var sig = raw.AsSpan(PayloadLen, SigLen);
+        public string CreateToken(int taskId, int qtyGood, TimeSpan ttl)
+            => CreateToken(taskId, qtyGood, null, ttl);
 
-        // verify signature
-        var expectedFull = HmacSha256(payload);
-        Span<byte> expected = stackalloc byte[SigLen];
-        expectedFull.AsSpan(0, SigLen).CopyTo(expected);
-
-        if (!CryptographicOperations.FixedTimeEquals(sig, expected))
+        public string CreateToken(
+            int taskId,
+            int qtyGood,
+            IReadOnlyList<TaskMaterialUsageInputDto>? materials,
+            TimeSpan ttl)
         {
-            reason = "Bad signature";
-            return false;
-        }
-
-        taskId = ReadUInt16BE(payload, 0);
-        var issuedMin = ReadUInt24BE(payload, 2);
-        var ttlMin = payload[5];
-        qtyGood = ReadUInt16BE(payload, 6);
-
-        // expiry
-        var issuedAt = Epoch2020.AddMinutes(issuedMin);
-        var expiresAt = issuedAt.AddMinutes(ttlMin);
-
-        if (DateTimeOffset.UtcNow > expiresAt)
-        {
-            reason = "Token expired";
-            return false;
-        }
-
-        return true;
-    }
-
-    private byte[] HmacSha256(ReadOnlySpan<byte> data)
-    {
-        using var hmac = new HMACSHA256(_secret);
-        return hmac.ComputeHash(data.ToArray());
-    }
-
-    private static void WriteUInt16BE(Span<byte> buf, int offset, ushort value)
-    {
-        buf[offset] = (byte)(value >> 8);
-        buf[offset + 1] = (byte)value;
-    }
-
-    private static int ReadUInt16BE(ReadOnlySpan<byte> buf, int offset)
-        => (buf[offset] << 8) | buf[offset + 1];
-
-    private static void WriteUInt24BE(Span<byte> buf, int offset, int value)
-    {
-        buf[offset + 0] = (byte)(value >> 16);
-        buf[offset + 1] = (byte)(value >> 8);
-        buf[offset + 2] = (byte)value;
-    }
-
-    private static int ReadUInt24BE(ReadOnlySpan<byte> buf, int offset)
-        => (buf[offset] << 16) | (buf[offset + 1] << 8) | buf[offset + 2];
-}
-
-public static class Base32Crockford
-{
-    private const string Alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-
-    public static string Encode(byte[] data)
-    {
-        if (data == null || data.Length == 0) return "";
-
-        int bits = 0;
-        int value = 0;
-        var sb = new StringBuilder((data.Length * 8 + 4) / 5);
-
-        foreach (var b in data)
-        {
-            value = (value << 8) | b;
-            bits += 8;
-
-            while (bits >= 5)
+            var payload = new TaskQrTokenPayloadDto
             {
-                int idx = (value >> (bits - 5)) & 31;
-                bits -= 5;
-                sb.Append(Alphabet[idx]);
+                task_id = taskId,
+                qty_good = qtyGood,
+                exp_unix = DateTimeOffset.UtcNow.Add(ttl).ToUnixTimeSeconds(),
+                materials = materials?
+                    .Select(x => new TaskMaterialUsageInputDto
+                    {
+                        material_id = x.material_id,
+                        quantity_used = Math.Round(x.quantity_used, 4),
+                        quantity_left = Math.Round(x.quantity_left, 4),
+                        is_stock = x.is_stock
+                    })
+                    .ToList() ?? new List<TaskMaterialUsageInputDto>()
+            };
+
+            var jsonBytes = JsonSerializer.SerializeToUtf8Bytes(payload, _jsonOptions);
+            var payloadBase64 = Base64UrlEncode(jsonBytes);
+            var sigBytes = Sign(payloadBase64);
+            var sigBase64 = Base64UrlEncode(sigBytes);
+
+            return $"{payloadBase64}.{sigBase64}";
+        }
+
+        public bool TryValidate(string token, out int taskId, out int qtyGood, out string reason)
+        {
+            taskId = 0;
+            qtyGood = 0;
+
+            if (!TryValidate(token, out TaskQrTokenPayloadDto payload, out reason))
+                return false;
+
+            taskId = payload.task_id;
+            qtyGood = payload.qty_good;
+            return true;
+        }
+
+        public bool TryValidate(string token, out TaskQrTokenPayloadDto payload, out string reason)
+        {
+            payload = new TaskQrTokenPayloadDto();
+            reason = "Invalid token";
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                reason = "Token is empty";
+                return false;
+            }
+
+            var parts = token.Split('.', 2);
+            if (parts.Length != 2)
+            {
+                reason = "Token format is invalid";
+                return false;
+            }
+
+            try
+            {
+                var payloadBase64 = parts[0];
+                var providedSig = Base64UrlDecode(parts[1]);
+                var expectedSig = Sign(payloadBase64);
+
+                if (!CryptographicOperations.FixedTimeEquals(providedSig, expectedSig))
+                {
+                    reason = "Token signature is invalid";
+                    return false;
+                }
+
+                var jsonBytes = Base64UrlDecode(payloadBase64);
+                var model = JsonSerializer.Deserialize<TaskQrTokenPayloadDto>(jsonBytes, _jsonOptions);
+
+                if (model == null)
+                {
+                    reason = "Token payload is invalid";
+                    return false;
+                }
+
+                if (model.exp_unix <= DateTimeOffset.UtcNow.ToUnixTimeSeconds())
+                {
+                    reason = "QR token has expired";
+                    return false;
+                }
+
+                if (model.task_id <= 0)
+                {
+                    reason = "task_id is invalid";
+                    return false;
+                }
+
+                if (model.qty_good <= 0)
+                {
+                    reason = "qty_good is invalid";
+                    return false;
+                }
+
+                model.materials ??= new List<TaskMaterialUsageInputDto>();
+
+                payload = model;
+                reason = "";
+                return true;
+            }
+            catch
+            {
+                reason = "Cannot parse token";
+                return false;
             }
         }
 
-        if (bits > 0)
+        private byte[] Sign(string payloadBase64)
         {
-            int idx = (value << (5 - bits)) & 31;
-            sb.Append(Alphabet[idx]);
+            using var hmac = new HMACSHA256(_secretBytes);
+            return hmac.ComputeHash(Encoding.UTF8.GetBytes(payloadBase64));
         }
 
-        return sb.ToString();
-    }
-
-    public static byte[] Decode(string s)
-    {
-        if (string.IsNullOrWhiteSpace(s)) return Array.Empty<byte>();
-
-        s = s.Trim().ToUpperInvariant();
-        int bits = 0;
-        int value = 0;
-        var bytes = new List<byte>();
-
-        foreach (var ch0 in s)
+        private static string Base64UrlEncode(byte[] bytes)
         {
-            var ch = ch0;
-            if (ch == 'O') ch = '0';
-            if (ch == 'I' || ch == 'L') ch = '1';
+            return Convert.ToBase64String(bytes)
+                .TrimEnd('=')
+                .Replace('+', '-')
+                .Replace('/', '_');
+        }
 
-            int idx = Alphabet.IndexOf(ch);
-            if (idx < 0) throw new FormatException("Invalid Base32 character");
+        private static byte[] Base64UrlDecode(string input)
+        {
+            var s = input.Replace('-', '+').Replace('_', '/');
 
-            value = (value << 5) | idx;
-            bits += 5;
-
-            if (bits >= 8)
+            switch (s.Length % 4)
             {
-                bytes.Add((byte)((value >> (bits - 8)) & 0xFF));
-                bits -= 8;
+                case 2: s += "=="; break;
+                case 3: s += "="; break;
             }
-        }
 
-        return bytes.ToArray();
+            return Convert.FromBase64String(s);
+        }
     }
 }
