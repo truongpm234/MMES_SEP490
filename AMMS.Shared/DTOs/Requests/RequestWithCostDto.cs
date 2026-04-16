@@ -38,6 +38,7 @@ namespace AMMS.Shared.DTOs.Requests
         public DateTime? quote_expires_at { get; set; }
         public int? order_id { get; set; }
         public int? quote_id { get; set; }
+        public long order_code { get; set; }
         public int? product_length_mm { get; set; }
         public int? product_width_mm { get; set; }
         public int? product_height_mm { get; set; }

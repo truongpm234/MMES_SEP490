@@ -36,6 +36,9 @@ namespace AMMS.Infrastructure.Repositories
             var request = await _db.order_requests.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.order_request_id == id);
 
+            var payment = await _db.payments.AsNoTracking()
+                .FirstOrDefaultAsync(p => p.order_request_id == id);
+
             if (request == null)
                 return null;
 
@@ -90,7 +93,7 @@ namespace AMMS.Infrastructure.Repositories
                 paper_code = displayPaperCode,
                 paper_name = displayPaperName,
                 wave_type = displayWaveType,
-
+                order_code = payment.order_code,
                 ink_type_names = estimate?.ink_type_names,
 
                 paper_alternative = estimate?.paper_alternative,

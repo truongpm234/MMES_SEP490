@@ -14,6 +14,11 @@ namespace AMMS.Infrastructure.Repositories
         public Task AddAsync(payment entity, CancellationToken ct = default)
             => _db.payments.AddAsync(entity, ct).AsTask();
 
+        public async Task GetByRequestIdAsync(int orderRequestId, CancellationToken ct = default)
+            => await _db.payments.AsNoTracking()
+                .Where(x => x.order_request_id == orderRequestId)
+                .ToListAsync(ct);   
+
         public Task<payment?> GetPaidByProviderOrderCodeAsync(string provider, long orderCode, CancellationToken ct = default)
             => _db.payments.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.provider == provider && x.order_code == orderCode && x.status == "PAID", ct);
