@@ -19,9 +19,6 @@ namespace AMMS.Application.Services
             _repo = repo;
         }
 
-        public Task<object> RecalculateAndSaveAsync(CancellationToken ct = default)
-            => _repo.RecalculateAndSaveAsync(ct);
-
         public async Task<PagedResultLite<MissingMaterialDto>> GetPagedAsync(int page, int pageSize, CancellationToken ct = default)
         {
             await _repo.RecalculateAndSaveAsync(ct);
@@ -53,6 +50,5 @@ namespace AMMS.Application.Services
 
             return result;
         }
-
     }
 }

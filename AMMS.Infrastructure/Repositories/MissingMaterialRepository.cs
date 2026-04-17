@@ -3,6 +3,7 @@ using AMMS.Infrastructure.Entities.AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Orders;
+using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
@@ -33,11 +34,9 @@ namespace AMMS.Infrastructure.Repositories
             NormalizePaging(ref page, ref pageSize);
             var skip = (page - 1) * pageSize;
 
-            // ✅ show cả trường hợp remaining = 0 nhưng is_buy = true
-            // (để UI thấy "đã mua đủ")
             var query = _db.missing_materials.AsNoTracking()
-                .OrderByDescending(x => x.is_buy)         // mua đủ lên trước
-                .ThenByDescending(x => x.quantity)        // còn thiếu nhiều lên trước
+                .OrderByDescending(x => x.is_buy)
+                .ThenByDescending(x => x.quantity)
                 .ThenByDescending(x => x.created_at);
 
             var rows = await query.Skip(skip).Take(pageSize + 1).ToListAsync(ct);
@@ -57,12 +56,8 @@ namespace AMMS.Infrastructure.Repositories
                     request_date = x.request_date,
                     needed = x.needed,
                     available = x.available,
-
-                    // ✅ remaining missing in DB (đã trừ outstanding Ordered)
                     quantity = x.quantity,
                     total_price = x.total_price,
-
-                    // ✅ is_buy = true khi remaining==0 (và baseMissing>0)
                     is_buy = x.is_buy
                 }).ToList()
             };
@@ -76,11 +71,11 @@ namespace AMMS.Infrastructure.Repositories
             {
                 await using var tx = await _db.Database.BeginTransactionAsync(ct);
 
-                // 1) clear table (tính lại toàn bộ)
+                // 1) clear table
                 _db.missing_materials.RemoveRange(_db.missing_materials);
                 await _db.SaveChangesAsync(ct);
 
-                // 2) chỉ tính cho order "thiếu" (giống tinh thần hiện tại)
+                // 2) chỉ tính cho order thiếu vật liệu
                 var orderIds = await _db.orders.AsNoTracking()
                     .Where(o =>
                         o.is_enough == null || o.is_enough == false ||
@@ -124,9 +119,9 @@ namespace AMMS.Infrastructure.Repositories
                     return new { insertedRows = 0, message = "No BOM lines found." };
                 }
 
-                var today = DateTime.SpecifyKind(DateTime.UtcNow.Date, DateTimeKind.Unspecified);
-                var historyStart = DateTime.SpecifyKind(today.AddDays(-30), DateTimeKind.Unspecified);
-                var historyEndExclusive = DateTime.SpecifyKind(today.AddDays(1), DateTimeKind.Unspecified);
+                var today = AppTime.NowVnUnspecified().Date;
+                var historyStart = today.AddDays(-30);
+                var historyEndExclusive = today.AddDays(1);
 
                 var materialIdsInBom = bomLines.Select(x => x.MaterialId).Distinct().ToList();
 
@@ -138,10 +133,16 @@ namespace AMMS.Infrastructure.Repositories
                         s.material_id != null &&
                         materialIdsInBom.Contains(s.material_id.Value))
                     .GroupBy(s => s.material_id!.Value)
-                    .Select(g => new { MaterialId = g.Key, Usage = g.Sum(x => x.qty ?? 0m) })
+                    .Select(g => new
+                    {
+                        MaterialId = g.Key,
+                        Usage = g.Sum(x => x.qty ?? 0m)
+                    })
                     .ToListAsync(ct);
 
-                var usageDict = usageLast30.ToDictionary(x => x.MaterialId, x => Math.Round(x.Usage, 4));
+                var usageDict = usageLast30.ToDictionary(
+                    x => x.MaterialId,
+                    x => Math.Round(x.Usage, 4));
 
                 var orderedOutstandingList = await (
                     from pi in _db.purchase_items.AsNoTracking()
@@ -162,8 +163,7 @@ namespace AMMS.Infrastructure.Repositories
                     x => Math.Round(x.QtyOrdered, 4)
                 );
 
-                var now = DateTime.UtcNow;
-
+                var now = AppTime.NowVnUnspecified();
 
                 var insertRows = bomLines
                     .GroupBy(x => new { x.MaterialId, x.MaterialName, x.Unit })
@@ -197,14 +197,11 @@ namespace AMMS.Infrastructure.Repositories
                         var unitPrice = Math.Round(g.Max(x => x.CostPrice), 2);
                         var totalPrice = Math.Round(remaining * unitPrice, 2);
 
-                        var requestDate = g
-                        .Select(x => x.DeliveryDate)
-                        .Where(d => d != null)
-                        .OrderBy(d => d)
-                        .FirstOrDefault();
-
-                        var requestDateUtc = ToUtc(requestDate);
-
+                        var requestDateValue = g
+                            .Select(x => x.DeliveryDate)
+                            .Where(d => d != null)
+                            .OrderBy(d => d)
+                            .FirstOrDefault();
 
                         var isBuy = baseMissing > 0m && remaining == 0m;
 
@@ -213,15 +210,11 @@ namespace AMMS.Infrastructure.Repositories
                             material_id = g.Key.MaterialId,
                             material_name = g.Key.MaterialName ?? "",
                             unit = g.Key.Unit ?? "",
-
-                            request_date = requestDateUtc,
-
+                            request_date = requestDateValue,
                             needed = needed,
                             available = available,
-
                             quantity = remaining,
                             total_price = totalPrice,
-
                             is_buy = isBuy,
                             created_at = now
                         };
@@ -240,22 +233,6 @@ namespace AMMS.Infrastructure.Repositories
                     message = "Recalculated & saved missing materials (baseMissing - orderedOutstanding)."
                 };
             });
-        }
-
-        private static DateTime ToUtc(DateTime dt)
-        {
-            return dt.Kind switch
-            {
-                DateTimeKind.Utc => dt,
-                DateTimeKind.Local => dt.ToUniversalTime(),
-                _ => DateTime.SpecifyKind(dt, DateTimeKind.Utc) // Unspecified => treat as UTC
-            };
-        }
-
-        private static DateTime? ToUtc(DateTime? dt)
-        {
-            if (dt == null) return null;
-            return ToUtc(dt.Value);
         }
     }
 }
