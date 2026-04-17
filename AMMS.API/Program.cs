@@ -307,6 +307,8 @@ builder.Services.AddScoped<IEstimateConfigRepository, EstimateConfigRepository>(
 builder.Services.AddScoped<ITaskService, TaskService>();
 builder.Services.AddScoped<IProductionCalendarRepository, ProductionCalendarRepository>();
 builder.Services.AddScoped<IProductionCalendarService, ProductionCalendarService>();
+builder.Services.AddScoped<ISubProductRepository, SubProductRepository>();
+builder.Services.AddScoped<ISubProductService, SubProductService>();
 // Logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
