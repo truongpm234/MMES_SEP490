@@ -27,4 +27,6 @@ public partial class product_type
 
     public virtual ICollection<product> products { get; set; } = new List<product>();
 
+    public virtual ICollection<sub_product> sub_products { get; set; } = new List<sub_product>();
+
 }
