@@ -72,6 +72,7 @@ public partial class AppDbContext : DbContext
 
     public virtual DbSet<product> products { get; set; } = null!;
 
+    public virtual DbSet<sub_product> sub_products { get; set; } = null!;
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<bom>(entity =>
@@ -736,6 +737,44 @@ public partial class AppDbContext : DbContext
 
             entity.HasIndex(e => e.is_manual_override)
                 .HasDatabaseName("ix_production_calendar_manual");
+        });
+
+        modelBuilder.Entity<sub_product>(entity =>
+        {
+            entity.ToTable("sub_product", "AMMS_DB");
+
+            entity.HasKey(e => e.id).HasName("sub_product_pkey");
+
+            entity.Property(e => e.id)
+                  .ValueGeneratedOnAdd();
+
+            entity.Property(e => e.product_process)
+                  .HasMaxLength(100);
+
+            entity.Property(e => e.quantity)
+                  .HasDefaultValue(0);
+
+            entity.Property(e => e.is_active)
+                  .HasDefaultValue(true);
+
+            entity.Property(e => e.description)
+                  .HasMaxLength(255);
+
+            entity.Property(e => e.updated_at)
+                  .HasColumnType("timestamp without time zone")
+                  .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasIndex(e => e.product_type_id)
+                  .HasDatabaseName("ix_sub_product_product_type_id");
+
+            entity.HasIndex(e => e.is_active)
+                  .HasDatabaseName("ix_sub_product_is_active");
+
+            entity.HasOne(d => d.product_type)
+                  .WithMany(p => p.sub_products)
+                  .HasForeignKey(d => d.product_type_id)
+                  .OnDelete(DeleteBehavior.Restrict)
+                  .HasConstraintName("fk_sub_product_product_type");
         });
 
         OnModelCreatingPartial(modelBuilder);
