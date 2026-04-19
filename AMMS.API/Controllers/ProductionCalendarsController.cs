@@ -1,5 +1,6 @@
 ﻿using AMMS.Application.Interfaces;
 using AMMS.Shared.DTOs.Planning;
+using AMMS.Shared.DTOs.ProductionCalendars;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -19,6 +20,9 @@ namespace AMMS.API.Controllers
         [HttpGet("by-date")]
         public async Task<IActionResult> GetByDate([FromQuery] DateTime date, CancellationToken ct)
         {
+            if (date == default)
+                return BadRequest(new { message = "date is required" });
+
             var row = await _service.GetByDateAsync(date, ct);
 
             if (row == null)
@@ -57,6 +61,94 @@ namespace AMMS.API.Controllers
                 calendar_date = date.Date,
                 is_working_day = isWorking,
                 is_non_working_day = !isWorking
+            });
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> Create([FromBody] CreateProductionCalendarRequest dto, CancellationToken ct)
+        {
+            if (dto == null || dto.calendar_date == default)
+                return BadRequest(new { message = "calendar_date is required" });
+
+            try
+            {
+                await _service.CreateAsync(dto, ct);
+
+                return StatusCode(StatusCodes.Status201Created, new
+                {
+                    message = "Production calendar created successfully",
+                    calendar_date = dto.calendar_date.Date
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPut]
+        public async Task<IActionResult> Update([FromQuery] DateTime date, [FromBody] UpdateProductionCalendarRequest dto, CancellationToken ct)
+        {
+            if (date == default)
+                return BadRequest(new { message = "date is required" });
+
+            try
+            {
+                var ok = await _service.UpdateAsync(date, dto, ct);
+                if (!ok)
+                    return NotFound(new { message = "Calendar date not found", calendar_date = date.Date });
+
+                return Ok(new
+                {
+                    message = "Production calendar updated successfully",
+                    calendar_date = date.Date
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPatch("non-working-day")]
+        public async Task<IActionResult> UpdateNonWorkingDay(
+            [FromQuery] DateTime date,
+            [FromBody] ToggleNonWorkingDayRequest dto,
+            CancellationToken ct)
+        {
+            if (date == default)
+                return BadRequest(new { message = "date is required" });
+
+            var ok = await _service.UpdateNonWorkingDayAsync(date, dto.is_non_working_day, ct);
+            if (!ok)
+                return NotFound(new { message = "Calendar date not found", calendar_date = date.Date });
+
+            return Ok(new
+            {
+                message = "is_non_working_day updated successfully",
+                calendar_date = date.Date,
+                is_non_working_day = dto.is_non_working_day
+            });
+        }
+
+        [HttpPatch("manual-override")]
+        public async Task<IActionResult> UpdateManualOverride(
+            [FromQuery] DateTime date,
+            [FromBody] ToggleManualOverrideRequest dto,
+            CancellationToken ct)
+        {
+            if (date == default)
+                return BadRequest(new { message = "date is required" });
+
+            var ok = await _service.UpdateManualOverrideAsync(date, dto.is_manual_override, ct);
+            if (!ok)
+                return NotFound(new { message = "Calendar date not found", calendar_date = date.Date });
+
+            return Ok(new
+            {
+                message = "is_manual_override updated successfully",
+                calendar_date = date.Date,
+                is_manual_override = dto.is_manual_override
             });
         }
 
