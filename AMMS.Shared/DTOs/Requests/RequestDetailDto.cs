@@ -47,6 +47,8 @@
         public DateTime? verified_at { get; set; }
         public DateTime? quote_expires_at { get; set; }
         public bool layout_confirmed { get; set; }
+        public string? deposit_receipt_path { get; set; }
+        public string? remaining_receipt_path { get; set; }
         public List<CostEstimateDetailDto> cost_estimate { get; set; } = new();
     }
 

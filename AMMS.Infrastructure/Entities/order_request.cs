@@ -93,6 +93,10 @@ public partial class order_request
 
     public DateTime? estimate_finish_date { get; set; }
 
+    public string? deposit_receipt_path { get; set; }
+
+    public string? remaining_receipt_path { get; set; }
+
     public virtual quote? quote { get; set; }
 
     public virtual order? order { get; set; }

@@ -28,13 +28,14 @@ namespace AMMS.Application.Services
         private readonly IConfiguration _config;
         private readonly IWebHostEnvironment _env;
         private readonly IBaseConfigRepository _baseconfigRepo;
+        private readonly ICloudinaryFileStorageService _cloudinaryStorage;
 
         public PaymentsService(
             AppDbContext db,
             IRequestService requestService,
             IDealService dealService,
             IPaymentRepository paymentRepo,
-            ILogger<PaymentsService> logger, IConfiguration config, IWebHostEnvironment env, IBaseConfigRepository baseconfigRepo)
+            ILogger<PaymentsService> logger, IConfiguration config, IWebHostEnvironment env, IBaseConfigRepository baseconfigRepo, ICloudinaryFileStorageService cloudinaryStorage)
         {
             _db = db;
             _requestService = requestService;
@@ -44,6 +45,7 @@ namespace AMMS.Application.Services
             _config = config;
             _env = env;
             _baseconfigRepo = baseconfigRepo;
+            _cloudinaryStorage = cloudinaryStorage;
         }
 
         public Task<payment?> GetPaidByProviderOrderCodeAsync(string provider, long orderCode, CancellationToken ct = default)
@@ -351,7 +353,10 @@ namespace AMMS.Application.Services
                 }
 
                 await _db.SaveChangesAsync(ct);
+
                 await tx.CommitAsync(ct);
+
+                await TryGenerateAndPersistReceiptAsync(orderCode, PaymentTypes.Deposit, ct);
 
                 if (shouldSendPaidEmail)
                 {
@@ -497,6 +502,7 @@ namespace AMMS.Application.Services
 
                 await _db.SaveChangesAsync(ct);
                 await tx.CommitAsync(ct);
+                await TryGenerateAndPersistReceiptAsync(orderCode, PaymentTypes.Remaining, ct);
 
                 return (true, $"Remaining payment recorded successfully: order_id={ord.order_id}");
             });
@@ -904,6 +910,88 @@ namespace AMMS.Application.Services
 
             throw new FileNotFoundException(
                 "Receipt template not found. Checked paths: " + string.Join(" | ", candidates));
+        }
+
+        private static bool IsSuccessfulPaymentStatus(string? status)
+        {
+            return string.Equals(status, "PAID", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status, "SUCCESS", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private async Task TryGenerateAndPersistReceiptAsync(
+    long orderCode,
+    string paymentType,
+    CancellationToken ct = default)
+        {
+            try
+            {
+                var payment = await _db.payments
+                    .AsNoTracking()
+                    .Where(x => x.provider == "PAYOS" && x.order_code == orderCode)
+                    .OrderByDescending(x => x.payment_id)
+                    .FirstOrDefaultAsync(ct);
+
+                if (payment == null)
+                    return;
+
+                if (!IsSuccessfulPaymentStatus(payment.status))
+                    return;
+
+                var request = await _db.order_requests
+                    .FirstOrDefaultAsync(x => x.order_request_id == payment.order_request_id, ct);
+
+                if (request == null)
+                    return;
+
+                // Dùng method hiện tại của bạn.
+                // Nếu sau này method này thật sự trả PDF thì code dưới vẫn dùng được.
+                var generated = await GenerateReceiptPdfByOrderCodeAsync(orderCode, ct);
+
+                if (generated == null)
+                    return;
+
+                var extension = Path.GetExtension(generated.Value.FileName);
+                if (string.IsNullOrWhiteSpace(extension))
+                    extension = ".docx";
+
+                var normalizedPaymentType = string.Equals(
+                    paymentType,
+                    PaymentTypes.Remaining,
+                    StringComparison.OrdinalIgnoreCase)
+                    ? PaymentTypes.Remaining
+                    : PaymentTypes.Deposit;
+
+                var fileName = normalizedPaymentType == PaymentTypes.Remaining
+                    ? $"phieu-thu-con-lai-AM{request.order_request_id:D6}{extension}"
+                    : $"phieu-thu-dat-coc-AM{request.order_request_id:D6}{extension}";
+
+                var publicId = normalizedPaymentType == PaymentTypes.Remaining
+                    ? $"receipts/request_{request.order_request_id}/remaining_receipt"
+                    : $"receipts/request_{request.order_request_id}/deposit_receipt";
+
+                await using var ms = new MemoryStream(generated.Value.FileBytes);
+
+                var url = await _cloudinaryStorage.UploadRawWithPublicIdAsync(
+                    ms,
+                    fileName,
+                    generated.Value.ContentType,
+                    publicId);
+
+                if (normalizedPaymentType == PaymentTypes.Remaining)
+                    request.remaining_receipt_path = url;
+                else
+                    request.deposit_receipt_path = url;
+
+                await _db.SaveChangesAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Auto generate/save payment receipt failed. OrderCode={OrderCode}, PaymentType={PaymentType}",
+                    orderCode,
+                    paymentType);
+            }
         }
     }
 }

@@ -123,6 +123,8 @@ namespace AMMS.Infrastructure.Repositories
                 consultant_contract_path = estimate?.consultant_contract_path,
                 customer_signed_contract_path = estimate?.customer_signed_contract_path,
                 actual_consultant_user_id = request.actual_consultant_user_id,
+                deposit_receipt_path = request.deposit_receipt_path,
+                remaining_receipt_path = request.remaining_receipt_path,
             };
         }
 
@@ -852,6 +854,8 @@ namespace AMMS.Infrastructure.Repositories
                 printer_ready_file_path = SafeText(request.print_ready_file),
                 actual_consultant_user_id = request.actual_consultant_user_id,
                 assign_name = SafeText(request.assign_name),
+                deposit_receipt_path = request.deposit_receipt_path,
+                remaining_receipt_path = request.remaining_receipt_path,
                 cost_estimate = estimates.Select(ce =>
                 {
                     var discountAmount = ce.discount_amount < 0m ? 0m : ce.discount_amount;

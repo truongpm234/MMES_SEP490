@@ -58,5 +58,7 @@ namespace AMMS.Shared.DTOs.Requests
         public DateTime? estimate_finish_date { get; set; }
         public string? contract_check_note { get; set; }
         public string? assign_name { get; set; }
+        public string? deposit_receipt_path { get; set; }
+        public string? remaining_receipt_path { get; set; }
     }
 }
