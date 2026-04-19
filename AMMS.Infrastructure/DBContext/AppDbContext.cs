@@ -716,12 +716,15 @@ public partial class AppDbContext : DbContext
                 .HasMaxLength(255);
 
             entity.Property(e => e.holiday_type)
-                .HasMaxLength(50);
+                .HasMaxLength(50)
+                .IsRequired();
 
             entity.Property(e => e.is_non_working_day)
-                .HasDefaultValue(true);
+                .IsRequired()
+                .HasDefaultValue(false);
 
             entity.Property(e => e.is_manual_override)
+                .IsRequired()
                 .HasDefaultValue(false);
 
             entity.Property(e => e.created_at)

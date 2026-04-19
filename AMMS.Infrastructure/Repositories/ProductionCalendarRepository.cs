@@ -16,17 +16,25 @@ namespace AMMS.Infrastructure.Repositories
 
         public async Task<production_calendar?> GetByDateAsync(DateTime date, CancellationToken ct = default)
         {
-            var d = date.Date;
+            var d = ToUnspecifiedDate(date);
 
             return await _db.production_calendars
                 .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.calendar_date.Date == d, ct);
+                .FirstOrDefaultAsync(x => x.calendar_date == d, ct);
+        }
+
+        public async Task<production_calendar?> GetByDateTrackingAsync(DateTime date, CancellationToken ct = default)
+        {
+            var d = ToUnspecifiedDate(date);
+
+            return await _db.production_calendars
+                .FirstOrDefaultAsync(x => x.calendar_date == d, ct);
         }
 
         public async Task<List<production_calendar>> GetRangeAsync(DateTime from, DateTime to, CancellationToken ct = default)
         {
-            var fromDate = from.Date;
-            var toDate = to.Date;
+            var fromDate = ToUnspecifiedDate(from);
+            var toDate = ToUnspecifiedDate(to);
 
             if (toDate < fromDate)
                 (fromDate, toDate) = (toDate, fromDate);
@@ -38,9 +46,18 @@ namespace AMMS.Infrastructure.Repositories
                 .ToListAsync(ct);
         }
 
+        public async Task AddAsync(production_calendar entity, CancellationToken ct = default)
+        {
+            entity.calendar_date = ToUnspecifiedDate(entity.calendar_date);
+            entity.created_at = ToUnspecified(entity.created_at);
+            entity.updated_at = ToUnspecified(entity.updated_at);
+
+            await _db.production_calendars.AddAsync(entity, ct);
+        }
+
         public async Task UpsertAsync(production_calendar entity, CancellationToken ct = default)
         {
-            var d = entity.calendar_date.Date;
+            var d = ToUnspecifiedDate(entity.calendar_date);
 
             var existing = await _db.production_calendars
                 .FirstOrDefaultAsync(x => x.calendar_date == d, ct);
@@ -48,6 +65,8 @@ namespace AMMS.Infrastructure.Repositories
             if (existing == null)
             {
                 entity.calendar_date = d;
+                entity.created_at = ToUnspecified(entity.created_at);
+                entity.updated_at = ToUnspecified(entity.updated_at);
                 await _db.production_calendars.AddAsync(entity, ct);
                 return;
             }
@@ -57,12 +76,12 @@ namespace AMMS.Infrastructure.Repositories
             existing.is_non_working_day = entity.is_non_working_day;
             existing.is_manual_override = entity.is_manual_override;
             existing.note = entity.note;
-            existing.updated_at = entity.updated_at;
+            existing.updated_at = ToUnspecified(entity.updated_at);
         }
 
         public async Task<bool> DeleteByDateAsync(DateTime date, CancellationToken ct = default)
         {
-            var d = date.Date;
+            var d = ToUnspecifiedDate(date);
 
             var existing = await _db.production_calendars
                 .FirstOrDefaultAsync(x => x.calendar_date == d, ct);
@@ -76,5 +95,11 @@ namespace AMMS.Infrastructure.Repositories
 
         public Task SaveChangesAsync(CancellationToken ct = default)
             => _db.SaveChangesAsync(ct);
+
+        private static DateTime ToUnspecifiedDate(DateTime value)
+            => DateTime.SpecifyKind(value.Date, DateTimeKind.Unspecified);
+
+        private static DateTime ToUnspecified(DateTime value)
+            => DateTime.SpecifyKind(value, DateTimeKind.Unspecified);
     }
 }
