@@ -359,7 +359,6 @@ namespace AMMS.Application.Services
                 pdfBytes,
                 ct);
 
-            // CHỈ dùng is_match, không dùng similarity_percent để pass
             if (!compareResult.is_match)
             {
                 return new UploadCustomerSignedContractResponse
@@ -369,7 +368,7 @@ namespace AMMS.Application.Services
                     customer_signed_contract_path = null,
                     compare_result = compareResult,
                     compare_warning = compareResult.reject_reason
-                        ?? "Uploaded contract is not valid."
+                        ?? "Hợp đồng khách hàng tải lên không hợp lệ."
                 };
             }
 
