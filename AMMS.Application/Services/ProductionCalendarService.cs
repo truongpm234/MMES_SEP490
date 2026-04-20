@@ -4,11 +4,6 @@ using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Planning;
 using AMMS.Shared.DTOs.ProductionCalendars;
 using AMMS.Shared.Helpers;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace AMMS.Application.Services
 {
@@ -217,6 +212,11 @@ namespace AMMS.Application.Services
                 throw new ArgumentException($"holiday_type length must be <= {maxLength}");
 
             return trimmed.ToUpperInvariant();
+        }
+
+        public Task<List<production_calendar>> GetAllDate()
+        {
+            return _repo.GetAllDate();
         }
     }
 }
