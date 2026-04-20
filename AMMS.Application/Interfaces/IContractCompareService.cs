@@ -12,7 +12,6 @@ namespace AMMS.Application.Interfaces
         Task<CompareContractResponse> CompareAsync(
             int requestId,
             int estimateId,
-            string expectedCustomerName,
             string consultantDocxUrl,
             string customerPdfUrl,
             CancellationToken ct = default);
@@ -20,7 +19,6 @@ namespace AMMS.Application.Interfaces
         Task<CompareContractResponse> CompareAsync(
             int requestId,
             int estimateId,
-            string expectedCustomerName,
             string consultantDocxUrl,
             byte[] customerPdfBytes,
             CancellationToken ct = default);

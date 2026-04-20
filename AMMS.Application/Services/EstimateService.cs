@@ -323,21 +323,21 @@ namespace AMMS.Application.Services
     string contentType,
     CancellationToken ct = default)
         {
-            if (requestId <= 0) throw new ArgumentException("request_id phải lớn hơn 0.");
-            if (estimateId <= 0) throw new ArgumentException("estimate_id phải lớn hơn 0.");
-            if (fileStream == null) throw new ArgumentException("Thiếu file tải lên.");
-            if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("Thiếu tên file.");
+            if (requestId <= 0) throw new ArgumentException("request_id must be > 0");
+            if (estimateId <= 0) throw new ArgumentException("estimate_id must be > 0");
+            if (fileStream == null) throw new ArgumentException("file is required");
+            if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("fileName is required");
 
             var estimate = await _estimateRepo.GetTrackingByIdAsync(estimateId, ct);
             if (estimate == null || estimate.order_request_id != requestId)
-                throw new InvalidOperationException("Không tìm thấy báo giá tương ứng.");
+                throw new InvalidOperationException("Estimate not found");
 
             if (string.IsNullOrWhiteSpace(estimate.consultant_contract_path))
-                throw new InvalidOperationException("Chưa có hợp đồng tư vấn viên để đối chiếu.");
+                throw new InvalidOperationException("Consultant contract has not been uploaded yet");
 
             var ext = Path.GetExtension(fileName)?.Trim().ToLowerInvariant();
             if (ext != ".pdf")
-                throw new ArgumentException("Hợp đồng khách hàng đã ký phải là file .pdf.");
+                throw new ArgumentException("Customer signed contract must be .pdf");
 
             byte[] pdfBytes;
             await using (var pdfMs = new MemoryStream())
@@ -347,19 +347,14 @@ namespace AMMS.Application.Services
                 pdfBytes = pdfMs.ToArray();
             }
 
-            var request = await _requestRepository.GetByIdAsync(requestId);
-            if (request == null)
-                throw new InvalidOperationException("Không tìm thấy yêu cầu báo giá.");
-
             var compareResult = await _contractCompareService.CompareAsync(
                 requestId,
                 estimateId,
-                request.customer_name ?? "",
                 estimate.consultant_contract_path!,
                 pdfBytes,
                 ct);
 
-            if (!compareResult.is_match)
+            if (compareResult.similarity_percent < 95m)
             {
                 return new UploadCustomerSignedContractResponse
                 {
@@ -367,6 +362,7 @@ namespace AMMS.Application.Services
                     estimate_id = estimateId,
                     customer_signed_contract_path = null,
                     compare_result = compareResult,
+                    compare_warning = $"Hợp đồng khách tải lên chưa khớp so với hợp đồng tư vấn viên cung câp. Quý khách vui lòng xem lại và tải lại sau."
                 };
             }
 
@@ -385,6 +381,8 @@ namespace AMMS.Application.Services
 
             estimate.customer_signed_contract_path = pdfUrl;
             await _estimateRepo.SaveChangesAsync();
+
+            var request = await _requestRepository.GetByIdAsync(requestId);
 
             return new UploadCustomerSignedContractResponse
             {

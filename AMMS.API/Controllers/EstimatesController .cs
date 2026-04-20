@@ -147,41 +147,18 @@ namespace AMMS.API.Controllers
         {
             try
             {
-                if (req == null)
-                    return BadRequest(new
-                    {
-                        success = false,
-                        message = "Thiếu dữ liệu tải lên hợp đồng khách hàng đã ký."
-                    });
-
                 if (req.request_id <= 0)
-                    return BadRequest(new
-                    {
-                        success = false,
-                        message = "request_id phải lớn hơn 0."
-                    });
+                    return BadRequest(new { message = "request_id must be > 0" });
 
                 if (req.estimate_id <= 0)
-                    return BadRequest(new
-                    {
-                        success = false,
-                        message = "estimate_id phải lớn hơn 0."
-                    });
+                    return BadRequest(new { message = "estimate_id must be > 0" });
 
                 if (req.file == null || req.file.Length == 0)
-                    return BadRequest(new
-                    {
-                        success = false,
-                        message = "Bạn chưa chọn file hợp đồng khách hàng đã ký."
-                    });
+                    return BadRequest(new { message = "file is required" });
 
                 var ext = Path.GetExtension(req.file.FileName)?.ToLowerInvariant();
                 if (ext != ".pdf")
-                    return BadRequest(new
-                    {
-                        success = false,
-                        message = "Hợp đồng khách hàng đã ký chỉ được phép tải lên file .pdf."
-                    });
+                    return BadRequest(new { message = "Only .pdf is allowed" });
 
                 await using var stream = req.file.OpenReadStream();
 
@@ -195,54 +172,39 @@ namespace AMMS.API.Controllers
 
                 if (result.customer_signed_contract_path == null)
                 {
-                    return LoiBadRequest(
-                        TaoThongBaoLoiHopDongDaKy(result.compare_result),
-                        new
-                        {
-                            request_id = result.request_id,
-                            estimate_id = result.estimate_id,
-                            compare_result = result.compare_result
-                        });
+                    return BadRequest(new
+                    {
+                        message = result.compare_warning ?? "Uploaded contract does not match consultant contract enough to save.",
+                        data = result
+                    });
                 }
 
-                return ThanhCong("Tải lên hợp đồng khách hàng đã ký thành công.", new
+                return Ok(new
                 {
-                    request_id = result.request_id,
-                    estimate_id = result.estimate_id,
-                    customer_signed_contract_path = result.customer_signed_contract_path,
-                    compare_result = result.compare_result
+                    message = "Upload signed contract successfully",
+                    data = result
                 });
             }
             catch (PdfDocumentFormatException)
             {
                 return BadRequest(new
                 {
-                    success = false,
-                    message = "File PDF không hợp lệ hoặc nội dung file bị lỗi nên hệ thống không thể đọc để đối chiếu."
+                    message = "File PDF không hợp lệ hoặc nội dung file bị lỗi nên hệ thống không thể đọc để đối chiếu hợp đồng."
                 });
             }
             catch (ArgumentException ex)
             {
-                return BadRequest(new
-                {
-                    success = false,
-                    message = ex.Message
-                });
+                return BadRequest(new { message = ex.Message });
             }
             catch (InvalidOperationException ex)
             {
-                return NotFound(new
-                {
-                    success = false,
-                    message = ex.Message
-                });
+                return NotFound(new { message = ex.Message });
             }
             catch (Exception ex)
             {
                 return StatusCode(StatusCodes.Status500InternalServerError, new
                 {
-                    success = false,
-                    message = "Tải lên hợp đồng khách hàng đã ký thất bại.",
+                    message = "Upload signed contract failed",
                     detail = ex.Message
                 });
             }
@@ -362,57 +324,6 @@ namespace AMMS.API.Controllers
                     detail = ex.Message
                 });
             }
-        }
-
-        private IActionResult ThanhCong(string message, object? data = null)
-        {
-            return Ok(new
-            {
-                success = true,
-                message,
-                data
-            });
-        }
-
-        private IActionResult LoiBadRequest(string message, object? details = null)
-        {
-            return BadRequest(new
-            {
-                success = false,
-                message,
-                details
-            });
-        }
-
-        private IActionResult LoiKhongTimThay(string message, object? details = null)
-        {
-            return NotFound(new
-            {
-                success = false,
-                message,
-                details
-            });
-        }
-
-        private IActionResult LoiHeThong(string message, object? details = null)
-        {
-            return StatusCode(StatusCodes.Status500InternalServerError, new
-            {
-                success = false,
-                message,
-                details
-            });
-        }
-
-        private static string TaoThongBaoLoiHopDongDaKy(CompareContractResponse? compareResult)
-        {
-            if (compareResult == null)
-                return "Hợp đồng khách hàng tải lên không hợp lệ.";
-
-            if (!string.IsNullOrWhiteSpace(compareResult.reject_reason))
-                return compareResult.reject_reason!;
-
-            return "Hợp đồng tải lên không vượt qua bước đối chiếu.";
         }
     }
 }

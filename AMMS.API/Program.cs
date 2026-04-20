@@ -424,22 +424,6 @@ app.UseSwaggerUI(c =>
     c.DisplayRequestDuration();
 });
 
-var webRoot = app.Environment.WebRootPath;
-if (string.IsNullOrWhiteSpace(webRoot))
-{
-    webRoot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
-}
-Directory.CreateDirectory(webRoot);
-
-app.UseStaticFiles(new StaticFileOptions
-{
-    FileProvider = new PhysicalFileProvider(
-        string.IsNullOrWhiteSpace(app.Environment.WebRootPath)
-            ? Path.Combine(app.Environment.ContentRootPath, "wwwroot")
-            : app.Environment.WebRootPath),
-    RequestPath = ""
-}); 
-
 app.UseRouting();
 
 app.UseCors("AllowAll");
