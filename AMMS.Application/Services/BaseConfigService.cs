@@ -25,5 +25,10 @@ namespace AMMS.Application.Services
         {
             return await _repo.GetPaymentTermsAsync(ct);
         }
+
+        public async Task UpdateAsync(UpdateEstimateBaseConfigRequest dto, CancellationToken ct)
+        {
+            await _repo.UpdateAsync(dto, ct);
+        }
     }
 }

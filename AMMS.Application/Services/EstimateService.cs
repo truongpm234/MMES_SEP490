@@ -347,14 +347,19 @@ namespace AMMS.Application.Services
                 pdfBytes = pdfMs.ToArray();
             }
 
+            var request = await _requestRepository.GetByIdAsync(requestId);
+            if (request == null)
+                throw new InvalidOperationException("Order request not found");
+
             var compareResult = await _contractCompareService.CompareAsync(
                 requestId,
                 estimateId,
+                request.customer_name ?? "",
                 estimate.consultant_contract_path!,
                 pdfBytes,
                 ct);
 
-            if (compareResult.similarity_percent < 95m)
+            if (!compareResult.is_match)
             {
                 return new UploadCustomerSignedContractResponse
                 {
@@ -362,7 +367,8 @@ namespace AMMS.Application.Services
                     estimate_id = estimateId,
                     customer_signed_contract_path = null,
                     compare_result = compareResult,
-                    compare_warning = $"Hợp đồng khách tải lên chưa khớp so với hợp đồng tư vấn viên cung câp. Quý khách vui lòng xem lại và tải lại sau."
+                    compare_warning = compareResult.reject_reason
+                        ?? "Hợp đồng khách hàng tải lên không hợp lệ."
                 };
             }
 
@@ -381,8 +387,6 @@ namespace AMMS.Application.Services
 
             estimate.customer_signed_contract_path = pdfUrl;
             await _estimateRepo.SaveChangesAsync();
-
-            var request = await _requestRepository.GetByIdAsync(requestId);
 
             return new UploadCustomerSignedContractResponse
             {

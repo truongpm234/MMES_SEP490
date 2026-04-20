@@ -625,6 +625,7 @@ public partial class AppDbContext : DbContext
             e.Property(x => x.config_group).HasMaxLength(100);
             e.Property(x => x.config_key).HasMaxLength(120);
             e.Property(x => x.value_num).HasColumnType("numeric(18,6)");
+            e.Property(e => e.updated_at).HasColumnType("timestamp without time zone");
         });
 
         modelBuilder.Entity<missing_material>(entity =>

@@ -26,6 +26,10 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     libreoffice \
     libreoffice-writer \
+    poppler-utils \
+    tesseract-ocr \
+    tesseract-ocr-vie \
+    tesseract-ocr-eng \
     fontconfig \
     fonts-dejavu \
     fonts-liberation \
@@ -42,5 +46,6 @@ RUN echo "{}" > appsettings.json
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://+:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
+ENV CONTRACT_COMPARE_KEEP_DEBUG_FILES=true
 
 ENTRYPOINT ["dotnet", "AMMS.API.dll"]

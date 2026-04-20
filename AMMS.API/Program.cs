@@ -16,6 +16,7 @@ using Hangfire.PostgreSql;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
@@ -309,6 +310,8 @@ builder.Services.AddScoped<IProductionCalendarRepository, ProductionCalendarRepo
 builder.Services.AddScoped<IProductionCalendarService, ProductionCalendarService>();
 builder.Services.AddScoped<ISubProductRepository, SubProductRepository>();
 builder.Services.AddScoped<ISubProductService, SubProductService>();
+builder.Services.AddScoped<IPdfDigitalSignatureValidator, ITextPdfDigitalSignatureValidator>();
+
 // Logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
@@ -420,6 +423,22 @@ app.UseSwaggerUI(c =>
     c.DefaultModelsExpandDepth(-1);
     c.DisplayRequestDuration();
 });
+
+var webRoot = app.Environment.WebRootPath;
+if (string.IsNullOrWhiteSpace(webRoot))
+{
+    webRoot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+}
+Directory.CreateDirectory(webRoot);
+
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(
+        string.IsNullOrWhiteSpace(app.Environment.WebRootPath)
+            ? Path.Combine(app.Environment.ContentRootPath, "wwwroot")
+            : app.Environment.WebRootPath),
+    RequestPath = ""
+}); 
 
 app.UseRouting();
 
