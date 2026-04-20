@@ -195,32 +195,22 @@ namespace AMMS.API.Controllers
 
                 if (result.customer_signed_contract_path == null)
                 {
-                    return BadRequest(new
-                    {
-                        success = false,
-                        message = result.compare_result?.message
-                                  ?? result.compare_warning
-                                  ?? "Hợp đồng tải lên không vượt qua bước đối chiếu.",
-                        data = new
+                    return LoiBadRequest(
+                        TaoThongBaoLoiHopDongDaKy(result.compare_result),
+                        new
                         {
                             request_id = result.request_id,
                             estimate_id = result.estimate_id,
                             compare_result = result.compare_result
-                        }
-                    });
+                        });
                 }
 
-                return Ok(new
+                return ThanhCong("Tải lên hợp đồng khách hàng đã ký thành công.", new
                 {
-                    success = true,
-                    message = "Tải lên hợp đồng khách hàng đã ký thành công.",
-                    data = new
-                    {
-                        request_id = result.request_id,
-                        estimate_id = result.estimate_id,
-                        customer_signed_contract_path = result.customer_signed_contract_path,
-                        compare_result = result.compare_result
-                    }
+                    request_id = result.request_id,
+                    estimate_id = result.estimate_id,
+                    customer_signed_contract_path = result.customer_signed_contract_path,
+                    compare_result = result.compare_result
                 });
             }
             catch (PdfDocumentFormatException)
@@ -372,6 +362,57 @@ namespace AMMS.API.Controllers
                     detail = ex.Message
                 });
             }
+        }
+
+        private IActionResult ThanhCong(string message, object? data = null)
+        {
+            return Ok(new
+            {
+                success = true,
+                message,
+                data
+            });
+        }
+
+        private IActionResult LoiBadRequest(string message, object? details = null)
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message,
+                details
+            });
+        }
+
+        private IActionResult LoiKhongTimThay(string message, object? details = null)
+        {
+            return NotFound(new
+            {
+                success = false,
+                message,
+                details
+            });
+        }
+
+        private IActionResult LoiHeThong(string message, object? details = null)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message,
+                details
+            });
+        }
+
+        private static string TaoThongBaoLoiHopDongDaKy(CompareContractResponse? compareResult)
+        {
+            if (compareResult == null)
+                return "Hợp đồng khách hàng tải lên không hợp lệ.";
+
+            if (!string.IsNullOrWhiteSpace(compareResult.reject_reason))
+                return compareResult.reject_reason!;
+
+            return "Hợp đồng tải lên không vượt qua bước đối chiếu.";
         }
     }
 }

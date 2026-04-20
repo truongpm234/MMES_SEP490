@@ -1,8 +1,6 @@
-﻿using System.Collections.Generic;
-
-namespace AMMS.Shared.DTOs.Estimates
+﻿namespace AMMS.Shared.DTOs.Estimates
 {
-    public class CompareContractResponse
+    public sealed class CompareContractResponse
     {
         public int request_id { get; set; }
         public int estimate_id { get; set; }
@@ -24,21 +22,26 @@ namespace AMMS.Shared.DTOs.Estimates
         public int consultant_text_length { get; set; }
         public int customer_text_length { get; set; }
 
-        public string? verification_mode { get; set; }
-        public string? message { get; set; }
+        public string verification_mode { get; set; } = string.Empty;
         public string? reject_reason { get; set; }
+
+        public List<TextDifferenceItemDto> text_differences { get; set; } = new();
 
         public string? debug_signature_box_rect { get; set; }
         public string? debug_signature_name_rect { get; set; }
-
-        public List<ContractClauseDifferenceDto> clause_differences { get; set; } = new();
     }
 
-    public class ContractClauseDifferenceDto
+    public sealed class TextDifferenceItemDto
     {
-        public int clause_number { get; set; }
-        public string clause_title { get; set; } = "";
-        public string expected_text { get; set; } = "";
-        public string actual_text { get; set; } = "";
+        public string type { get; set; } = "changed";
+
+        public int clause_no { get; set; }
+        public string clause_title { get; set; } = string.Empty;
+
+        public decimal similarity_percent { get; set; }
+        public string message { get; set; } = string.Empty;
+
+        public string expected_text { get; set; } = string.Empty;
+        public string actual_text { get; set; } = string.Empty;
     }
 }

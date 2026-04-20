@@ -367,7 +367,6 @@ namespace AMMS.Application.Services
                     estimate_id = estimateId,
                     customer_signed_contract_path = null,
                     compare_result = compareResult,
-                    compare_warning = compareResult.message ?? "Hợp đồng tải lên không hợp lệ."
                 };
             }
 
