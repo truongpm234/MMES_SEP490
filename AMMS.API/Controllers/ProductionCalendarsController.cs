@@ -1,7 +1,6 @@
 ﻿using AMMS.Application.Interfaces;
 using AMMS.Shared.DTOs.Planning;
 using AMMS.Shared.DTOs.ProductionCalendars;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AMMS.API.Controllers
@@ -36,6 +35,11 @@ namespace AMMS.API.Controllers
             }
 
             return Ok(row);
+        }
+        [HttpGet("all-date")]
+        public async Task<IActionResult> GetAllDate()
+        {
+            return Ok(await _service.GetAllDate());
         }
 
         [HttpGet("range")]
