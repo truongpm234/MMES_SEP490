@@ -1,4 +1,6 @@
-﻿namespace AMMS.Shared.DTOs.Estimates
+﻿using System.Collections.Generic;
+
+namespace AMMS.Shared.DTOs.Estimates
 {
     public class CompareContractResponse
     {
@@ -12,6 +14,7 @@
 
         public bool signature_name_present { get; set; }
         public bool signature_mark_present { get; set; }
+        public bool signature_inside_allowed_box { get; set; }
 
         public bool has_digital_signature { get; set; }
         public bool digital_signature_valid { get; set; }
@@ -22,19 +25,19 @@
         public int customer_text_length { get; set; }
 
         public string? verification_mode { get; set; }
+        public string? message { get; set; }
         public string? reject_reason { get; set; }
 
         public string? debug_signature_box_rect { get; set; }
         public string? debug_signature_name_rect { get; set; }
 
-        public List<TextDifferenceItemDto> text_differences { get; set; } = new();
+        public List<ContractClauseDifferenceDto> clause_differences { get; set; } = new();
     }
 
-    public class TextDifferenceItemDto
+    public class ContractClauseDifferenceDto
     {
-        public string type { get; set; } = "";
-        public int expected_line { get; set; }
-        public int actual_line { get; set; }
+        public int clause_number { get; set; }
+        public string clause_title { get; set; } = "";
         public string expected_text { get; set; } = "";
         public string actual_text { get; set; } = "";
     }

@@ -323,21 +323,21 @@ namespace AMMS.Application.Services
     string contentType,
     CancellationToken ct = default)
         {
-            if (requestId <= 0) throw new ArgumentException("request_id phải > 0");
-            if (estimateId <= 0) throw new ArgumentException("estimate_id phải > 0");
-            if (fileStream == null) throw new ArgumentException("Thiếu file hợp đồng");
-            if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("Thiếu tên file");
+            if (requestId <= 0) throw new ArgumentException("request_id phải lớn hơn 0.");
+            if (estimateId <= 0) throw new ArgumentException("estimate_id phải lớn hơn 0.");
+            if (fileStream == null) throw new ArgumentException("Thiếu file tải lên.");
+            if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("Thiếu tên file.");
 
             var estimate = await _estimateRepo.GetTrackingByIdAsync(estimateId, ct);
             if (estimate == null || estimate.order_request_id != requestId)
-                throw new InvalidOperationException("Không tìm thấy bảng giá tương ứng");
+                throw new InvalidOperationException("Không tìm thấy báo giá tương ứng.");
 
             if (string.IsNullOrWhiteSpace(estimate.consultant_contract_path))
-                throw new InvalidOperationException("Hợp đồng tư vấn viên chưa được upload");
+                throw new InvalidOperationException("Chưa có hợp đồng tư vấn viên để đối chiếu.");
 
             var ext = Path.GetExtension(fileName)?.Trim().ToLowerInvariant();
             if (ext != ".pdf")
-                throw new ArgumentException("Hợp đồng khách hàng đã ký phải là file .pdf");
+                throw new ArgumentException("Hợp đồng khách hàng đã ký phải là file .pdf.");
 
             byte[] pdfBytes;
             await using (var pdfMs = new MemoryStream())
@@ -349,7 +349,7 @@ namespace AMMS.Application.Services
 
             var request = await _requestRepository.GetByIdAsync(requestId);
             if (request == null)
-                throw new InvalidOperationException("Không tìm thấy yêu cầu đặt hàng");
+                throw new InvalidOperationException("Không tìm thấy yêu cầu báo giá.");
 
             var compareResult = await _contractCompareService.CompareAsync(
                 requestId,
@@ -367,8 +367,7 @@ namespace AMMS.Application.Services
                     estimate_id = estimateId,
                     customer_signed_contract_path = null,
                     compare_result = compareResult,
-                    compare_warning = compareResult.reject_reason
-                        ?? "Hợp đồng khách hàng tải lên không hợp lệ."
+                    compare_warning = compareResult.message ?? "Hợp đồng tải lên không hợp lệ."
                 };
             }
 

@@ -1,16 +1,15 @@
 ﻿using AMMS.Application.Interfaces;
 using AMMS.Shared.DTOs.Estimates;
-using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using UglyToad.PdfPig;
-using SixLabors.ImageSharp.Processing;
 
 namespace AMMS.Application.Services
 {
@@ -74,99 +73,84 @@ namespace AMMS.Application.Services
             byte[] customerPdfBytes,
             CancellationToken ct)
         {
-            // 1) Đọc DOCX theo paragraph, không ghép tất cả thành 1 dòng dài
-            var consultantStructuredText = ExtractDocxStructuredText(consultantDocxBytes);
+            // 1) Extract text từ DOCX consultant
+            var consultantRawText = ExtractDocxStructuredText(consultantDocxBytes);
+            var expectedClauses = ExtractClauseMap(consultantRawText);
 
-            // 2) Đọc PDF text-layer trước
-            var customerPdfText = ExtractPdfStructuredText(customerPdfBytes);
-
-            // 3) Cắt đúng phạm vi Điều 1 -> trước block ký
-            var consultantClauseText = ExtractClauseRangeFromDieu1ToDieu7(consultantStructuredText);
-
-            var customerClauseTextFromPdf = SafeExtractClauseRange(customerPdfText);
-
-            // 4) OCR toàn bộ PDF để có thêm lớp kiểm tra “nội dung hiển thị thực tế”
-            //    Nếu OCR lỗi thì vẫn fallback về PDF text
-            string? customerOcrText = null;
-            string? customerClauseTextFromOcr = null;
-            bool usedOcrFallback = false;
-
-            try
-            {
-                customerOcrText = await OcrWholePdfAsync(customerPdfBytes, ct);
-                customerClauseTextFromOcr = SafeExtractClauseRange(customerOcrText);
-                usedOcrFallback = !string.IsNullOrWhiteSpace(customerClauseTextFromOcr);
-            }
-            catch
-            {
-                // không throw ở đây để tránh chết flow nếu môi trường OCR chưa sẵn
-                customerOcrText = null;
-                customerClauseTextFromOcr = null;
-                usedOcrFallback = false;
-            }
-
-            if (string.IsNullOrWhiteSpace(customerClauseTextFromPdf) &&
-                string.IsNullOrWhiteSpace(customerClauseTextFromOcr))
+            if (expectedClauses.Count < 7)
             {
                 throw new InvalidOperationException(
-                    "Không trích xuất được nội dung hợp đồng trong phạm vi Điều 1 đến Điều 7 từ file PDF khách hàng.");
+                    "Không trích xuất đủ nội dung từ Điều 1 đến Điều 7 trong hợp đồng gốc của tư vấn viên.");
             }
 
-            // 5) Build line list để so sánh chặt
-            var expectedLines = BuildComparableLines(consultantClauseText);
+            // 2) Ưu tiên text layer từ PDF khách hàng
+            var customerPdfRawText = ExtractPdfStructuredText(customerPdfBytes);
+            var actualClauses = ExtractClauseMap(customerPdfRawText);
 
-            var actualPdfLines = string.IsNullOrWhiteSpace(customerClauseTextFromPdf)
-                ? new List<string>()
-                : BuildComparableLines(customerClauseTextFromPdf);
+            bool usedOcrFallback = false;
 
-            var actualOcrLines = string.IsNullOrWhiteSpace(customerClauseTextFromOcr)
-                ? new List<string>()
-                : BuildComparableLines(customerClauseTextFromOcr);
-
-            var expectedJoined = string.Join("\n", expectedLines);
-            var actualPdfJoined = string.Join("\n", actualPdfLines);
-            var actualOcrJoined = string.Join("\n", actualOcrLines);
-
-            var pdfBodyExactMatch = !string.IsNullOrWhiteSpace(actualPdfJoined) &&
-                                    string.Equals(expectedJoined, actualPdfJoined, StringComparison.Ordinal);
-
-            var ocrBodyExactMatch = !string.IsNullOrWhiteSpace(actualOcrJoined) &&
-                                    string.Equals(expectedJoined, actualOcrJoined, StringComparison.Ordinal);
-
-            // Nếu có OCR thì yêu cầu cả PDF text layer và OCR đều không được phát hiện sai khác
-            bool bodyExactMatch;
-            decimal similarityPercent;
-            List<TextDifferenceItemDto> textDifferences;
-
-            if (!string.IsNullOrWhiteSpace(actualOcrJoined))
+            // Chỉ OCR nếu PDF text layer không extract đủ 7 điều
+            if (actualClauses.Count < 7)
             {
-                bodyExactMatch = pdfBodyExactMatch && ocrBodyExactMatch;
-
-                var pdfSimilarity = Math.Round(
-                    (decimal)(ComputeDiceSimilarity(expectedJoined, actualPdfJoined, 2) * 100d), 2);
-
-                var ocrSimilarity = Math.Round(
-                    (decimal)(ComputeDiceSimilarity(expectedJoined, actualOcrJoined, 2) * 100d), 2);
-
-                similarityPercent = Math.Min(pdfSimilarity, ocrSimilarity);
-
-                var pdfDiffs = BuildTextDifferences(expectedLines, actualPdfLines, 50);
-                var ocrDiffs = BuildTextDifferences(expectedLines, actualOcrLines, 50);
-
-                // ưu tiên diff từ OCR nếu OCR thấy lỗi rõ hơn
-                textDifferences = ocrDiffs.Count > 0 ? ocrDiffs : pdfDiffs;
+                var customerOcrText = await OcrWholePdfAsync(customerPdfBytes, ct);
+                actualClauses = ExtractClauseMap(customerOcrText);
+                usedOcrFallback = true;
             }
-            else
+
+            if (actualClauses.Count < 7)
             {
-                bodyExactMatch = pdfBodyExactMatch;
-
-                similarityPercent = Math.Round(
-                    (decimal)(ComputeDiceSimilarity(expectedJoined, actualPdfJoined, 2) * 100d), 2);
-
-                textDifferences = BuildTextDifferences(expectedLines, actualPdfLines, 50);
+                throw new InvalidOperationException(
+                    "Không trích xuất được đầy đủ nội dung từ Điều 1 đến Điều 7 trong file PDF khách hàng.");
             }
 
-            // 6) Check chữ ký
+            // 3) So sánh theo từng điều
+            var clauseDiffs = new List<ContractClauseDifferenceDto>();
+
+            for (int i = 1; i <= 7; i++)
+            {
+                if (!expectedClauses.TryGetValue(i, out var expectedClause))
+                {
+                    clauseDiffs.Add(new ContractClauseDifferenceDto
+                    {
+                        clause_number = i,
+                        clause_title = $"Điều {i}",
+                        expected_text = "",
+                        actual_text = "(Thiếu điều này trong hợp đồng gốc)"
+                    });
+                    continue;
+                }
+
+                if (!actualClauses.TryGetValue(i, out var actualClause))
+                {
+                    clauseDiffs.Add(new ContractClauseDifferenceDto
+                    {
+                        clause_number = i,
+                        clause_title = expectedClause.Title,
+                        expected_text = expectedClause.DisplayText,
+                        actual_text = "(Không tìm thấy điều này trong file PDF khách hàng)"
+                    });
+                    continue;
+                }
+
+                if (!string.Equals(expectedClause.NormalizedText, actualClause.NormalizedText, StringComparison.Ordinal))
+                {
+                    clauseDiffs.Add(new ContractClauseDifferenceDto
+                    {
+                        clause_number = i,
+                        clause_title = expectedClause.Title,
+                        expected_text = expectedClause.DisplayText,
+                        actual_text = actualClause.DisplayText
+                    });
+                }
+            }
+
+            var expectedAll = string.Join("\n", expectedClauses.OrderBy(x => x.Key).Select(x => x.Value.NormalizedText));
+            var actualAll = string.Join("\n", actualClauses.OrderBy(x => x.Key).Select(x => x.Value.NormalizedText));
+
+            var bodyExactMatch = clauseDiffs.Count == 0;
+            var similarityPercent = Math.Round((decimal)(ComputeDiceSimilarity(expectedAll, actualAll, 2) * 100d), 2);
+
+            // 4) Check chữ ký
             var signatureAnalysis = await AnalyzeCustomerSignatureRegionAsync(
                 customerPdfBytes,
                 expectedCustomerName,
@@ -178,10 +162,15 @@ namespace AMMS.Application.Services
                 signatureAnalysis.has_visible_signature &&
                 signatureAnalysis.signature_inside_allowed_box;
 
-            var signatureAccepted =
-                digitalSignature.is_valid || visibleSignatureAccepted;
+            var signatureAccepted = digitalSignature.is_valid || visibleSignatureAccepted;
 
             var isMatch = bodyExactMatch && signatureAccepted;
+
+            var message = BuildUserMessage(
+                bodyExactMatch,
+                clauseDiffs,
+                signatureAnalysis,
+                digitalSignature.is_valid);
 
             return new CompareContractResponse
             {
@@ -195,79 +184,313 @@ namespace AMMS.Application.Services
 
                 signature_name_present = signatureAnalysis.signature_name_present,
                 signature_mark_present = signatureAnalysis.has_visible_signature,
+                signature_inside_allowed_box = signatureAnalysis.signature_inside_allowed_box,
 
                 has_digital_signature = digitalSignature.has_signature,
                 digital_signature_valid = digitalSignature.is_valid,
 
                 used_ocr_fallback = usedOcrFallback,
 
-                consultant_text_length = expectedJoined.Length,
-                customer_text_length = !string.IsNullOrWhiteSpace(actualOcrJoined)
-                    ? actualOcrJoined.Length
-                    : actualPdfJoined.Length,
+                consultant_text_length = expectedAll.Length,
+                customer_text_length = actualAll.Length,
 
                 verification_mode = digitalSignature.is_valid
                     ? "ĐỐI CHIẾU CHẶT ĐIỀU 1-7 + CHỮ KÝ SỐ"
                     : "ĐỐI CHIẾU CHẶT ĐIỀU 1-7 + CHỮ KÝ TAY ĐÚNG Ô",
 
-                reject_reason = BuildRejectReason(
-                    bodyExactMatch,
-                    signatureAnalysis,
-                    digitalSignature.is_valid,
-                    textDifferences),
-
-                text_differences = textDifferences,
+                message = message,
+                reject_reason = isMatch ? null : message,
 
                 debug_signature_box_rect = ToRectString(signatureAnalysis.allowed_signature_box),
-                debug_signature_name_rect = ToRectString(signatureAnalysis.name_band)
+                debug_signature_name_rect = ToRectString(signatureAnalysis.name_band),
+
+                clause_differences = clauseDiffs
             };
         }
 
-        private static string? BuildRejectReason(
+        private static string BuildUserMessage(
             bool bodyExactMatch,
+            List<ContractClauseDifferenceDto> clauseDiffs,
             SignatureAnalysisResult signatureAnalysis,
-            bool digitalSignatureValid,
-            List<TextDifferenceItemDto> diffs)
+            bool digitalSignatureValid)
         {
             if (bodyExactMatch &&
                 (digitalSignatureValid ||
                  (signatureAnalysis.has_visible_signature && signatureAnalysis.signature_inside_allowed_box)))
             {
-                return null;
+                return "Hợp đồng hợp lệ. Nội dung từ Điều 1 đến Điều 7 khớp với bản gốc và chữ ký hợp lệ.";
             }
 
-            var reasons = new List<string>();
+            var messages = new List<string>();
 
             if (!bodyExactMatch)
             {
-                if (diffs.Count == 0)
-                {
-                    reasons.Add("Nội dung hợp đồng trong phạm vi Điều 1 đến Điều 7 đã bị thay đổi.");
-                }
-                else
-                {
-                    reasons.Add("Nội dung hợp đồng trong phạm vi Điều 1 đến Điều 7 đã bị thay đổi.");
-                }
+                var clauseList = clauseDiffs
+                    .Select(x => $"Điều {x.clause_number}")
+                    .Distinct()
+                    .OrderBy(x => x)
+                    .ToList();
+
+                messages.Add($"Nội dung hợp đồng đã bị thay đổi tại: {string.Join(", ", clauseList)}.");
             }
 
             if (!digitalSignatureValid)
             {
                 if (!signatureAnalysis.has_visible_signature)
                 {
-                    reasons.Add("Không phát hiện chữ ký tay trong vùng ký của khách hàng.");
+                    messages.Add("Không phát hiện chữ ký tay trong vùng ký của khách hàng.");
                 }
                 else if (!signatureAnalysis.signature_inside_allowed_box)
                 {
-                    reasons.Add("Phát hiện chữ ký nhưng chữ ký nằm ngoài ô ký cho phép của khách hàng.");
+                    messages.Add("Phát hiện chữ ký nhưng chữ ký nằm ngoài ô ký cho phép của khách hàng.");
                 }
             }
 
-            return string.Join(" ", reasons);
+            if (messages.Count == 0)
+                messages.Add("Hợp đồng tải lên không vượt qua bước đối chiếu.");
+
+            return string.Join(" ", messages);
         }
 
-        /// <summary>
-        /// Đọc DOCX theo paragraph để giữ cấu trúc dòng/đoạn.
-        /// </summary>
+        private static Dictionary<int, ClauseContent> ExtractClauseMap(string rawText)
+        {
+            var logicalLines = BuildLogicalLines(rawText);
+            var result = new Dictionary<int, ClauseContent>();
+
+            int? currentClause = null;
+            string currentTitle = "";
+            var buffer = new List<string>();
+
+            void FlushCurrent()
+            {
+                if (!currentClause.HasValue || buffer.Count == 0)
+                    return;
+
+                if (currentClause.Value < 1 || currentClause.Value > 7)
+                    return;
+
+                var originalText = string.Join("\n", buffer).Trim();
+
+                result[currentClause.Value] = new ClauseContent
+                {
+                    ClauseNumber = currentClause.Value,
+                    Title = string.IsNullOrWhiteSpace(currentTitle) ? $"Điều {currentClause.Value}" : currentTitle,
+                    DisplayText = SanitizeForDisplay(originalText),
+                    NormalizedText = NormalizeForCompare(originalText)
+                };
+            }
+
+            foreach (var line in logicalLines)
+            {
+                if (IsSignatureMarker(line))
+                    break;
+
+                if (TryParseClauseHeader(line, out var clauseNo, out var clauseTitle))
+                {
+                    FlushCurrent();
+
+                    currentClause = clauseNo;
+                    currentTitle = clauseTitle;
+                    buffer = new List<string> { line };
+                    continue;
+                }
+
+                if (currentClause.HasValue)
+                {
+                    buffer.Add(line);
+                }
+            }
+
+            FlushCurrent();
+            return result;
+        }
+
+        private static List<string> BuildLogicalLines(string rawText)
+        {
+            if (string.IsNullOrWhiteSpace(rawText))
+                return new List<string>();
+
+            var preLines = rawText
+                .Replace("\r\n", "\n")
+                .Replace('\r', '\n')
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.Replace("\t", " ").Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToList();
+
+            var expanded = new List<string>();
+
+            foreach (var line in preLines)
+            {
+                foreach (var part in SplitSpecialLine(line))
+                {
+                    if (!string.IsNullOrWhiteSpace(part))
+                        expanded.Add(part.Trim());
+                }
+            }
+
+            var result = new List<string>();
+
+            foreach (var line in expanded)
+            {
+                if (result.Count == 0)
+                {
+                    result.Add(line);
+                    continue;
+                }
+
+                if (IsNewLogicalLine(line))
+                {
+                    result.Add(line);
+                }
+                else
+                {
+                    result[^1] = $"{result[^1]} {line}".Trim();
+                }
+            }
+
+            return result;
+        }
+
+        private static IEnumerable<string> SplitSpecialLine(string line)
+        {
+            // Ví dụ PDF có thể ra:
+            // "Điều 5: Điều khoản Thanh toán • Phương thức thanh toán: ..."
+            var match = Regex.Match(
+                line,
+                @"^(Điều\s*[1-7]\s*:\s*[^•·●▪◦■]*)([•·●▪◦■].+)$",
+                RegexOptions.IgnoreCase);
+
+            if (match.Success)
+            {
+                yield return match.Groups[1].Value.Trim();
+                yield return match.Groups[2].Value.Trim();
+                yield break;
+            }
+
+            yield return line;
+        }
+
+        private static bool IsNewLogicalLine(string line)
+        {
+            if (TryParseClauseHeader(line, out _, out _))
+                return true;
+
+            if (Regex.IsMatch(line, @"^\s*([•·●▪◦■\-–—\*\+]|o)\s+", RegexOptions.IgnoreCase))
+                return true;
+
+            if (Regex.IsMatch(line, @"^\s*\d+(\.\d+)*[.)]\s+"))
+                return true;
+
+            var normalized = CanonicalMarker(line);
+
+            string[] prefixes =
+            {
+                "ten san pham",
+                "quy cach",
+                "so luong",
+                "tong gia tri don hang",
+                "thue vat",
+                "bang chu",
+                "dia diem giao hang",
+                "phuong thuc thanh toan",
+                "tien do thanh toan",
+                "dot 1",
+                "dot 2",
+                "chung tu",
+                "bao goi",
+                "thoi gian giao hang du kien",
+                "giao nhan",
+                "trong qua trinh thuc hien",
+                "moi tranh chap phat sinh",
+                "hop dong co hieu luc ke tu ngay ky",
+                "hop dong nay duoc lap thanh",
+            };
+
+            return prefixes.Any(p => normalized.StartsWith(p));
+        }
+
+        private static bool TryParseClauseHeader(string line, out int clauseNo, out string clauseTitle)
+        {
+            clauseNo = 0;
+            clauseTitle = "";
+
+            var normalized = CanonicalMarker(line);
+            var match = Regex.Match(normalized, @"^dieu\s*([1-7])\s*[:.\-]?\s*(.*)$", RegexOptions.IgnoreCase);
+
+            if (!match.Success)
+                return false;
+
+            clauseNo = int.Parse(match.Groups[1].Value);
+
+            var originalMatch = Regex.Match(line, @"^\s*(Điều\s*[1-7]\s*[:.\-]?\s*.*)$", RegexOptions.IgnoreCase);
+            clauseTitle = originalMatch.Success
+                ? NormalizeDisplayText(originalMatch.Groups[1].Value)
+                : $"Điều {clauseNo}";
+
+            return true;
+        }
+
+        private static bool IsSignatureMarker(string line)
+        {
+            var normalized = CanonicalMarker(line);
+            return normalized.Contains("dai dien ben a");
+        }
+
+        private static string SanitizeForDisplay(string text)
+        {
+            var logicalLines = BuildLogicalLines(text);
+
+            var cleaned = logicalLines
+                .Select(NormalizeDisplayText)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToList();
+
+            return string.Join(" ", cleaned);
+        }
+
+        private static string NormalizeForCompare(string text)
+        {
+            var logicalLines = BuildLogicalLines(text);
+
+            var cleaned = logicalLines
+                .Select(NormalizeDisplayText)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x.ToLowerInvariant())
+                .ToList();
+
+            return string.Join("\n", cleaned);
+        }
+
+        private static string NormalizeDisplayText(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input))
+                return "";
+
+            var text = WebUtility.HtmlDecode(input);
+            text = text.Normalize(NormalizationForm.FormKC);
+            text = text.Replace('\u00A0', ' ');
+            text = text.Replace("\t", " ");
+
+            // bỏ bullet/numbering đầu dòng
+            text = Regex.Replace(text, @"^\s*([•·●▪◦■\-–—\*\+]|o)\s+", "");
+            text = Regex.Replace(text, @"^\s*\d+(\.\d+)*[.)]\s+", "");
+
+            // chuẩn hóa khoảng trắng
+            text = Regex.Replace(text, @"\s+", " ").Trim();
+
+            // bỏ khoảng trắng thừa trước dấu câu
+            text = Regex.Replace(text, @"\s+([,.;:!?])", "$1");
+
+            // chuẩn hóa khoảng trắng sau dấu câu
+            text = Regex.Replace(text, @"([,.;:!?])(?=\S)", "$1 ");
+
+            // chuẩn hóa lại lần cuối
+            text = Regex.Replace(text, @"\s+", " ").Trim();
+
+            return text;
+        }
+
         private static string ExtractDocxStructuredText(byte[] bytes)
         {
             using var ms = new MemoryStream(bytes);
@@ -275,36 +498,34 @@ namespace AMMS.Application.Services
 
             var lines = new List<string>();
 
-            static void ReadParagraphs(OpenXmlPartRootElement? root, List<string> output)
+            void ReadParagraphs(IEnumerable<Paragraph> paragraphs)
             {
-                if (root == null) return;
-
-                foreach (var p in root.Descendants<Paragraph>())
+                foreach (var p in paragraphs)
                 {
-                    var text = (p.InnerText ?? "").Trim();
+                    var text = p.InnerText?.Trim();
                     if (!string.IsNullOrWhiteSpace(text))
-                        output.Add(text);
+                        lines.Add(text);
                 }
             }
 
-            ReadParagraphs(doc.MainDocumentPart?.Document, lines);
+            if (doc.MainDocumentPart?.Document?.Body != null)
+            {
+                ReadParagraphs(doc.MainDocumentPart.Document.Body.Descendants<Paragraph>());
+            }
 
             foreach (var headerPart in doc.MainDocumentPart?.HeaderParts ?? Enumerable.Empty<HeaderPart>())
             {
-                ReadParagraphs(headerPart.Header, lines);
+                ReadParagraphs(headerPart.Header?.Descendants<Paragraph>() ?? Enumerable.Empty<Paragraph>());
             }
 
             foreach (var footerPart in doc.MainDocumentPart?.FooterParts ?? Enumerable.Empty<FooterPart>())
             {
-                ReadParagraphs(footerPart.Footer, lines);
+                ReadParagraphs(footerPart.Footer?.Descendants<Paragraph>() ?? Enumerable.Empty<Paragraph>());
             }
 
             return string.Join("\n", lines);
         }
 
-        /// <summary>
-        /// Đọc PDF text-layer, giữ tách trang/tách dòng ở mức tốt nhất có thể.
-        /// </summary>
         private static string ExtractPdfStructuredText(byte[] bytes)
         {
             using var ms = new MemoryStream(bytes);
@@ -319,272 +540,6 @@ namespace AMMS.Application.Services
             }
 
             return sb.ToString();
-        }
-
-        /// <summary>
-        /// Chỉ lấy nội dung từ Điều 1 đến trước phần ký "ĐẠI DIỆN BÊN A".
-        /// </summary>
-        private static string ExtractClauseRangeFromDieu1ToDieu7(string input)
-        {
-            if (string.IsNullOrWhiteSpace(input))
-                throw new InvalidOperationException("Nội dung hợp đồng trống, không thể đối chiếu.");
-
-            var lines = input
-                .Replace("\r\n", "\n")
-                .Replace('\r', '\n')
-                .Split('\n');
-
-            var result = new List<string>();
-            bool started = false;
-
-            foreach (var rawLine in lines)
-            {
-                var line = rawLine ?? "";
-                var marker = CanonicalMarker(line);
-
-                if (!started)
-                {
-                    if (Regex.IsMatch(marker, @"\bdieu\s*1\b"))
-                    {
-                        started = true;
-                    }
-                    else
-                    {
-                        continue;
-                    }
-                }
-
-                if (Regex.IsMatch(marker, @"\bdai\s*dien\s*ben\s*a\b"))
-                    break;
-
-                result.Add(line);
-            }
-
-            var text = string.Join("\n", result).Trim();
-
-            if (string.IsNullOrWhiteSpace(text))
-                throw new InvalidOperationException("Không tìm thấy phạm vi từ Điều 1 để đối chiếu.");
-
-            var wholeMarker = CanonicalMarker(text);
-            if (!Regex.IsMatch(wholeMarker, @"\bdieu\s*7\b"))
-            {
-                throw new InvalidOperationException(
-                    "Không tìm thấy đầy đủ phạm vi từ Điều 1 đến Điều 7 trong hợp đồng để đối chiếu.");
-            }
-
-            return text;
-        }
-
-        private static string? SafeExtractClauseRange(string input)
-        {
-            try
-            {
-                return ExtractClauseRangeFromDieu1ToDieu7(input);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static string CanonicalMarker(string input)
-        {
-            if (string.IsNullOrWhiteSpace(input)) return "";
-
-            var text = WebUtility.HtmlDecode(input);
-            text = text.Normalize(NormalizationForm.FormKC);
-            text = RemoveDiacritics(text).ToLowerInvariant();
-            text = Regex.Replace(text, @"\s+", " ").Trim();
-
-            return text;
-        }
-
-        private static string RemoveDiacritics(string text)
-        {
-            if (string.IsNullOrWhiteSpace(text)) return "";
-
-            var normalized = text.Normalize(NormalizationForm.FormD);
-            var sb = new StringBuilder(normalized.Length);
-
-            foreach (var ch in normalized)
-            {
-                var unicodeCategory = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch);
-                if (unicodeCategory != System.Globalization.UnicodeCategory.NonSpacingMark)
-                    sb.Append(ch);
-            }
-
-            return sb.ToString()
-                .Normalize(NormalizationForm.FormC)
-                .Replace('đ', 'd')
-                .Replace('Đ', 'D');
-        }
-
-        /// <summary>
-        /// Dùng để so sánh chặt theo line:
-        /// - bỏ bullet đầu dòng
-        /// - chuẩn hóa khoảng trắng
-        /// - không dùng similarity để cho pass
-        /// </summary>
-        private static List<string> BuildComparableLines(string input)
-        {
-            if (string.IsNullOrWhiteSpace(input))
-                return new List<string>();
-
-            return input
-                .Replace("\r\n", "\n")
-                .Replace('\r', '\n')
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                .Select(NormalizeComparableLine)
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .ToList();
-        }
-
-        private static string NormalizeComparableLine(string line)
-        {
-            if (string.IsNullOrWhiteSpace(line))
-                return "";
-
-            var text = WebUtility.HtmlDecode(line);
-            text = text.Normalize(NormalizationForm.FormKC);
-            text = text.Replace('\u00A0', ' ');
-
-            // bỏ bullet đầu dòng
-            text = Regex.Replace(
-                text,
-                @"^\s*([•·●▪◦■\-–—\*\+]+\s*)+",
-                "");
-
-            // chuẩn hóa khoảng trắng
-            text = Regex.Replace(text, @"\s+", " ").Trim();
-
-            // bỏ khác biệt hoa/thường
-            text = text.ToLowerInvariant();
-
-            return text;
-        }
-
-        private static List<TextDifferenceItemDto> BuildTextDifferences(
-            List<string> expectedLines,
-            List<string> actualLines,
-            int maxItems)
-        {
-            var diffs = new List<TextDifferenceItemDto>();
-
-            int m = expectedLines.Count;
-            int n = actualLines.Count;
-
-            var dp = new int[m + 1, n + 1];
-
-            for (int i = m - 1; i >= 0; i--)
-            {
-                for (int j = n - 1; j >= 0; j--)
-                {
-                    if (expectedLines[i] == actualLines[j])
-                        dp[i, j] = dp[i + 1, j + 1] + 1;
-                    else
-                        dp[i, j] = Math.Max(dp[i + 1, j], dp[i, j + 1]);
-                }
-            }
-
-            int x = 0, y = 0;
-            var rawOps = new List<TextDifferenceItemDto>();
-
-            while (x < m && y < n)
-            {
-                if (expectedLines[x] == actualLines[y])
-                {
-                    x++;
-                    y++;
-                    continue;
-                }
-
-                if (dp[x + 1, y] >= dp[x, y + 1])
-                {
-                    rawOps.Add(new TextDifferenceItemDto
-                    {
-                        type = "removed",
-                        expected_line = x + 1,
-                        actual_line = y + 1,
-                        expected_text = expectedLines[x],
-                        actual_text = ""
-                    });
-                    x++;
-                }
-                else
-                {
-                    rawOps.Add(new TextDifferenceItemDto
-                    {
-                        type = "added",
-                        expected_line = x + 1,
-                        actual_line = y + 1,
-                        expected_text = "",
-                        actual_text = actualLines[y]
-                    });
-                    y++;
-                }
-            }
-
-            while (x < m)
-            {
-                rawOps.Add(new TextDifferenceItemDto
-                {
-                    type = "removed",
-                    expected_line = x + 1,
-                    actual_line = y + 1,
-                    expected_text = expectedLines[x],
-                    actual_text = ""
-                });
-                x++;
-            }
-
-            while (y < n)
-            {
-                rawOps.Add(new TextDifferenceItemDto
-                {
-                    type = "added",
-                    expected_line = x + 1,
-                    actual_line = y + 1,
-                    expected_text = "",
-                    actual_text = actualLines[y]
-                });
-                y++;
-            }
-
-            for (int i = 0; i < rawOps.Count; i++)
-            {
-                if (diffs.Count >= maxItems)
-                    break;
-
-                var current = rawOps[i];
-
-                if (i + 1 < rawOps.Count)
-                {
-                    var next = rawOps[i + 1];
-
-                    var isReplacePair =
-                        (current.type == "removed" && next.type == "added") ||
-                        (current.type == "added" && next.type == "removed");
-
-                    if (isReplacePair)
-                    {
-                        diffs.Add(new TextDifferenceItemDto
-                        {
-                            type = "changed",
-                            expected_line = current.type == "removed" ? current.expected_line : next.expected_line,
-                            actual_line = current.type == "added" ? current.actual_line : next.actual_line,
-                            expected_text = current.type == "removed" ? current.expected_text : next.expected_text,
-                            actual_text = current.type == "added" ? current.actual_text : next.actual_text
-                        });
-
-                        i++;
-                        continue;
-                    }
-                }
-
-                diffs.Add(current);
-            }
-
-            return diffs;
         }
 
         private async Task<SignatureAnalysisResult> AnalyzeCustomerSignatureRegionAsync(
@@ -617,17 +572,17 @@ namespace AMMS.Application.Services
 
                 using var image = await Image.LoadAsync<Rgba32>(renderedFile, ct);
 
-                // Panel khách hàng bên trái cuối trang
+                // Tinh chỉnh theo template hiện tại
                 var customerPanel = ToRectangle(image.Width, image.Height, 0.04, 0.73, 0.42, 0.24);
 
-                // Ô ký hợp lệ
-                var allowedSignatureBox = ToRectangle(image.Width, image.Height, 0.08, 0.80, 0.28, 0.08);
+                // Ô ký thật sự
+                var allowedSignatureBox = ToRectangle(image.Width, image.Height, 0.09, 0.79, 0.24, 0.08);
 
-                // Vùng quan sát lớn hơn ô ký một chút để bắt trường hợp ký lệch
-                var observationBox = ToRectangle(image.Width, image.Height, 0.04, 0.77, 0.40, 0.12);
+                // Vùng quan sát lớn hơn nhẹ nhưng KHÔNG đè xuống vùng tên
+                var observationBox = ToRectangle(image.Width, image.Height, 0.07, 0.78, 0.28, 0.09);
 
-                // Dòng họ tên in sẵn dưới chữ ký
-                var nameBand = ToRectangle(image.Width, image.Height, 0.06, 0.90, 0.32, 0.04);
+                // Dòng tên in sẵn bên dưới
+                var nameBand = ToRectangle(image.Width, image.Height, 0.05, 0.89, 0.32, 0.05);
 
                 var nameBandPath = Path.Combine(tempRoot, "signature-name-band.png");
 
@@ -636,10 +591,10 @@ namespace AMMS.Application.Services
                     await nameCrop.SaveAsPngAsync(nameBandPath, ct);
                 }
 
-                var nameBandText = await OcrImageAsync(nameBandPath, ct);
+                var nameBandText = await OcrImageAsync(nameBandPath, ct, pageSegMode: 7);
 
-                var signatureNamePresent = NormalizeComparableLine(nameBandText)
-                    .Contains(NormalizeComparableLine(expectedCustomerName), StringComparison.Ordinal);
+                var signatureNamePresent = NormalizeDisplayText(nameBandText).ToLowerInvariant()
+                    .Contains(NormalizeDisplayText(expectedCustomerName).ToLowerInvariant(), StringComparison.Ordinal);
 
                 var inkBounds = DetectInkBounds(image, observationBox);
 
@@ -658,8 +613,8 @@ namespace AMMS.Application.Services
                         ? 0d
                         : (double)intersectionArea / detectedArea;
 
-                    // yêu cầu chữ ký phải nằm chủ yếu trong ô cho phép
-                    insideAllowedBox = insideRatio >= 0.85d;
+                    // nới nhẹ để tránh fail oan nếu ký hơi lệch nhưng vẫn nằm chủ yếu trong ô
+                    insideAllowedBox = insideRatio >= 0.70d;
                 }
 
                 return new SignatureAnalysisResult
@@ -682,7 +637,6 @@ namespace AMMS.Application.Services
                 }
                 catch
                 {
-                    // ignore cleanup error
                 }
             }
         }
@@ -724,7 +678,8 @@ namespace AMMS.Application.Services
                 }
             }
 
-            if (darkPixelCount < 120 ||
+            // threshold thấp hơn một chút để bắt chữ ký mảnh
+            if (darkPixelCount < 80 ||
                 minX == int.MaxValue ||
                 minY == int.MaxValue ||
                 maxX <= minX ||
@@ -799,7 +754,7 @@ namespace AMMS.Application.Services
 
                 foreach (var page in pages)
                 {
-                    var ocrText = await OcrImageAsync(page, ct);
+                    var ocrText = await OcrImageAsync(page, ct, pageSegMode: 6);
                     sb.AppendLine(ocrText);
                 }
 
@@ -818,11 +773,11 @@ namespace AMMS.Application.Services
             }
         }
 
-        private async Task<string> OcrImageAsync(string imagePath, CancellationToken ct)
+        private async Task<string> OcrImageAsync(string imagePath, CancellationToken ct, int pageSegMode)
         {
             return await RunProcessCaptureAsync(
                 "tesseract",
-                $"\"{imagePath}\" stdout -l vie+eng --psm 6",
+                $"\"{imagePath}\" stdout -l vie+eng --psm {pageSegMode}",
                 ct);
         }
 
@@ -856,7 +811,7 @@ namespace AMMS.Application.Services
 
         private static HashSet<string> BuildWordShingles(string input, int n)
         {
-            var words = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var words = input.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries);
             var result = new HashSet<string>(StringComparer.Ordinal);
 
             if (words.Length == 0) return result;
@@ -873,6 +828,38 @@ namespace AMMS.Application.Services
             }
 
             return result;
+        }
+
+        private static string CanonicalMarker(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input)) return "";
+
+            var text = WebUtility.HtmlDecode(input);
+            text = text.Normalize(NormalizationForm.FormKC);
+            text = RemoveDiacritics(text).ToLowerInvariant();
+            text = Regex.Replace(text, @"\s+", " ").Trim();
+
+            return text;
+        }
+
+        private static string RemoveDiacritics(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return "";
+
+            var normalized = text.Normalize(NormalizationForm.FormD);
+            var sb = new StringBuilder(normalized.Length);
+
+            foreach (var ch in normalized)
+            {
+                var unicodeCategory = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch);
+                if (unicodeCategory != System.Globalization.UnicodeCategory.NonSpacingMark)
+                    sb.Append(ch);
+            }
+
+            return sb.ToString()
+                .Normalize(NormalizationForm.FormC)
+                .Replace('đ', 'd')
+                .Replace('Đ', 'D');
         }
 
         private static async Task RunProcessAsync(
@@ -940,6 +927,14 @@ namespace AMMS.Application.Services
             }
 
             return output;
+        }
+
+        private sealed class ClauseContent
+        {
+            public int ClauseNumber { get; set; }
+            public string Title { get; set; } = "";
+            public string DisplayText { get; set; } = "";
+            public string NormalizedText { get; set; } = "";
         }
 
         private sealed class SignatureAnalysisResult

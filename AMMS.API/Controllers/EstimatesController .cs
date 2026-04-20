@@ -142,26 +142,46 @@ namespace AMMS.API.Controllers
         [HttpPost("upload-customer-signed-contract")]
         [RequestSizeLimit(50_000_000)]
         public async Task<IActionResult> UploadCustomerSignedContract(
-            [FromForm] UploadCustomerSignedContractRequest req,
-            CancellationToken ct)
+    [FromForm] UploadCustomerSignedContractRequest req,
+    CancellationToken ct)
         {
             try
             {
                 if (req == null)
-                    return LoiBadRequest("Thiếu dữ liệu tải lên hợp đồng khách hàng đã ký.");
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Thiếu dữ liệu tải lên hợp đồng khách hàng đã ký."
+                    });
 
                 if (req.request_id <= 0)
-                    return LoiBadRequest("request_id phải lớn hơn 0.");
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "request_id phải lớn hơn 0."
+                    });
 
                 if (req.estimate_id <= 0)
-                    return LoiBadRequest("estimate_id phải lớn hơn 0.");
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "estimate_id phải lớn hơn 0."
+                    });
 
                 if (req.file == null || req.file.Length == 0)
-                    return LoiBadRequest("Bạn chưa chọn file hợp đồng khách hàng đã ký.");
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Bạn chưa chọn file hợp đồng khách hàng đã ký."
+                    });
 
                 var ext = Path.GetExtension(req.file.FileName)?.ToLowerInvariant();
                 if (ext != ".pdf")
-                    return LoiBadRequest("Hợp đồng khách hàng đã ký chỉ được phép tải lên file .pdf.");
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Hợp đồng khách hàng đã ký chỉ được phép tải lên file .pdf."
+                    });
 
                 await using var stream = req.file.OpenReadStream();
 
@@ -175,40 +195,66 @@ namespace AMMS.API.Controllers
 
                 if (result.customer_signed_contract_path == null)
                 {
-                    return LoiBadRequest(
-                        TaoThongBaoLoiHopDongDaKy(result.compare_result),
-                        new
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = result.compare_result?.message
+                                  ?? result.compare_warning
+                                  ?? "Hợp đồng tải lên không vượt qua bước đối chiếu.",
+                        data = new
                         {
                             request_id = result.request_id,
                             estimate_id = result.estimate_id,
-                            compare_warning = result.compare_warning,
                             compare_result = result.compare_result
-                        });
+                        }
+                    });
                 }
 
-                return ThanhCong("Tải lên hợp đồng khách hàng đã ký thành công.", new
+                return Ok(new
                 {
-                    request_id = result.request_id,
-                    estimate_id = result.estimate_id,
-                    customer_signed_contract_path = result.customer_signed_contract_path,
-                    compare_result = result.compare_result
+                    success = true,
+                    message = "Tải lên hợp đồng khách hàng đã ký thành công.",
+                    data = new
+                    {
+                        request_id = result.request_id,
+                        estimate_id = result.estimate_id,
+                        customer_signed_contract_path = result.customer_signed_contract_path,
+                        compare_result = result.compare_result
+                    }
                 });
             }
             catch (PdfDocumentFormatException)
             {
-                return LoiBadRequest("File PDF không hợp lệ hoặc nội dung file bị lỗi nên hệ thống không thể đọc để đối chiếu.");
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "File PDF không hợp lệ hoặc nội dung file bị lỗi nên hệ thống không thể đọc để đối chiếu."
+                });
             }
             catch (ArgumentException ex)
             {
-                return LoiBadRequest("Dữ liệu tải lên hợp đồng khách hàng đã ký không hợp lệ.", ex.Message);
+                return BadRequest(new
+                {
+                    success = false,
+                    message = ex.Message
+                });
             }
             catch (InvalidOperationException ex)
             {
-                return LoiKhongTimThay("Không tìm thấy yêu cầu, báo giá hoặc hợp đồng tư vấn để đối chiếu.", ex.Message);
+                return NotFound(new
+                {
+                    success = false,
+                    message = ex.Message
+                });
             }
             catch (Exception ex)
             {
-                return LoiHeThong("Tải lên hợp đồng khách hàng đã ký thất bại.", ex.Message);
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    success = false,
+                    message = "Tải lên hợp đồng khách hàng đã ký thất bại.",
+                    detail = ex.Message
+                });
             }
         }
 
@@ -326,85 +372,6 @@ namespace AMMS.API.Controllers
                     detail = ex.Message
                 });
             }
-        }
-
-        private IActionResult ThanhCong(string thongBao, object? duLieu = null)
-        {
-            return Ok(new
-            {
-                thanh_cong = true,
-                thong_bao = thongBao,
-                du_lieu = duLieu
-            });
-        }
-
-        private IActionResult LoiBadRequest(string thongBao, object? chiTiet = null)
-        {
-            return BadRequest(new
-            {
-                thanh_cong = false,
-                thong_bao = thongBao,
-                chi_tiet = chiTiet
-            });
-        }
-
-        private IActionResult LoiKhongTimThay(string thongBao, object? chiTiet = null)
-        {
-            return NotFound(new
-            {
-                thanh_cong = false,
-                thong_bao = thongBao,
-                chi_tiet = chiTiet
-            });
-        }
-
-        private IActionResult LoiHeThong(string thongBao, object? chiTiet = null)
-        {
-            return StatusCode(StatusCodes.Status500InternalServerError, new
-            {
-                thanh_cong = false,
-                thong_bao = thongBao,
-                chi_tiet = chiTiet
-            });
-        }
-
-        private static string TaoThongBaoLoiHopDongDaKy(CompareContractResponse? compareResult)
-        {
-            if (compareResult == null)
-                return "Hợp đồng khách hàng tải lên không hợp lệ.";
-
-            var loi = new List<string>();
-
-            if (!compareResult.body_text_exact_match && compareResult.similarity_percent < 95m)
-            {
-                loi.Add($"Nội dung hợp đồng đã bị thay đổi đáng kể. Độ tương đồng hiện tại: {compareResult.similarity_percent:0.##}%.");
-            }
-            else if (!compareResult.body_text_exact_match)
-            {
-                loi.Add("Nội dung hợp đồng có khác biệt so với bản gốc.");
-            }
-
-            if (!compareResult.signature_name_present)
-            {
-                loi.Add("Không phát hiện đúng vùng họ tên của khách hàng tại khu vực ký.");
-            }
-
-            if (!compareResult.signature_mark_present && !compareResult.digital_signature_valid)
-            {
-                loi.Add("Không phát hiện chữ ký hiển thị trong vùng ký quy định và cũng không có chữ ký số hợp lệ.");
-            }
-
-            if (loi.Count == 0 && !string.IsNullOrWhiteSpace(compareResult.reject_reason))
-            {
-                loi.Add(compareResult.reject_reason!);
-            }
-
-            if (loi.Count == 0)
-            {
-                loi.Add("Hợp đồng tải lên không vượt qua bước đối chiếu.");
-            }
-
-            return string.Join(" ", loi);
         }
     }
 }
