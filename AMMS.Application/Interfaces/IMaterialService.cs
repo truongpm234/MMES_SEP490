@@ -18,5 +18,6 @@ namespace AMMS.Application.Interfaces
         Task<MaterialTypeGlueDto> GetAllPhuGlueTypeAsync();
         Task<bool> IncreaseStockAsync(int materialId, decimal quantity);
         Task<bool> DecreaseStockAsync(int materialId, decimal quantity);
+        Task<PagedResultLite<MaterialStockAlertDto>> GetMaterialStockAlertsPagedAsync( int page, int pageSize, decimal nearMinThresholdPercent = 0.2m, CancellationToken ct = default);
     }
 }
