@@ -11,5 +11,6 @@ namespace AMMS.Application.Interfaces
     {
         Task<EstimateBaseConfigDto> GetAsync(CancellationToken ct = default);
         Task<PaymentTermsConfig> GetPaymentTermsAsync(CancellationToken ct);
+        Task UpdateAsync(UpdateEstimateBaseConfigRequest dto, CancellationToken ct);
     }
 }
