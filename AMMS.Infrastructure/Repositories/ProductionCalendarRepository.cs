@@ -23,6 +23,11 @@ namespace AMMS.Infrastructure.Repositories
                 .FirstOrDefaultAsync(x => x.calendar_date == d, ct);
         }
 
+        public async Task<List<production_calendar>> GetAllDate()
+        {
+            return await _db.production_calendars.ToListAsync();
+        }
+
         public async Task<production_calendar?> GetByDateTrackingAsync(DateTime date, CancellationToken ct = default)
         {
             var d = ToUnspecifiedDate(date);

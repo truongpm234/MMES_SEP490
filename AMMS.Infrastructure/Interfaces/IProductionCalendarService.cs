@@ -1,10 +1,6 @@
-﻿using AMMS.Shared.DTOs.Planning;
+﻿using AMMS.Infrastructure.Entities;
+using AMMS.Shared.DTOs.Planning;
 using AMMS.Shared.DTOs.ProductionCalendars;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace AMMS.Application.Interfaces
 {
@@ -12,6 +8,7 @@ namespace AMMS.Application.Interfaces
     {
         Task<bool> IsWorkingDayAsync(DateTime date, CancellationToken ct = default);
         Task<ProductionCalendarDto?> GetByDateAsync(DateTime date, CancellationToken ct = default);
+        Task<List<production_calendar>> GetAllDate();
         Task<List<ProductionCalendarDto>> GetRangeAsync(DateTime from, DateTime to, CancellationToken ct = default);
 
         Task CreateAsync(CreateProductionCalendarRequest dto, CancellationToken ct = default); // thêm
