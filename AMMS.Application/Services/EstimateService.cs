@@ -359,6 +359,7 @@ namespace AMMS.Application.Services
                 pdfBytes,
                 ct);
 
+            // CHỈ dùng is_match, không dùng similarity_percent để pass
             if (!compareResult.is_match)
             {
                 return new UploadCustomerSignedContractResponse
@@ -369,18 +370,6 @@ namespace AMMS.Application.Services
                     compare_result = compareResult,
                     compare_warning = compareResult.reject_reason
                         ?? "Uploaded contract is not valid."
-                };
-            }
-
-            if (compareResult.similarity_percent < 95m)
-            {
-                return new UploadCustomerSignedContractResponse
-                {
-                    request_id = requestId,
-                    estimate_id = estimateId,
-                    customer_signed_contract_path = null,
-                    compare_result = compareResult,
-                    compare_warning = $"Hợp đồng khách tải lên chưa khớp so với hợp đồng tư vấn viên cung câp. Quý khách vui lòng xem lại và tải lại sau."
                 };
             }
 

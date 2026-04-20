@@ -5,12 +5,12 @@ using DocumentFormat.OpenXml.Wordprocessing;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Advanced;
 using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
 using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using UglyToad.PdfPig;
+using SixLabors.ImageSharp.Processing;
 
 namespace AMMS.Application.Services
 {
@@ -86,18 +86,29 @@ namespace AMMS.Application.Services
             var expectedBody = ExtractBodyWithoutSignatureZone(consultantText);
             var actualBody = ExtractBodyWithoutSignatureZone(customerText);
 
-            var normalizedExpectedBody = NormalizeStrict(expectedBody);
-            var normalizedActualBody = NormalizeStrict(actualBody);
+            // strict exact match: chỉ normalize nhẹ, không bỏ chữ/dấu câu quá mạnh
+            var normalizedExpectedExact = NormalizeForExactBodyMatch(expectedBody);
+            var normalizedActualExact = NormalizeForExactBodyMatch(actualBody);
 
             var bodyExactMatch = string.Equals(
-                normalizedExpectedBody,
-                normalizedActualBody,
+                normalizedExpectedExact,
+                normalizedActualExact,
                 StringComparison.Ordinal);
 
+            // similarity chỉ để debug/reference, không dùng để pass
+            var normalizedExpectedSoft = NormalizeForSimilarity(expectedBody);
+            var normalizedActualSoft = NormalizeForSimilarity(actualBody);
+
             var similarity = ComputeDiceSimilarity(
-                normalizedExpectedBody,
-                normalizedActualBody,
+                normalizedExpectedSoft,
+                normalizedActualSoft,
                 2);
+
+            var similarityPercent = Math.Round((decimal)(similarity * 100d), 2);
+
+            var textDiffs = bodyExactMatch
+                ? new List<ContractTextDiffItemDto>()
+                : BuildLineDiff(normalizedExpectedExact, normalizedActualExact, 20);
 
             var signatureRegion = await AnalyzeCustomerSignatureRegionAsync(
                 customerPdfBytes,
@@ -106,14 +117,18 @@ namespace AMMS.Application.Services
 
             var digitalSignature = await _pdfDigitalSignatureValidator.ValidateAsync(customerPdfBytes, ct);
 
-            var bodyAccepted = bodyExactMatch || similarity >= 0.95d;
+            // strict:
+            // - body phải exact match
+            // - visible signature: phải nằm trong ô cho phép và không tràn ra ngoài
+            // - hoặc có digital signature hợp lệ
+            var visibleSignatureAccepted =
+                signatureRegion.signature_mark_present &&
+                signatureRegion.signature_inside_allowed_box &&
+                !signatureRegion.signature_outside_allowed_box;
 
-            var signatureAccepted =
-                signatureRegion.signature_mark_present || digitalSignature.is_valid;
+            var digitalSignatureAccepted = digitalSignature.is_valid;
 
-            var isMatch = bodyAccepted && signatureAccepted;
-
-            var similarityPercent = Math.Round((decimal)(similarity * 100d), 2);
+            var isMatch = bodyExactMatch && (visibleSignatureAccepted || digitalSignatureAccepted);
 
             return new CompareContractResponse
             {
@@ -127,56 +142,74 @@ namespace AMMS.Application.Services
 
                 signature_name_present = signatureRegion.signature_name_present,
                 signature_mark_present = signatureRegion.signature_mark_present,
+                signature_inside_allowed_box = signatureRegion.signature_inside_allowed_box,
+                signature_outside_allowed_box = signatureRegion.signature_outside_allowed_box,
 
                 has_digital_signature = digitalSignature.has_signature,
                 digital_signature_valid = digitalSignature.is_valid,
 
                 used_ocr_fallback = usedOcrFallback,
 
-                consultant_text_length = normalizedExpectedBody.Length,
-                customer_text_length = normalizedActualBody.Length,
+                consultant_text_length = normalizedExpectedExact.Length,
+                customer_text_length = normalizedActualExact.Length,
 
                 verification_mode = digitalSignature.is_valid
-                    ? "BODY_SIMILARITY>=95 + SIGNATURE_AREA + DIGITAL_SIGNATURE"
-                    : "BODY_SIMILARITY>=95 + SIGNATURE_AREA + VISIBLE_SIGNATURE",
+                    ? "BODY_EXACT + VALID_DIGITAL_SIGNATURE"
+                    : "BODY_EXACT + VISIBLE_SIGNATURE_IN_ALLOWED_BOX_ONLY",
 
                 reject_reason = BuildRejectReason(
-                    bodyAccepted,
                     bodyExactMatch,
                     similarityPercent,
                     signatureRegion.signature_name_present,
                     signatureRegion.signature_mark_present,
-                    digitalSignature.is_valid)
+                    signatureRegion.signature_inside_allowed_box,
+                    signatureRegion.signature_outside_allowed_box,
+                    digitalSignature.is_valid),
+
+                text_differences = textDiffs
             };
         }
 
         private static string? BuildRejectReason(
-    bool bodyAccepted,
-    bool bodyExactMatch,
-    decimal similarityPercent,
-    bool signatureNamePresent,
-    bool signatureMarkPresent,
-    bool digitalSignatureValid)
+            bool bodyExactMatch,
+            decimal similarityPercent,
+            bool signatureNamePresent,
+            bool signatureMarkPresent,
+            bool signatureInsideAllowedBox,
+            bool signatureOutsideAllowedBox,
+            bool digitalSignatureValid)
         {
-            if (bodyAccepted && (signatureMarkPresent || digitalSignatureValid))
+            if (bodyExactMatch && ((signatureMarkPresent && signatureInsideAllowedBox && !signatureOutsideAllowedBox) || digitalSignatureValid))
                 return null;
 
             var reasons = new List<string>();
 
-            if (!bodyAccepted)
+            if (!bodyExactMatch)
             {
                 reasons.Add(
-                    $"Contract body text is not similar enough. Current similarity = {similarityPercent:0.##}%.");
+                    $"Contract body text was changed. Similarity reference = {similarityPercent:0.##}%.");
             }
 
-            if (!signatureMarkPresent && !digitalSignatureValid)
+            if (!digitalSignatureValid)
             {
-                reasons.Add("No visible signature mark or valid digital signature was found.");
+                if (!signatureMarkPresent)
+                {
+                    reasons.Add("No visible signature mark was found in the customer signature area.");
+                }
+                else
+                {
+                    if (!signatureInsideAllowedBox)
+                        reasons.Add("Signature was not found inside the allowed signature box.");
+
+                    if (signatureOutsideAllowedBox)
+                        reasons.Add("Signature contains marks outside the allowed signature box.");
+                }
             }
 
+            // Chỉ để debug, không dùng làm điều kiện fail cứng
             if (!signatureNamePresent)
             {
-                reasons.Add("Customer name was not detected in the expected signature-name area.");
+                reasons.Add("Warning: customer name was not clearly detected in the expected name band.");
             }
 
             return string.Join(" ", reasons);
@@ -184,8 +217,8 @@ namespace AMMS.Application.Services
 
         private static bool ShouldUseOcrFallback(string consultantText, string customerPdfText)
         {
-            var a = NormalizeStrict(consultantText);
-            var b = NormalizeStrict(customerPdfText);
+            var a = NormalizeForSimilarity(consultantText);
+            var b = NormalizeForSimilarity(customerPdfText);
 
             if (string.IsNullOrWhiteSpace(b))
                 return true;
@@ -265,7 +298,6 @@ namespace AMMS.Application.Services
             if (string.IsNullOrWhiteSpace(input))
                 return "";
 
-            // Cắt từ phần tiêu đề chữ ký cuối hợp đồng
             var marker = "ĐẠI DIỆN BÊN A";
             var idx = input.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
 
@@ -275,17 +307,36 @@ namespace AMMS.Application.Services
             return input.Substring(0, idx);
         }
 
-        private static string NormalizeStrict(string input)
+        // exact match pháp lý: normalize nhẹ
+        private static string NormalizeForExactBodyMatch(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input))
+                return "";
+
+            input = WebUtility.HtmlDecode(input);
+            input = input.Normalize(NormalizationForm.FormKC);
+
+            input = input.Replace("\r\n", "\n").Replace("\r", "\n");
+
+            var lines = input
+                .Split('\n')
+                .Select(x => Regex.Replace(x, @"[ \t]+", " ").TrimEnd())
+                .ToList();
+
+            while (lines.Count > 0 && string.IsNullOrWhiteSpace(lines[^1]))
+                lines.RemoveAt(lines.Count - 1);
+
+            return string.Join("\n", lines).Trim();
+        }
+
+        // soft similarity: chỉ để debug
+        private static string NormalizeForSimilarity(string input)
         {
             if (string.IsNullOrWhiteSpace(input)) return "";
 
             input = WebUtility.HtmlDecode(input);
             input = input.Normalize(NormalizationForm.FormKC).ToLowerInvariant();
-
-            // bỏ xuống dòng, khoảng trắng thừa
             input = Regex.Replace(input, @"\s+", " ").Trim();
-
-            // bỏ ký tự trang trí, giữ chữ + số + khoảng trắng
             input = Regex.Replace(input, @"[^\p{L}\p{Nd}\s]", " ");
             input = Regex.Replace(input, @"\s+", " ").Trim();
 
@@ -328,10 +379,79 @@ namespace AMMS.Application.Services
             return result;
         }
 
-        private async Task<(bool signature_name_present, bool signature_mark_present)> AnalyzeCustomerSignatureRegionAsync(
-            byte[] pdfBytes,
-            string expectedCustomerName,
-            CancellationToken ct)
+        private static List<ContractTextDiffItemDto> BuildLineDiff(string expected, string actual, int maxItems = 20)
+        {
+            var expectedLines = SplitNormalizedLines(expected);
+            var actualLines = SplitNormalizedLines(actual);
+
+            var result = new List<ContractTextDiffItemDto>();
+            var max = Math.Max(expectedLines.Count, actualLines.Count);
+
+            for (int i = 0; i < max; i++)
+            {
+                var e = i < expectedLines.Count ? expectedLines[i] : null;
+                var a = i < actualLines.Count ? actualLines[i] : null;
+
+                if (e == a)
+                    continue;
+
+                if (e == null && a != null)
+                {
+                    result.Add(new ContractTextDiffItemDto
+                    {
+                        type = "added",
+                        expected_line = 0,
+                        actual_line = i + 1,
+                        expected_text = "",
+                        actual_text = a
+                    });
+                }
+                else if (e != null && a == null)
+                {
+                    result.Add(new ContractTextDiffItemDto
+                    {
+                        type = "removed",
+                        expected_line = i + 1,
+                        actual_line = 0,
+                        expected_text = e,
+                        actual_text = ""
+                    });
+                }
+                else
+                {
+                    result.Add(new ContractTextDiffItemDto
+                    {
+                        type = "changed",
+                        expected_line = i + 1,
+                        actual_line = i + 1,
+                        expected_text = e ?? "",
+                        actual_text = a ?? ""
+                    });
+                }
+
+                if (result.Count >= maxItems)
+                    break;
+            }
+
+            return result;
+        }
+
+        private static List<string> SplitNormalizedLines(string input)
+        {
+            return input
+                .Replace("\r\n", "\n")
+                .Replace("\r", "\n")
+                .Split('\n')
+                .Select(x => x.Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToList();
+        }
+
+        private async Task<(bool signature_name_present, bool signature_mark_present, bool signature_inside_allowed_box, bool signature_outside_allowed_box)>
+            AnalyzeCustomerSignatureRegionAsync(
+                byte[] pdfBytes,
+                string expectedCustomerName,
+                CancellationToken ct)
         {
             var tempRoot = Path.Combine(Path.GetTempPath(), "contract-sign-check", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(tempRoot);
@@ -351,35 +471,69 @@ namespace AMMS.Application.Services
 
                 var renderedFile = Directory.GetFiles(tempRoot, "page-*.png").OrderBy(x => x).LastOrDefault();
                 if (renderedFile == null)
-                    return (false, false);
+                    return (false, false, false, false);
 
-                using var image = await Image.LoadAsync<Rgba32>(renderedFile, ct);
+                using var image = Image.Load<Rgba32>(renderedFile);
 
+                // Các box này đang căn theo template hiện tại của bạn
+                // Nếu template đổi layout thì chỉnh lại ratio
+                var allowedSignatureBox = ToRectangle(image.Width, image.Height, 0.10, 0.79, 0.22, 0.08);
+                var nameBand = ToRectangle(image.Width, image.Height, 0.08, 0.90, 0.26, 0.04);
 
-                var signatureBox = ToRectangle(image.Width, image.Height, 0.05, 0.74, 0.40, 0.16);
-                var nameBand = ToRectangle(image.Width, image.Height, 0.05, 0.88, 0.40, 0.07);
+                // Các vùng cấm để phát hiện ký sai chỗ
+                var forbiddenLeft = ToRectangle(image.Width, image.Height, 0.03, 0.79, 0.05, 0.08);
+                var forbiddenRight = ToRectangle(image.Width, image.Height, 0.34, 0.79, 0.10, 0.08);
+                var forbiddenAbove = ToRectangle(image.Width, image.Height, 0.10, 0.76, 0.22, 0.02);
+                var forbiddenBelow = ToRectangle(image.Width, image.Height, 0.10, 0.88, 0.22, 0.02);
 
-                var signatureCropPath = Path.Combine(tempRoot, "signature-box.png");
+                var allowedSignaturePath = Path.Combine(tempRoot, "allowed-signature-box.png");
                 var nameBandPath = Path.Combine(tempRoot, "signature-name-band.png");
+                var forbiddenLeftPath = Path.Combine(tempRoot, "forbidden-left.png");
+                var forbiddenRightPath = Path.Combine(tempRoot, "forbidden-right.png");
+                var forbiddenAbovePath = Path.Combine(tempRoot, "forbidden-above.png");
+                var forbiddenBelowPath = Path.Combine(tempRoot, "forbidden-below.png");
 
-                using (var signatureCrop = image.Clone(x => x.Crop(signatureBox)))
+                await SaveCropAsync(image, allowedSignatureBox, allowedSignaturePath, ct);
+                await SaveCropAsync(image, nameBand, nameBandPath, ct);
+                await SaveCropAsync(image, forbiddenLeft, forbiddenLeftPath, ct);
+                await SaveCropAsync(image, forbiddenRight, forbiddenRightPath, ct);
+                await SaveCropAsync(image, forbiddenAbove, forbiddenAbovePath, ct);
+                await SaveCropAsync(image, forbiddenBelow, forbiddenBelowPath, ct);
+
+                string nameBandText = "";
+                try
                 {
-                    await signatureCrop.SaveAsPngAsync(signatureCropPath, ct);
+                    nameBandText = await OcrImageAsync(nameBandPath, ct);
+                }
+                catch
+                {
+                    nameBandText = "";
                 }
 
-                using (var nameCrop = image.Clone(x => x.Crop(nameBand)))
-                {
-                    await nameCrop.SaveAsPngAsync(nameBandPath, ct);
-                }
+                var signatureNamePresent = NormalizeForSimilarity(nameBandText)
+                    .Contains(NormalizeForSimilarity(expectedCustomerName), StringComparison.Ordinal);
 
-                var nameBandText = await OcrImageAsync(nameBandPath, ct);
+                var insideRatio = GetDarkRatio(allowedSignaturePath);
+                var leftRatio = GetDarkRatio(forbiddenLeftPath);
+                var rightRatio = GetDarkRatio(forbiddenRightPath);
+                var aboveRatio = GetDarkRatio(forbiddenAbovePath);
+                var belowRatio = GetDarkRatio(forbiddenBelowPath);
 
-                var signatureNamePresent = NormalizeStrict(nameBandText)
-                    .Contains(NormalizeStrict(expectedCustomerName), StringComparison.Ordinal);
+                var signatureMarkPresent = insideRatio >= 0.0030d;
+                var signatureInsideAllowedBox = signatureMarkPresent;
 
-                var signatureMarkPresent = await HasVisibleSignatureMarkAsync(signatureCropPath, ct);
+                var signatureOutsideAllowedBox =
+                    leftRatio >= 0.0020d ||
+                    rightRatio >= 0.0020d ||
+                    aboveRatio >= 0.0020d ||
+                    belowRatio >= 0.0020d;
 
-                return (signatureNamePresent, signatureMarkPresent);
+                return (
+                    signature_name_present: signatureNamePresent,
+                    signature_mark_present: signatureMarkPresent,
+                    signature_inside_allowed_box: signatureInsideAllowedBox,
+                    signature_outside_allowed_box: signatureOutsideAllowedBox
+                );
             }
             finally
             {
@@ -390,7 +544,6 @@ namespace AMMS.Application.Services
                 }
                 catch
                 {
-                    // ignore cleanup error
                 }
             }
         }
@@ -402,6 +555,16 @@ namespace AMMS.Application.Services
                 y: (int)Math.Round(height * yRatio),
                 width: Math.Max(1, (int)Math.Round(width * wRatio)),
                 height: Math.Max(1, (int)Math.Round(height * hRatio)));
+        }
+
+        private static async Task SaveCropAsync(
+            Image<Rgba32> source,
+            Rectangle rect,
+            string outputPath,
+            CancellationToken ct)
+        {
+            using var crop = source.Clone(x => x.Crop(rect));
+            await crop.SaveAsPngAsync(outputPath, ct);
         }
 
         private static int GetPdfPageCount(byte[] pdfBytes)
@@ -456,15 +619,13 @@ namespace AMMS.Application.Services
 
         private async Task<string> OcrImageAsync(string imagePath, CancellationToken ct)
         {
-            var result = await RunProcessCaptureAsync(
+            return await RunProcessCaptureAsync(
                 "tesseract",
                 $"\"{imagePath}\" stdout -l vie+eng --psm 6",
                 ct);
-
-            return result;
         }
 
-        private static Task<bool> HasVisibleSignatureMarkAsync(string imagePath, CancellationToken ct)
+        private static double GetDarkRatio(string imagePath)
         {
             using var image = Image.Load<Rgba32>(imagePath);
 
@@ -487,11 +648,10 @@ namespace AMMS.Application.Services
                 }
             }
 
-            var darkRatio = totalPixelCount == 0
-                ? 0d
-                : (double)darkPixelCount / totalPixelCount;
+            if (totalPixelCount <= 0)
+                return 0d;
 
-            return Task.FromResult(darkRatio >= 0.002d);
+            return (double)darkPixelCount / totalPixelCount;
         }
 
         private static async Task RunProcessAsync(
@@ -512,18 +672,20 @@ namespace AMMS.Application.Services
             using var process = new Process { StartInfo = psi };
             process.Start();
 
-            var stdOut = process.StandardOutput.ReadToEndAsync(ct);
-            var stdErr = process.StandardError.ReadToEndAsync(ct);
+            var stdOutTask = process.StandardOutput.ReadToEndAsync(ct);
+            var stdErrTask = process.StandardError.ReadToEndAsync(ct);
 
             await process.WaitForExitAsync(ct);
 
-            var error = await stdErr;
+            var error = await stdErrTask;
 
             if (process.ExitCode != 0)
             {
                 throw new InvalidOperationException(
                     $"{fileName} failed with exit code {process.ExitCode}. Error: {error}");
             }
+
+            await stdOutTask;
         }
 
         private static async Task<string> RunProcessCaptureAsync(
