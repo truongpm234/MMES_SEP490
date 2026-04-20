@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y \
     poppler-utils \
     tesseract-ocr \
     tesseract-ocr-vie \
+    tesseract-ocr-eng \
     fontconfig \
     fonts-dejavu \
     fonts-liberation \
