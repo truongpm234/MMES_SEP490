@@ -1,6 +1,4 @@
-﻿using System.Collections.Generic;
-
-namespace AMMS.Shared.DTOs.Estimates
+﻿namespace AMMS.Shared.DTOs.Estimates
 {
     public class CompareContractResponse
     {

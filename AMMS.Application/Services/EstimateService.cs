@@ -323,21 +323,21 @@ namespace AMMS.Application.Services
     string contentType,
     CancellationToken ct = default)
         {
-            if (requestId <= 0) throw new ArgumentException("request_id must be > 0");
-            if (estimateId <= 0) throw new ArgumentException("estimate_id must be > 0");
-            if (fileStream == null) throw new ArgumentException("file is required");
-            if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("fileName is required");
+            if (requestId <= 0) throw new ArgumentException("request_id phải > 0");
+            if (estimateId <= 0) throw new ArgumentException("estimate_id phải > 0");
+            if (fileStream == null) throw new ArgumentException("Thiếu file hợp đồng");
+            if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("Thiếu tên file");
 
             var estimate = await _estimateRepo.GetTrackingByIdAsync(estimateId, ct);
             if (estimate == null || estimate.order_request_id != requestId)
-                throw new InvalidOperationException("Estimate not found");
+                throw new InvalidOperationException("Không tìm thấy bảng giá tương ứng");
 
             if (string.IsNullOrWhiteSpace(estimate.consultant_contract_path))
-                throw new InvalidOperationException("Consultant contract has not been uploaded yet");
+                throw new InvalidOperationException("Hợp đồng tư vấn viên chưa được upload");
 
             var ext = Path.GetExtension(fileName)?.Trim().ToLowerInvariant();
             if (ext != ".pdf")
-                throw new ArgumentException("Customer signed contract must be .pdf");
+                throw new ArgumentException("Hợp đồng khách hàng đã ký phải là file .pdf");
 
             byte[] pdfBytes;
             await using (var pdfMs = new MemoryStream())
@@ -349,7 +349,7 @@ namespace AMMS.Application.Services
 
             var request = await _requestRepository.GetByIdAsync(requestId);
             if (request == null)
-                throw new InvalidOperationException("Order request not found");
+                throw new InvalidOperationException("Không tìm thấy yêu cầu đặt hàng");
 
             var compareResult = await _contractCompareService.CompareAsync(
                 requestId,
@@ -639,6 +639,7 @@ namespace AMMS.Application.Services
                 message = "Generate consultant contract successfully"
             };
         }
+
         public async Task SaveConsultantContractPathAsync(int requestId, int estimateId, string consultantContractPath, CancellationToken ct = default)
         {
             if (requestId <= 0)
