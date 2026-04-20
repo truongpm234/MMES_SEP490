@@ -83,7 +83,6 @@ namespace AMMS.Application.Services
                 ? await OcrWholePdfAsync(customerPdfBytes, ct)
                 : customerDirectText;
 
-            // Chỉ so body contract, bỏ phần vùng chữ ký cuối để không false fail vì chữ ký
             var expectedBody = ExtractBodyWithoutSignatureZone(consultantText);
             var actualBody = ExtractBodyWithoutSignatureZone(customerText);
 
@@ -107,14 +106,14 @@ namespace AMMS.Application.Services
 
             var digitalSignature = await _pdfDigitalSignatureValidator.ValidateAsync(customerPdfBytes, ct);
 
-            // Chấp nhận nếu:
-            // 1) body không đổi
-            // 2) tên khách có mặt ở vùng tên ký Bên A
-            // 3) có dấu ký nhìn thấy trong box ký HOẶC có digital signature hợp lệ
-            var isMatch =
-                bodyExactMatch &&
-                signatureRegion.signature_name_present &&
-                (signatureRegion.signature_mark_present || digitalSignature.is_valid);
+            var bodyAccepted = bodyExactMatch || similarity >= 0.95d;
+
+            var signatureAccepted =
+                signatureRegion.signature_mark_present || digitalSignature.is_valid;
+
+            var isMatch = bodyAccepted && signatureAccepted;
+
+            var similarityPercent = Math.Round((decimal)(similarity * 100d), 2);
 
             return new CompareContractResponse
             {
@@ -124,7 +123,7 @@ namespace AMMS.Application.Services
                 is_match = isMatch,
 
                 body_text_exact_match = bodyExactMatch,
-                similarity_percent = Math.Round((decimal)(similarity * 100d), 2),
+                similarity_percent = similarityPercent,
 
                 signature_name_present = signatureRegion.signature_name_present,
                 signature_mark_present = signatureRegion.signature_mark_present,
@@ -138,11 +137,13 @@ namespace AMMS.Application.Services
                 customer_text_length = normalizedActualBody.Length,
 
                 verification_mode = digitalSignature.is_valid
-                    ? "BODY_EXACT + CUSTOMER_SIGNATURE_AREA + DIGITAL_SIGNATURE"
-                    : "BODY_EXACT + CUSTOMER_SIGNATURE_AREA + VISIBLE_SIGNATURE",
+                    ? "BODY_SIMILARITY>=95 + SIGNATURE_AREA + DIGITAL_SIGNATURE"
+                    : "BODY_SIMILARITY>=95 + SIGNATURE_AREA + VISIBLE_SIGNATURE",
 
                 reject_reason = BuildRejectReason(
+                    bodyAccepted,
                     bodyExactMatch,
+                    similarityPercent,
                     signatureRegion.signature_name_present,
                     signatureRegion.signature_mark_present,
                     digitalSignature.is_valid)
@@ -150,24 +151,33 @@ namespace AMMS.Application.Services
         }
 
         private static string? BuildRejectReason(
-            bool bodyExactMatch,
-            bool signatureNamePresent,
-            bool signatureMarkPresent,
-            bool digitalSignatureValid)
+    bool bodyAccepted,
+    bool bodyExactMatch,
+    decimal similarityPercent,
+    bool signatureNamePresent,
+    bool signatureMarkPresent,
+    bool digitalSignatureValid)
         {
-            if (bodyExactMatch && signatureNamePresent && (signatureMarkPresent || digitalSignatureValid))
+            if (bodyAccepted && (signatureMarkPresent || digitalSignatureValid))
                 return null;
 
             var reasons = new List<string>();
 
-            if (!bodyExactMatch)
-                reasons.Add("Contract body text was changed.");
-
-            if (!signatureNamePresent)
-                reasons.Add("Customer name was not found in the customer signature area.");
+            if (!bodyAccepted)
+            {
+                reasons.Add(
+                    $"Contract body text is not similar enough. Current similarity = {similarityPercent:0.##}%.");
+            }
 
             if (!signatureMarkPresent && !digitalSignatureValid)
+            {
                 reasons.Add("No visible signature mark or valid digital signature was found.");
+            }
+
+            if (!signatureNamePresent)
+            {
+                reasons.Add("Customer name was not detected in the expected signature-name area.");
+            }
 
             return string.Join(" ", reasons);
         }
@@ -345,12 +355,9 @@ namespace AMMS.Application.Services
 
                 using var image = await Image.LoadAsync<Rgba32>(renderedFile, ct);
 
-                // Điều chỉnh theo layout hiện tại của template:
-                // - Bên A nằm nửa trái
-                // - vùng ký nằm cuối trang
-                // - name band nằm thấp hơn box ký
-                var signatureBox = ToRectangle(image.Width, image.Height, 0.07, 0.78, 0.34, 0.09);
-                var nameBand = ToRectangle(image.Width, image.Height, 0.07, 0.90, 0.34, 0.045);
+
+                var signatureBox = ToRectangle(image.Width, image.Height, 0.05, 0.74, 0.40, 0.16);
+                var nameBand = ToRectangle(image.Width, image.Height, 0.05, 0.88, 0.40, 0.07);
 
                 var signatureCropPath = Path.Combine(tempRoot, "signature-box.png");
                 var nameBandPath = Path.Combine(tempRoot, "signature-name-band.png");
@@ -484,7 +491,7 @@ namespace AMMS.Application.Services
                 ? 0d
                 : (double)darkPixelCount / totalPixelCount;
 
-            return Task.FromResult(darkRatio >= 0.01d);
+            return Task.FromResult(darkRatio >= 0.002d);
         }
 
         private static async Task RunProcessAsync(
