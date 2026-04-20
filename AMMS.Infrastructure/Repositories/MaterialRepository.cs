@@ -306,5 +306,106 @@ namespace AMMS.Infrastructure.Repositories
             await _db.SaveChangesAsync();
             return true;
         }
+
+        public async Task<PagedResultLite<MaterialStockAlertDto>> GetMaterialStockAlertsPagedAsync(
+    int page,
+    int pageSize,
+    decimal nearMinThresholdPercent = 0.2m,
+    CancellationToken ct = default)
+        {
+            if (page <= 0) page = 1;
+            if (pageSize <= 0) pageSize = 10;
+            if (nearMinThresholdPercent < 0) nearMinThresholdPercent = 0.2m;
+
+            var skip = (page - 1) * pageSize;
+
+            var materials = await _db.materials
+                .AsNoTracking()
+                .Select(m => new
+                {
+                    m.material_id,
+                    m.code,
+                    m.name,
+                    m.unit,
+                    m.type,
+                    m.material_class,
+                    StockQty = m.stock_qty ?? 0m,
+                    MinStockQty = m.min_stock ?? 0m
+                })
+                .ToListAsync(ct);
+
+            var alerts = materials
+                .Select(m =>
+                {
+                    var stockQty = m.StockQty;
+                    var minStockQty = m.MinStockQty;
+
+                    var nearThreshold = minStockQty + (minStockQty * nearMinThresholdPercent);
+                    var gapToMin = stockQty - minStockQty;
+
+                    var isLowStock = stockQty < minStockQty;
+                    var isNearMinStock = !isLowStock && stockQty <= nearThreshold;
+
+                    string warningLevel;
+                    string? warningMessage;
+
+                    if (isLowStock)
+                    {
+                        warningLevel = "LOW_STOCK";
+                        warningMessage =
+                            $"NVL đã dưới min stock. Tồn hiện tại {stockQty:N2} {m.unit}, min stock là {minStockQty:N2} {m.unit}.";
+                    }
+                    else if (isNearMinStock)
+                    {
+                        warningLevel = "NEAR_MIN_STOCK";
+                        warningMessage =
+                            $"NVL gần chạm min stock. Tồn hiện tại {stockQty:N2} {m.unit}, min stock là {minStockQty:N2} {m.unit}.";
+                    }
+                    else
+                    {
+                        warningLevel = "NORMAL";
+                        warningMessage = null;
+                    }
+
+                    return new MaterialStockAlertDto
+                    {
+                        MaterialId = m.material_id,
+                        Code = m.code,
+                        Name = m.name,
+                        Unit = m.unit,
+                        Type = m.type,
+                        MaterialClass = m.material_class,
+                        StockQty = stockQty,
+                        MinStockQty = minStockQty,
+                        GapToMinStock = gapToMin,
+                        IsLowStock = isLowStock,
+                        IsNearMinStock = isNearMinStock,
+                        WarningLevel = warningLevel,
+                        WarningMessage = warningMessage
+                    };
+                })
+                .Where(x => x.IsLowStock || x.IsNearMinStock)
+                .OrderByDescending(x => x.IsLowStock)
+                .ThenBy(x => x.GapToMinStock)
+                .ThenBy(x => x.Name)
+                .ToList();
+
+            var paged = alerts
+                .Skip(skip)
+                .Take(pageSize + 1)
+                .ToList();
+
+            var hasNext = paged.Count > pageSize;
+            if (hasNext)
+                paged = paged.Take(pageSize).ToList();
+
+            return new PagedResultLite<MaterialStockAlertDto>
+            {
+                Page = page,
+                PageSize = pageSize,
+                HasNext = hasNext,
+                Data = paged
+            };
+        }
     }
 }

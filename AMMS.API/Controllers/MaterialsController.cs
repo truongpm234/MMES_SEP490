@@ -114,5 +114,14 @@ namespace AMMS.API.Controllers
                 return BadRequest(new { message = ex.Message });
             }
         }
+
+        [HttpGet("stock-alerts")]
+        public async Task<IActionResult> GetMaterialStockAlerts([FromQuery] int page = 1, [FromQuery] int pageSize = 10, [FromQuery] decimal nearMinThresholdPercent = 0.2m, CancellationToken ct = default)
+        {
+            var result = await _materialService.GetMaterialStockAlertsPagedAsync(
+                page, pageSize, nearMinThresholdPercent, ct);
+
+            return Ok(result);
+        }
     }
 }
