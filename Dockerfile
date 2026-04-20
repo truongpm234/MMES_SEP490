@@ -26,6 +26,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     libreoffice \
     libreoffice-writer \
+    poppler-utils \
+    tesseract-ocr \
+    tesseract-ocr-vie \
     fontconfig \
     fonts-dejavu \
     fonts-liberation \
