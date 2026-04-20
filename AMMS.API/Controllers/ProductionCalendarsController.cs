@@ -48,22 +48,6 @@ namespace AMMS.API.Controllers
             return Ok(rows);
         }
 
-        [HttpGet("is-working-day")]
-        public async Task<IActionResult> IsWorkingDay([FromQuery] DateTime date, CancellationToken ct)
-        {
-            if (date == default)
-                return BadRequest(new { message = "date is required" });
-
-            var isWorking = await _service.IsWorkingDayAsync(date, ct);
-
-            return Ok(new
-            {
-                calendar_date = date.Date,
-                is_working_day = isWorking,
-                is_non_working_day = !isWorking
-            });
-        }
-
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] CreateProductionCalendarRequest dto, CancellationToken ct)
         {
@@ -87,72 +71,6 @@ namespace AMMS.API.Controllers
         }
 
         [HttpPut]
-        public async Task<IActionResult> Update([FromQuery] DateTime date, [FromBody] UpdateProductionCalendarRequest dto, CancellationToken ct)
-        {
-            if (date == default)
-                return BadRequest(new { message = "date is required" });
-
-            try
-            {
-                var ok = await _service.UpdateAsync(date, dto, ct);
-                if (!ok)
-                    return NotFound(new { message = "Calendar date not found", calendar_date = date.Date });
-
-                return Ok(new
-                {
-                    message = "Production calendar updated successfully",
-                    calendar_date = date.Date
-                });
-            }
-            catch (ArgumentException ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
-        }
-
-        [HttpPatch("non-working-day")]
-        public async Task<IActionResult> UpdateNonWorkingDay(
-            [FromQuery] DateTime date,
-            [FromBody] ToggleNonWorkingDayRequest dto,
-            CancellationToken ct)
-        {
-            if (date == default)
-                return BadRequest(new { message = "date is required" });
-
-            var ok = await _service.UpdateNonWorkingDayAsync(date, dto.is_non_working_day, ct);
-            if (!ok)
-                return NotFound(new { message = "Calendar date not found", calendar_date = date.Date });
-
-            return Ok(new
-            {
-                message = "is_non_working_day updated successfully",
-                calendar_date = date.Date,
-                is_non_working_day = dto.is_non_working_day
-            });
-        }
-
-        [HttpPatch("manual-override")]
-        public async Task<IActionResult> UpdateManualOverride(
-            [FromQuery] DateTime date,
-            [FromBody] ToggleManualOverrideRequest dto,
-            CancellationToken ct)
-        {
-            if (date == default)
-                return BadRequest(new { message = "date is required" });
-
-            var ok = await _service.UpdateManualOverrideAsync(date, dto.is_manual_override, ct);
-            if (!ok)
-                return NotFound(new { message = "Calendar date not found", calendar_date = date.Date });
-
-            return Ok(new
-            {
-                message = "is_manual_override updated successfully",
-                calendar_date = date.Date,
-                is_manual_override = dto.is_manual_override
-            });
-        }
-
-        [HttpPut("upsert")]
         public async Task<IActionResult> Upsert([FromBody] ProductionCalendarDto dto, CancellationToken ct)
         {
             if (dto == null || dto.calendar_date == default)
