@@ -180,14 +180,12 @@ namespace AMMS.Application.Services
 
                 var now = AppTime.NowVnUnspecified();
 
-                // Nếu đã reject thì không cho finalize nữa
                 if (string.Equals(req.process_status, "Rejected", StringComparison.OrdinalIgnoreCase))
                 {
                     await tx.RollbackAsync(ct);
                     return (false, "Request has been rejected. Cannot finalize payment.");
                 }
 
-                // Nếu polling đã mark nhẹ Accepted thì vẫn phải cho finalize tiếp
                 var alreadyLightAccepted =
                     string.Equals(req.process_status, "Accepted", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(req.process_status, "Paid", StringComparison.OrdinalIgnoreCase) ||
@@ -272,12 +270,7 @@ namespace AMMS.Application.Services
 
                 await _db.SaveChangesAsync(ct);
 
-                var paymentTerms = await _baseconfigRepo.GetPaymentTermsAsync(ct);
-
-                decimal actualDepositAmount =
-                    (currentPayment?.amount).GetValueOrDefault() > 0
-                        ? currentPayment!.amount
-                        : PaymentAmountHelper.GetDepositAmount(est, paymentTerms);
+                decimal actualDepositAmount = (currentPayment?.amount).GetValueOrDefault() > 0 ? currentPayment!.amount : PaymentAmountHelper.GetDepositAmount(est);
 
                 await UpsertPaidPaymentRowAsync(
                     orderRequestId: orderRequestId,
@@ -456,20 +449,13 @@ namespace AMMS.Application.Services
                     return (false, "Accepted estimate not found for remaining payment");
                 }
 
-                var paymentTerms = await _baseconfigRepo.GetPaymentTermsAsync(ct);
+                var actualRemainingAmount = existing.amount > 0 ? existing.amount : PaymentAmountHelper.GetRemainingAmount(est);
 
-                var actualRemainingAmount =
-                    existing.amount > 0
-                        ? existing.amount
-                        : PaymentAmountHelper.GetRemainingAmount(est, paymentTerms);
-
-                // chỉ gán 1 lần
                 existing.status = "PAID";
                 existing.payment_type = "Remaining";
                 existing.paid_at ??= now;
                 existing.updated_at = now;
 
-                // LUÔN LƯU SỐ THẬT, KHÔNG DÙNG amount callback đã chia 100
                 existing.amount = actualRemainingAmount;
 
                 if (!string.IsNullOrWhiteSpace(paymentLinkId))

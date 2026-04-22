@@ -105,5 +105,37 @@ namespace AMMS.API.Controllers
                 calendar_date = date.Date
             });
         }
+
+        [HttpPost("create-range")]
+        public async Task<IActionResult> CreateRange([FromBody] CreateProductionCalendarRangeRequest dto, CancellationToken ct)
+        {
+            if (dto == null)
+                return BadRequest(new { message = "Payload is required" });
+
+            if (dto.from_date == default || dto.to_date == default)
+                return BadRequest(new { message = "from_date and to_date are required" });
+
+            try
+            {
+                var totalDays = await _service.CreateRangeAsync(dto, ct);
+
+                return StatusCode(StatusCodes.Status201Created, new
+                {
+                    message = "Production calendar range created successfully",
+                    from_date = dto.from_date.Date,
+                    to_date = dto.to_date.Date,
+                    total_days = totalDays,
+                    holiday_name = dto.holiday_name,
+                    holiday_type = string.IsNullOrWhiteSpace(dto.holiday_type)
+                        ? "MANUAL"
+                        : dto.holiday_type.Trim().ToUpperInvariant(),
+                    is_non_working_day = dto.is_non_working_day
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
     }
 }

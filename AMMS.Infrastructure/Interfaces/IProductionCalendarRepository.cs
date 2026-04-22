@@ -12,5 +12,16 @@ namespace AMMS.Infrastructure.Interfaces
         Task UpsertAsync(production_calendar entity, CancellationToken ct = default);
         Task<bool> DeleteByDateAsync(DateTime date, CancellationToken ct = default);
         Task SaveChangesAsync(CancellationToken ct = default);
+        Task<int> UpsertRangeAsync(
+            DateTime from,
+            DateTime to,
+            string? holidayName,
+            string holidayType,
+            bool isNonWorkingDay,
+            bool isManualOverride,
+            string? note,
+            DateTime createdAt,
+            DateTime updatedAt,
+            CancellationToken ct = default);
     }
 }

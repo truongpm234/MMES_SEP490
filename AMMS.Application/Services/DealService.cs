@@ -299,10 +299,7 @@ namespace AMMS.Application.Services
 
             var finalTotal = est?.final_total_cost ?? 0m;
 
-            var paymentTerms = await _baseConfigRepo.GetPaymentTermsAsync(ct);
-            var deposit = est == null
-                ? 0m
-                : PaymentAmountHelper.GetDepositDisplayAmount(est, paymentTerms);
+            var deposit = est == null ? 0m : PaymentAmountHelper.GetDepositDisplayAmount(est);
 
             string FormatVND(decimal amount) => string.Format("{0:N0} đ", amount);
 
@@ -444,10 +441,7 @@ namespace AMMS.Application.Services
 
             var finalTotal = est?.final_total_cost ?? 0m;
 
-            var paymentTerms = await _baseConfigRepo.GetPaymentTermsAsync(CancellationToken.None);
-            var deposit = est == null
-                ? 0m
-                : PaymentAmountHelper.GetDepositDisplayAmount(est, paymentTerms);
+            var deposit = est == null ? 0m : PaymentAmountHelper.GetDepositDisplayAmount(est);
 
             string FormatVND(decimal amount) => string.Format("{0:N0} đ", amount);
 
@@ -566,8 +560,6 @@ namespace AMMS.Application.Services
             if (est.order_request_id != requestId)
                 throw new InvalidOperationException("Estimate does not belong to this request");
 
-            var paymentTerms = await _baseConfigRepo.GetPaymentTermsAsync(ct);
-
             var pending = await _paymentRepo.GetLatestPendingByRequestIdAndEstimateIdAsync(requestId, estimateId, ct);
             if (pending != null)
             {
@@ -608,7 +600,7 @@ namespace AMMS.Application.Services
             var backendUrl = _config["Deal:BaseUrl"]!;
             var feBase = _config["Deal:BaseUrlFe"] ?? "https://sep490-fe.vercel.app";
 
-            var actualAmount = PaymentAmountHelper.GetDepositAmount(est, paymentTerms);
+            var actualAmount = PaymentAmountHelper.GetDepositAmount(est);
             var gatewayAmount = PaymentAmountHelper.ToGatewayAmount(actualAmount, _config);
 
             const int maxAttempt = 9;
@@ -697,8 +689,7 @@ namespace AMMS.Application.Services
                 throw new InvalidOperationException("Customer email missing");
 
             var est = await ResolveAcceptedEstimateAsync(req, ct);
-            var paymentTerms = await _baseConfigRepo.GetPaymentTermsAsync(ct);
-            var remainingAmount = PaymentAmountHelper.GetRemainingAmount(est, paymentTerms);
+            var remainingAmount = PaymentAmountHelper.GetRemainingAmount(est);
 
             if (remainingAmount <= 0)
                 throw new InvalidOperationException("Remaining amount is already 0. No need to send remaining-payment email.");
@@ -748,9 +739,8 @@ namespace AMMS.Application.Services
             }
 
             var est = await ResolveAcceptedEstimateAsync(req, ct);
-            var paymentTerms = await _baseConfigRepo.GetPaymentTermsAsync(ct);
 
-            var actualRemainingAmount = PaymentAmountHelper.GetRemainingAmount(est, paymentTerms);
+            var actualRemainingAmount = PaymentAmountHelper.GetRemainingAmount(est);
             var gatewayRemainingAmount = PaymentAmountHelper.ToGatewayAmount(actualRemainingAmount, _config);
 
             if (actualRemainingAmount <= 0)

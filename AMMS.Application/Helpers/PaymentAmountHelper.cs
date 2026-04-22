@@ -1,52 +1,45 @@
 ﻿using AMMS.Infrastructure.Entities;
-using AMMS.Shared.DTOs.Estimates;
 using Microsoft.Extensions.Configuration;
 
 namespace AMMS.Application.Helpers
 {
     public static class PaymentAmountHelper
     {
-        public static int GetDepositAmount(cost_estimate est, PaymentTermsConfig paymentTerms)
+        public static int GetDepositAmount(cost_estimate est)
         {
             if (est == null) throw new ArgumentNullException(nameof(est));
-            if (paymentTerms == null) throw new ArgumentNullException(nameof(paymentTerms));
 
             var finalTotal = NormalizeMoneyToInt(est.final_total_cost);
-            var depositPercent = NormalizePercent(paymentTerms.deposit_percent);
+            var depositActual = NormalizeMoneyToInt(est.deposit_amount);
 
-            var depositActual = Convert.ToInt32(Math.Round(
-                finalTotal * depositPercent / 100m,
-                0,
-                MidpointRounding.AwayFromZero));
+            if (depositActual < 0)
+                depositActual = 0;
+
+            if (finalTotal > 0 && depositActual > finalTotal)
+                depositActual = finalTotal;
 
             return depositActual;
         }
 
-        public static int GetRemainingAmount(cost_estimate est, PaymentTermsConfig paymentTerms)
+        public static int GetRemainingAmount(cost_estimate est)
         {
             if (est == null) throw new ArgumentNullException(nameof(est));
-            if (paymentTerms == null) throw new ArgumentNullException(nameof(paymentTerms));
 
             var finalTotal = NormalizeMoneyToInt(est.final_total_cost);
-            var depositPercent = NormalizePercent(paymentTerms.deposit_percent);
-
-            var depositActual = Convert.ToInt32(Math.Round(
-                finalTotal * depositPercent / 100m,
-                0,
-                MidpointRounding.AwayFromZero));
+            var depositActual = GetDepositAmount(est);
 
             var remaining = finalTotal - depositActual;
             return remaining > 0 ? remaining : 0;
         }
 
-        public static decimal GetDepositDisplayAmount(cost_estimate est, PaymentTermsConfig paymentTerms)
+        public static decimal GetDepositDisplayAmount(cost_estimate est)
         {
-            return GetDepositAmount(est, paymentTerms);
+            return GetDepositAmount(est);
         }
 
-        public static decimal GetRemainingDisplayAmount(cost_estimate est, PaymentTermsConfig paymentTerms)
+        public static decimal GetRemainingDisplayAmount(cost_estimate est)
         {
-            return GetRemainingAmount(est, paymentTerms);
+            return GetRemainingAmount(est);
         }
 
         public static int ToGatewayAmount(int actualAmount, IConfiguration config)
@@ -65,13 +58,6 @@ namespace AMMS.Application.Helpers
                     : 100;
 
             return Math.Max(1, actualAmount / divider);
-        }
-
-        private static decimal NormalizePercent(decimal value)
-        {
-            if (value < 0) return 0;
-            if (value > 100) return 100;
-            return value;
         }
 
         private static int NormalizeMoneyToInt(object? value)

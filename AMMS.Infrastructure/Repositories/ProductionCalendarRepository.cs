@@ -106,5 +106,67 @@ namespace AMMS.Infrastructure.Repositories
 
         private static DateTime ToUnspecified(DateTime value)
             => DateTime.SpecifyKind(value, DateTimeKind.Unspecified);
+
+        public async Task<int> UpsertRangeAsync(
+    DateTime from,
+    DateTime to,
+    string? holidayName,
+    string holidayType,
+    bool isNonWorkingDay,
+    bool isManualOverride,
+    string? note,
+    DateTime createdAt,
+    DateTime updatedAt,
+    CancellationToken ct = default)
+        {
+            var fromDate = ToUnspecifiedDate(from);
+            var toDate = ToUnspecifiedDate(to);
+
+            if (toDate < fromDate)
+                (fromDate, toDate) = (toDate, fromDate);
+
+            var existingRows = await _db.production_calendars
+                .Where(x => x.calendar_date >= fromDate && x.calendar_date <= toDate)
+                .ToListAsync(ct);
+
+            var existingMap = existingRows.ToDictionary(x => x.calendar_date.Date);
+
+            var count = 0;
+
+            for (var date = fromDate; date <= toDate; date = date.AddDays(1))
+            {
+                var key = date.Date;
+
+                if (existingMap.TryGetValue(key, out var existing))
+                {
+                    existing.holiday_name = holidayName;
+                    existing.holiday_type = holidayType;
+                    existing.is_non_working_day = isNonWorkingDay;
+                    existing.is_manual_override = isManualOverride;
+                    existing.note = note;
+                    existing.updated_at = ToUnspecified(updatedAt);
+                }
+                else
+                {
+                    var entity = new production_calendar
+                    {
+                        calendar_date = ToUnspecifiedDate(date),
+                        holiday_name = holidayName,
+                        holiday_type = holidayType,
+                        is_non_working_day = isNonWorkingDay,
+                        is_manual_override = isManualOverride,
+                        note = note,
+                        created_at = ToUnspecified(createdAt),
+                        updated_at = ToUnspecified(updatedAt)
+                    };
+
+                    await _db.production_calendars.AddAsync(entity, ct);
+                }
+
+                count++;
+            }
+
+            return count;
+        }
     }
 }
