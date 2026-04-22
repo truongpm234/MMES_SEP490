@@ -78,6 +78,7 @@ namespace AMMS.Application.Helpers
                 ["{{REQUEST_ID}}"] = request.order_request_id.ToString(),
 
                 ["{{PRODUCT_NAME}}"] = request.product_name ?? "",
+                ["{{CUSTOMER_SIGN_NAME}}"] = request.customer_name ?? "",
                 ["{{PRODUCT_SPEC}}"] = BuildProductSpec(request, estimate),
                 ["{{QUANTITY}}"] = FormatNumber(request.quantity ?? 0),
 
