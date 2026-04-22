@@ -98,9 +98,7 @@ public partial class cost_estimate
     public string? production_processes { get; set; }
 
     [Column(TypeName = "numeric(18,2)")]
-    [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
-
-    public decimal deposit_amount { get; private set; }
+    public decimal deposit_amount { get; set; }
 
     [Column("previous_estimate_id")]
     public int? previous_estimate_id { get; set; }

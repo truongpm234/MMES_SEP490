@@ -175,6 +175,7 @@ namespace AMMS.Application.Services
             SetIfHasValue(req.discount_percent, v => entity.discount_percent = v);
             SetIfHasValue(req.discount_amount, v => entity.discount_amount = v);
             SetIfHasValue(req.final_total_cost, v => entity.final_total_cost = v);
+            SetIfHasValue<decimal>(req.deposit_amount, v => entity.deposit_amount = v);
 
             SetIfHasValue(req.sheets_required, v => entity.sheets_required = v);
             SetIfHasValue(req.sheets_waste, v => entity.sheets_waste = v);

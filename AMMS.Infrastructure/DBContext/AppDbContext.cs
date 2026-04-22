@@ -480,9 +480,7 @@ public partial class AppDbContext : DbContext
 
             entity.Property(x => x.deposit_amount)
                 .HasColumnName("deposit_amount")
-                .HasColumnType("numeric(18,2)")
-                .HasComputedColumnSql("ROUND(final_total_cost * 0.30, 0)", stored: true)
-                .ValueGeneratedOnAddOrUpdate();
+                .HasColumnType("numeric(18,2)");
 
             entity.Property(x => x.deposit_amount).Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
             entity.Property(x => x.deposit_amount).Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Ignore);

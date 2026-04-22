@@ -69,6 +69,7 @@ namespace AMMS.Shared.DTOs.Estimates
         public int? sheets_waste { get; set; }
         public int? sheets_total { get; set; }
         public int? n_up { get; set; }
+        public decimal deposit_amount { get; set; }
         public decimal? total_area_m2 { get; set; }
 
         // ----- Thiết kế -----
