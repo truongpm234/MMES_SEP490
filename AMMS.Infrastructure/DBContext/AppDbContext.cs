@@ -482,9 +482,6 @@ public partial class AppDbContext : DbContext
                 .HasColumnName("deposit_amount")
                 .HasColumnType("numeric(18,2)");
 
-            entity.Property(x => x.deposit_amount).Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
-            entity.Property(x => x.deposit_amount).Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Ignore);
-
             entity.Property(e => e.previous_estimate_id)
                 .HasColumnName("previous_estimate_id");
 

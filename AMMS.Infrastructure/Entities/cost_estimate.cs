@@ -159,7 +159,6 @@ public partial class cost_estimate
     [Column("wave_cost", TypeName = "numeric(18,2)")]
     public decimal? wave_cost { get; set; }
 
-
     [Column("total_process_cost", TypeName = "numeric(18,2)")]
     public decimal? total_process_cost { get; set; }
 
