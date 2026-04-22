@@ -37,6 +37,9 @@ namespace AMMS.Application.Services
             if (!prod.order_id.HasValue)
                 throw new InvalidOperationException("Production chưa gắn với order.");
 
+            if (!prod.status.Equals("Scheduled", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Quá trình sản xuất chưa được quản lí phê duyệt bắt đầu.");
+
             var order = await _db.orders
                 .AsNoTracking()
                 .FirstOrDefaultAsync(x => x.order_id == prod.order_id.Value, ct);

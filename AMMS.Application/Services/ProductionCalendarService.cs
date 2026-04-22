@@ -218,5 +218,45 @@ namespace AMMS.Application.Services
         {
             return _repo.GetAllDate();
         }
+
+        public async Task<int> CreateRangeAsync(CreateProductionCalendarRangeRequest dto, CancellationToken ct = default)
+        {
+            if (dto == null)
+                throw new ArgumentException("Payload is required");
+
+            if (dto.from_date == default)
+                throw new ArgumentException("from_date is required");
+
+            if (dto.to_date == default)
+                throw new ArgumentException("to_date is required");
+
+            var fromDate = ToVnDate(dto.from_date);
+            var toDate = ToVnDate(dto.to_date);
+
+            if (toDate < fromDate)
+                throw new ArgumentException("to_date must be greater than or equal to from_date");
+
+            var holidayName = NormalizeNullable(dto.holiday_name, 255, "holiday_name");
+            var holidayType = NormalizeRequiredOrDefault(dto.holiday_type, 50, "MANUAL");
+            var note = NormalizeNullable(dto.note, null, "note");
+            var isManualOverride = dto.is_manual_override ?? true;
+
+            var now = AppTime.NowVnUnspecified();
+
+            var totalDays = await _repo.UpsertRangeAsync(
+                from: fromDate,
+                to: toDate,
+                holidayName: holidayName,
+                holidayType: holidayType,
+                isNonWorkingDay: dto.is_non_working_day,
+                isManualOverride: isManualOverride,
+                note: note,
+                createdAt: now,
+                updatedAt: now,
+                ct: ct);
+
+            await _repo.SaveChangesAsync(ct);
+            return totalDays;
+        }
     }
 }

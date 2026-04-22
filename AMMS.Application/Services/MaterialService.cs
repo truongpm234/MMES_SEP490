@@ -79,5 +79,9 @@ namespace AMMS.Application.Services
 
             return await _materialRepository.DecreaseStockAsync(materialId, quantity);
         }
+
+        public Task<PagedResultLite<MaterialStockAlertDto>> GetMaterialStockAlertsPagedAsync(
+    int page, int pageSize, decimal nearMinThresholdPercent = 0.2m, CancellationToken ct = default) =>
+    _materialRepository.GetMaterialStockAlertsPagedAsync(page, pageSize, nearMinThresholdPercent, ct);
     }
 }

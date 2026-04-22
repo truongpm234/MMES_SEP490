@@ -69,23 +69,28 @@ namespace AMMS.Application.Helpers
                 ["{{CONTRACT_DAY}}"] = signDate.Day.ToString(),
                 ["{{CONTRACT_MONTH}}"] = signDate.Month.ToString(),
                 ["{{CONTRACT_YEAR}}"] = signDate.Year.ToString(),
+
                 ["{{CUSTOMER_NAME}}"] = request.customer_name ?? "",
                 ["{{CUSTOMER_ADDRESS}}"] = request.detail_address ?? "",
                 ["{{CUSTOMER_PHONE}}"] = request.customer_phone ?? "",
                 ["{{CUSTOMER_REPRESENTATIVE}}"] = request.customer_name ?? "",
-                ["{{CUSTOMER_SIGN_NAME}}"] = request.customer_name ?? "",
+
                 ["{{REQUEST_ID}}"] = request.order_request_id.ToString(),
+
                 ["{{PRODUCT_NAME}}"] = request.product_name ?? "",
                 ["{{PRODUCT_SPEC}}"] = BuildProductSpec(request, estimate),
                 ["{{QUANTITY}}"] = FormatNumber(request.quantity ?? 0),
+
                 ["{{SUBTOTAL_BEFORE_VAT}}"] = FormatNumber(amounts.SubtotalBeforeVat),
                 ["{{VAT_PERCENT}}"] = amounts.VatPercent.ToString("0.##", CultureInfo.InvariantCulture),
                 ["{{VAT_AMOUNT}}"] = FormatNumber(amounts.VatAmount),
                 ["{{FINAL_TOTAL_COST}}"] = FormatNumber(amounts.FinalTotalCost),
                 ["{{FINAL_TOTAL_COST_TEXT}}"] = NumberToVietnameseText(
                     (long)Math.Round(amounts.FinalTotalCost, 0, MidpointRounding.AwayFromZero)),
+
                 ["{{DELIVERY_DATE}}"] = FormatDate(request.delivery_date ?? estimate.desired_delivery_date),
                 ["{{DELIVERY_ADDRESS}}"] = request.detail_address ?? "",
+
                 ["{{DEPOSIT_AMOUNT}}"] = FormatNumber(amounts.DepositAmount),
                 ["{{REMAINING_AMOUNT}}"] = FormatNumber(amounts.RemainingAmount)
             };

@@ -11,12 +11,13 @@ namespace AMMS.Application.Interfaces
         Task<List<production_calendar>> GetAllDate();
         Task<List<ProductionCalendarDto>> GetRangeAsync(DateTime from, DateTime to, CancellationToken ct = default);
 
-        Task CreateAsync(CreateProductionCalendarRequest dto, CancellationToken ct = default); // thêm
-        Task<bool> UpdateAsync(DateTime date, UpdateProductionCalendarRequest dto, CancellationToken ct = default); // thêm
-        Task<bool> UpdateNonWorkingDayAsync(DateTime date, bool isNonWorkingDay, CancellationToken ct = default); // thêm
-        Task<bool> UpdateManualOverrideAsync(DateTime date, bool isManualOverride, CancellationToken ct = default); // thêm
+        Task CreateAsync(CreateProductionCalendarRequest dto, CancellationToken ct = default); 
+        Task<bool> UpdateAsync(DateTime date, UpdateProductionCalendarRequest dto, CancellationToken ct = default); 
+        Task<bool> UpdateNonWorkingDayAsync(DateTime date, bool isNonWorkingDay, CancellationToken ct = default); 
+        Task<bool> UpdateManualOverrideAsync(DateTime date, bool isManualOverride, CancellationToken ct = default); 
 
         Task UpsertAsync(ProductionCalendarDto dto, CancellationToken ct = default);
         Task<bool> DeleteAsync(DateTime date, CancellationToken ct = default);
+        Task<int> CreateRangeAsync(CreateProductionCalendarRangeRequest dto, CancellationToken ct = default);
     }
 }

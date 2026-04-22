@@ -467,9 +467,7 @@ namespace AMMS.Infrastructure.Repositories
 
             var finalCost = est?.final_total_cost ?? order.total_amount ?? 0m;
 
-            var depositFallback = est != null
-                ? est.deposit_amount
-                : Math.Round(finalCost * 0.30m, 0);
+            var depositFallback = est?.deposit_amount ?? 0m;
 
             object? quoteFields = null;
 
