@@ -5,11 +5,6 @@ using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Orders;
 using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace AMMS.Infrastructure.Repositories
 {
@@ -75,11 +70,11 @@ namespace AMMS.Infrastructure.Repositories
                 _db.missing_materials.RemoveRange(_db.missing_materials);
                 await _db.SaveChangesAsync(ct);
 
-                // 2) chỉ tính cho order thiếu vật liệu
+                // 2) chỉ tính cho order thiếu vật liệu và status = "Accepted"
                 var orderIds = await _db.orders.AsNoTracking()
                     .Where(o =>
-                        o.is_enough == null || o.is_enough == false ||
-                        (o.status != null && (o.status == "Not Enough" || o.status == "Not enough")))
+                        o.status == "Accepted" &&
+                        (o.is_enough == null || o.is_enough == false))
                     .Select(o => o.order_id)
                     .Distinct()
                     .ToListAsync(ct);
