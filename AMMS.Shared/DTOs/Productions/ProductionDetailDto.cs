@@ -40,6 +40,9 @@ namespace AMMS.Shared.DTOs.Productions
         public DateTime? created_at { get; set; }
         public DateTime? planned_start_date { get; set; }
         public DateTime? actual_start_date { get; set; }
+        public int? lamination_material_id { get; set; }
+        public string? lamination_material_code { get; set; }
+        public string? lamination_material_name { get; set; }
         public List<ProductionStageDto> stages { get; set; } = new();
     }
 }

@@ -25,6 +25,11 @@ namespace AMMS.Application.Services
             return await _materialRepository.GetAll();
         }
 
+        public async Task<List<material>> GetMaterialByTypeMangAsync()
+        {
+            return await _materialRepository.GetMaterialByTypeMangAsync();
+        }
+
         public async Task<material?> GetByIdAsync(int id)
         {
             return await _materialRepository.GetByIdAsync(id);

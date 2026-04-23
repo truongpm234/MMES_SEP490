@@ -49,6 +49,16 @@ namespace AMMS.Infrastructure.Repositories
                 .Where(m => m.type != null && m.type == "Sóng")
                 .ToListAsync();
         }
+
+        public async Task<List<material>> GetMaterialByTypeMangAsync()
+        {
+            return await _db.materials
+                .AsNoTracking()
+                .Where(m => m.type != null && m.type == "Màng")
+                .OrderBy(m => m.name)
+                .ToListAsync();
+        }
+
         public async Task<PagedResultLite<MaterialShortageDto>> GetShortageForAllOrdersPagedAsync(
      int page,
      int pageSize,
@@ -422,25 +432,37 @@ namespace AMMS.Infrastructure.Repositories
                     on q.order_request_id equals r.order_request_id into rj
                 from r in rj.DefaultIfEmpty()
 
-                join ce in _db.cost_estimates.AsNoTracking().Where(x => x.is_active)
-                    on r.order_request_id equals ce.order_request_id into cej
-                from ce in cej
-                    .OrderByDescending(x => x.estimate_id)
-                    .Take(1)
-                    .DefaultIfEmpty()
-
                 where o.order_id == orderId
-                select new { o, r, ce }
+                select new { o, r }
             ).FirstOrDefaultAsync(ct);
 
-            if (header == null || header.r == null || header.ce == null)
+            if (header == null || header.r == null)
                 return null;
 
             var o1 = header.o;
             var r1 = header.r;
-            var ce1 = header.ce;
 
-            var paperCode = ce1.paper_code;
+            cost_estimate? ce1 = null;
+
+            if (r1.accepted_estimate_id.HasValue && r1.accepted_estimate_id.Value > 0)
+            {
+                ce1 = await _db.cost_estimates
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x =>
+                        x.estimate_id == r1.accepted_estimate_id.Value &&
+                        x.order_request_id == r1.order_request_id, ct);
+            }
+
+            ce1 ??= await _db.cost_estimates
+                .AsNoTracking()
+                .Where(x => x.order_request_id == r1.order_request_id)
+                .OrderByDescending(x => x.is_active)
+                .ThenByDescending(x => x.estimate_id)
+                .FirstOrDefaultAsync(ct);
+
+            if (ce1 == null)
+                return null;
+
             var displayPaperCode = EstimateMaterialAlternativeHelper.ResolvePaperCode(
                 ce1.paper_alternative,
                 ce1.paper_code);
@@ -449,36 +471,46 @@ namespace AMMS.Infrastructure.Repositories
                 ce1.wave_alternative,
                 ce1.wave_type);
 
-            var paperName = ce1.paper_name;
+            string? paperName = ce1.paper_name;
 
             if (!string.IsNullOrWhiteSpace(displayPaperCode))
             {
-                var pm = await _db.materials.AsNoTracking()
+                paperName = await _db.materials.AsNoTracking()
                     .Where(m => m.code == displayPaperCode)
-                    .Select(m => new { m.code, m.name, m.unit })
-                    .FirstOrDefaultAsync(ct);
-
-                if (pm != null)
-                    paperName = pm.name;
-                else
-                    paperName = displayPaperCode;
+                    .Select(m => m.name)
+                    .FirstOrDefaultAsync(ct) ?? ce1.paper_name ?? displayPaperCode;
             }
-            if (!string.IsNullOrWhiteSpace(paperCode))
+
+            string? displayLaminationCode = ce1.lamination_material_code;
+            string? displayLaminationName = ce1.lamination_material_name;
+
+            if (ce1.lamination_material_id.HasValue && string.IsNullOrWhiteSpace(displayLaminationName))
             {
-                var pm = await _db.materials.AsNoTracking()
-                    .Where(m => m.code == paperCode)
-                    .Select(m => new { m.code, m.name, m.unit })
+                var laminationMat = await _db.materials
+                    .AsNoTracking()
+                    .Where(x => x.material_id == ce1.lamination_material_id.Value)
+                    .Select(x => new { x.code, x.name })
                     .FirstOrDefaultAsync(ct);
 
-                if (pm != null)
+                if (laminationMat != null)
                 {
-                    paperName = pm.name;
+                    displayLaminationCode ??= laminationMat.code;
+                    displayLaminationName ??= laminationMat.name;
                 }
+            }
+
+            if (string.IsNullOrWhiteSpace(displayLaminationName) &&
+                !string.IsNullOrWhiteSpace(displayLaminationCode))
+            {
+                displayLaminationName = await _db.materials
+                    .AsNoTracking()
+                    .Where(x => x.code == displayLaminationCode)
+                    .Select(x => x.name)
+                    .FirstOrDefaultAsync(ct) ?? displayLaminationCode;
             }
 
             var items = new List<OrderMaterialLineDto>();
 
-            // PAPER
             if (ce1.sheets_total > 0)
             {
                 items.Add(new OrderMaterialLineDto
@@ -491,12 +523,11 @@ namespace AMMS.Infrastructure.Repositories
                 });
             }
 
-            // INK
             if (ce1.ink_weight_kg > 0)
             {
                 items.Add(new OrderMaterialLineDto
                 {
-                    material_group = "Mực in các loại",
+                    material_group = "Mực in",
                     material_code = "INK",
                     material_name = "Mực in",
                     unit = "kg",
@@ -504,7 +535,6 @@ namespace AMMS.Infrastructure.Repositories
                 });
             }
 
-            // COATING GLUE
             if (ce1.coating_glue_weight_kg > 0)
             {
                 items.Add(new OrderMaterialLineDto
@@ -517,7 +547,6 @@ namespace AMMS.Infrastructure.Repositories
                 });
             }
 
-            // MOUNTING GLUE
             if (ce1.mounting_glue_weight_kg > 0)
             {
                 items.Add(new OrderMaterialLineDto
@@ -528,20 +557,6 @@ namespace AMMS.Infrastructure.Repositories
                     unit = "kg",
                     quantity = ce1.mounting_glue_weight_kg
                 });
-            }
-
-            // LAMINATION
-            string? displayLaminationCode = ce1.lamination_material_code;
-            string? displayLaminationName = ce1.lamination_material_name;
-
-            if (string.IsNullOrWhiteSpace(displayLaminationName) &&
-                !string.IsNullOrWhiteSpace(displayLaminationCode))
-            {
-                displayLaminationName = await _db.materials
-                    .AsNoTracking()
-                    .Where(x => x.code == displayLaminationCode)
-                    .Select(x => x.name)
-                    .FirstOrDefaultAsync(ct) ?? displayLaminationCode;
             }
 
             if (ce1.lamination_weight_kg > 0)
@@ -556,16 +571,15 @@ namespace AMMS.Infrastructure.Repositories
                 });
             }
 
-            // WAVE
             if (!string.IsNullOrWhiteSpace(displayWaveType))
             {
                 items.Add(new OrderMaterialLineDto
                 {
-                    material_group = "Loại sóng",
+                    material_group = "Sóng carton",
                     material_code = displayWaveType,
                     material_name = $"Sóng {displayWaveType}",
-                    unit = "Tờ",
-                    quantity = (int)ce1.wave_sheets_used
+                    unit = "tờ",
+                    quantity = ce1.wave_sheets_used ?? 0
                 });
             }
 

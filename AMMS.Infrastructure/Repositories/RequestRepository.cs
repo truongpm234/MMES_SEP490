@@ -299,6 +299,9 @@ namespace AMMS.Infrastructure.Repositories
                     paper_alternative = ce != null ? ce.paper_alternative : null,
                     wave_alternative = ce != null ? ce.wave_alternative : null,
                     assign_name = r.assign_name,
+                    lamination_material_id = ce != null ? ce.lamination_material_id : null,
+                    lamination_material_code = ce != null ? ce.lamination_material_code : null,
+                    lamination_material_name = ce != null ? ce.lamination_material_name : null,
                 }
             )
             .Skip(skip)
@@ -413,6 +416,9 @@ namespace AMMS.Infrastructure.Repositories
                     paper_alternative = ce != null ? ce.paper_alternative : null,
                     wave_alternative = ce != null ? ce.wave_alternative : null,
                     assign_name = r.assign_name,
+                    lamination_material_id = ce != null ? ce.lamination_material_id : null,
+                    lamination_material_code = ce != null ? ce.lamination_material_code : null,
+                    lamination_material_name = ce != null ? ce.lamination_material_name : null,
                 }
             ).FirstOrDefaultAsync();
         }
@@ -745,7 +751,10 @@ namespace AMMS.Infrastructure.Repositories
                     wave_cost = ce != null ? ce.wave_cost : null,
                     total_process_cost = ce != null ? ce.total_process_cost : null,
                     ink_type_names = ce != null ? ce.ink_type_names : null,
-                    alternative_material_reason = ce != null ? ce.alternative_material_reason : null
+                    alternative_material_reason = ce != null ? ce.alternative_material_reason : null,
+                    lamination_material_id = ce != null ? ce.lamination_material_id : null,
+                    lamination_material_code = ce != null ? ce.lamination_material_code : null,
+                    lamination_material_name = ce != null ? ce.lamination_material_name : null,
                 };
 
             var list = await query
@@ -924,7 +933,9 @@ namespace AMMS.Infrastructure.Repositories
                         vat_amount = vatAmount,
                         consultant_contract_path = SafeText(ce.consultant_contract_path),
                         customer_signed_contract_path = SafeText(ce.customer_signed_contract_path),
-
+                        lamination_material_id = ce.lamination_material_id,
+                        lamination_material_code = ce.lamination_material_code,
+                        lamination_material_name = ce.lamination_material_name,
                         process_cost = ce.process_costs
                             .OrderBy(pc => pc.process_cost_id)
                             .Select(pc => new ProcessCostDetailDto
@@ -1033,6 +1044,9 @@ namespace AMMS.Infrastructure.Repositories
                     wave_unit_price = e.wave_unit_price,
                     wave_cost = e.wave_cost,
                     total_process_cost = e.total_process_cost,
+                    lamination_material_id = e.lamination_material_id,
+                    lamination_material_code = e.lamination_material_code,
+                    lamination_material_name = e.lamination_material_name,
                     process_costs = e.process_costs
     .OrderBy(pc => pc.process_code)
     .Select(pc => new EstimateProcessCostDto

@@ -96,6 +96,9 @@ namespace AMMS.Shared.DTOs.Requests
         public decimal? wave_unit_price { get; set; }
         public decimal? wave_cost { get; set; }
         public decimal? total_process_cost { get; set; }
+        public int? lamination_material_id { get; set; }
+        public string? lamination_material_code { get; set; }
+        public string? lamination_material_name { get; set; }
         public List<EstimateProcessCostDto> process_costs { get; set; } = new();
     }
 }

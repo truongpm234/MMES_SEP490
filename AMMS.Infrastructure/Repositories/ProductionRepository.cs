@@ -453,7 +453,9 @@ namespace AMMS.Infrastructure.Repositories
             dto.coating_type = estimate?.coating_type;
             dto.paper_alternative = estimate?.paper_alternative;
             dto.wave_alternative = estimate?.wave_alternative;
-
+            dto.lamination_material_id = estimate?.lamination_material_id;
+            dto.lamination_material_code = estimate?.lamination_material_code;
+            dto.lamination_material_name = estimate?.lamination_material_name;
             decimal estInkWeightKg = 0m;
             if (header.first_item?.i_ink_weight_kg.HasValue == true)
                 estInkWeightKg = header.first_item.i_ink_weight_kg.Value;

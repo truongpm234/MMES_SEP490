@@ -21,5 +21,6 @@ namespace AMMS.Application.Interfaces
         Task<bool> DecreaseStockAsync(int materialId, decimal quantity);
         Task<PagedResultLite<MaterialStockAlertDto>> GetMaterialStockAlertsPagedAsync( int page, int pageSize, decimal nearMinThresholdPercent = 0.2m, CancellationToken ct = default);
         Task<OrderMaterialsResponse?> GetMaterialsByOrderIdAsync(int orderId, CancellationToken ct = default);
+        Task<List<material>> GetMaterialByTypeMangAsync();
     }
 }

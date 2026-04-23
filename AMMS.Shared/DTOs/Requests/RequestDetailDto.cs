@@ -59,7 +59,9 @@
         public decimal final_total_cost { get; set; }
         public decimal deposit_amount { get; set; }
         public bool is_active { get; set; }
-
+        public int? lamination_material_id { get; set; }
+        public string? lamination_material_code { get; set; }
+        public string? lamination_material_name { get; set; }
         public string paper_code { get; set; } = "";
         public string paper_name { get; set; } = "";
         public string coating_type { get; set; } = "";

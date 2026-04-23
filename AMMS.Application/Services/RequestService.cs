@@ -206,7 +206,6 @@ namespace AMMS.Application.Services
             var oldDeliveryDate = entity.delivery_date;
             var newDeliveryDate = ToDeliveryDate(req.delivery_date);
 
-            // ===== order_request =====
             entity.customer_name = req.customer_name ?? entity.customer_name;
             entity.customer_phone = req.customer_phone ?? entity.customer_phone;
             entity.customer_email = req.customer_email ?? entity.customer_email;
@@ -256,10 +255,6 @@ namespace AMMS.Application.Services
                     : req.delivery_date_change_reason.Trim();
             }
 
-            // giữ lại 3 field trong DTO để tương thích request từ FE/API
-            // province, district: hiện chưa có cột tương ứng trong bảng order_request nên chưa persist
-            // processing_status: hiện chưa dùng để ghi đè vì nghiệp vụ đang reset process_status = Pending sau khi sửa
-
             // ===== cost_estimate =====
             if (ce != null)
             {
@@ -304,7 +299,6 @@ namespace AMMS.Application.Services
                         : req.alternative_material_reason.Trim();
             }
 
-            // ===== reset approval flow sau khi sửa =====
             entity.process_status = "Pending";
             entity.verified_at = null;
             entity.quote_expires_at = null;
@@ -907,7 +901,7 @@ namespace AMMS.Application.Services
                 };
             }
 
-            var est = await _estimateRepo.GetByOrderRequestIdAsync(requestId);
+            var est = await ResolveEstimateForRequestAsync(req);
             if (est == null)
             {
                 return new ConvertRequestToOrderResponse
@@ -1493,12 +1487,20 @@ namespace AMMS.Application.Services
                 "KEO DẦU" => "KEO_PHU_DAU",
                 "KEO_DAU" => "KEO_PHU_DAU",
                 "KEO_PHU_DAU" => "KEO_PHU_DAU",
-                "MANG_CAN" => "MANG_12MIC",
-                "CAN_MANG" => "MANG_12MIC",
-                "LAMINATION" => "MANG_12MIC",
-                "MANG_12MIC" => "MANG_12MIC",
                 _ => c
             };
+        }
+
+        private async Task<cost_estimate?> ResolveEstimateForRequestAsync(order_request req, CancellationToken ct = default)
+        {
+            if (req.accepted_estimate_id.HasValue && req.accepted_estimate_id.Value > 0)
+            {
+                var accepted = await _estimateRepo.GetTrackingByIdAsync(req.accepted_estimate_id.Value, ct);
+                if (accepted != null && accepted.order_request_id == req.order_request_id)
+                    return accepted;
+            }
+
+            return await _estimateRepo.GetByOrderRequestIdAsync(req.order_request_id);
         }
 
         private int? GetActualConsultantUserId()

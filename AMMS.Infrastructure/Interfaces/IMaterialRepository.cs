@@ -13,6 +13,7 @@ namespace AMMS.Infrastructure.Interfaces
         Task UpdateAsync(material entity);
         Task SaveChangeAsync();
         Task<List<material>> GetMaterialByTypeSongAsync();
+        Task<List<material>> GetMaterialByTypeMangAsync();
         Task<PagedResultLite<MaterialShortageDto>> GetShortageForAllOrdersPagedAsync(
             int page, int pageSize, CancellationToken ct = default);
         Task<MaterialTypePaperDto> GetAllPaperTypeAsync();
