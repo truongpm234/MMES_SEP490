@@ -1,6 +1,7 @@
 ﻿using AMMS.Infrastructure.Entities;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Materials;
+using AMMS.Shared.DTOs.Orders;
 
 namespace AMMS.Infrastructure.Interfaces
 {
@@ -25,5 +26,6 @@ namespace AMMS.Infrastructure.Interfaces
     int pageSize,
     decimal nearMinThresholdPercent = 0.2m,
     CancellationToken ct = default);
+        Task<OrderMaterialsResponse?> GetMaterialsByOrderIdAsync(int orderId, CancellationToken ct = default);
     }
 }

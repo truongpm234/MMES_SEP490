@@ -539,6 +539,8 @@ namespace AMMS.Infrastructure.Repositories
                     sub_total,
                     discount_percent,
                     discount_amount,
+                    lamination_material_code = est.lamination_material_code,
+                    lamination_material_name = est.lamination_material_name,
                 };
             }
 
@@ -574,6 +576,10 @@ namespace AMMS.Infrastructure.Repositories
                 file_url = urlDesign,
                 contract_file = null,
 
+                lamination_material_id = est?.lamination_material_id,
+                lamination_material_code = est?.lamination_material_code,
+                lamination_material_name = est?.lamination_material_name,
+
                 quote_fields = quoteFields
             };
         }
@@ -585,7 +591,6 @@ namespace AMMS.Infrastructure.Repositories
             if (pageSize > 200) pageSize = 200;
         }
 
-        // ✅ CHANGED: Get ALL missing materials (NOT by orderId)
         public async Task<PagedResultLite<MissingMaterialDto>> GetAllMissingMaterialsAsync(
     int page,
     int pageSize,

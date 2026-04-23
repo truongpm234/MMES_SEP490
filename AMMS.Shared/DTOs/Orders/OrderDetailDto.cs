@@ -43,6 +43,9 @@ namespace AMMS.Shared.DTOs.Orders
 
         public bool layout_confirmed { get; set; }
 
+        public int? lamination_material_id { get; set; }
+        public string? lamination_material_code { get; set; }
+        public string? lamination_material_name { get; set; }
     }
 
 }

@@ -137,6 +137,46 @@ namespace AMMS.Application.Services
                 if (value != null) setter(value);
             }
 
+            var laminationMaterialIdInput =
+    req.lamination_material_id ?? previousEstimate?.lamination_material_id;
+
+            var laminationMaterialCodeInput =
+                !string.IsNullOrWhiteSpace(req.lamination_material_code)
+                    ? req.lamination_material_code.Trim()
+                    : previousEstimate?.lamination_material_code;
+
+            var laminationMaterialNameInput =
+                !string.IsNullOrWhiteSpace(req.lamination_material_name)
+                    ? req.lamination_material_name.Trim()
+                    : previousEstimate?.lamination_material_name;
+
+            var laminationSnapshot = await EstimateMaterialSnapshotHelper.ResolveAsync(
+                _materialRepo,
+                laminationMaterialIdInput,
+                laminationMaterialCodeInput,
+                laminationMaterialNameInput,
+                defaultName: "Màng cán",
+                defaultUnit: "kg");
+
+            if ((req.lamination_weight_kg ?? 0m) > 0m && laminationSnapshot?.material_id == null)
+            {
+                throw new ArgumentException(
+                    "Khi có màng cán, phải truyền lamination_material_id hoặc lamination_material_code hợp lệ.");
+            }
+
+            if (laminationSnapshot != null)
+            {
+                entity.lamination_material_id = laminationSnapshot.material_id;
+                entity.lamination_material_code = laminationSnapshot.code;
+                entity.lamination_material_name = laminationSnapshot.name;
+            }
+            else
+            {
+                entity.lamination_material_id = null;
+                entity.lamination_material_code = null;
+                entity.lamination_material_name = null;
+            }
+
             SetIfHasValue(req.paper_cost, v => entity.paper_cost = v);
             SetIfHasValue(req.paper_sheets_used, v => entity.paper_sheets_used = v);
             SetIfHasValue(req.paper_unit_price, v => entity.paper_unit_price = v);
@@ -497,6 +537,16 @@ namespace AMMS.Application.Services
                 resolvedWaveName = waveMaterial?.name ?? $"Sóng {resolvedWaveType}";
             }
 
+            var laminationSnapshot = await EstimateMaterialSnapshotHelper.ResolveAsync(
+    _materialRepo,
+    estimate.lamination_material_id,
+    estimate.lamination_material_code,
+    estimate.lamination_material_name,
+    defaultName: "Màng cán",
+    defaultUnit: "kg");
+
+            var laminationMaterial = laminationSnapshot?.material;
+
             var orderItems = await _orderRepo.GetOrderItemsByOrderIdAsync(request.order_id.Value, ct);
 
             foreach (var item in orderItems)
@@ -539,7 +589,28 @@ namespace AMMS.Application.Services
                 waveCodesToMatch.Add(estimate.wave_alternative.Trim());
             if (!string.IsNullOrWhiteSpace(resolvedWaveType))
                 waveCodesToMatch.Add(resolvedWaveType.Trim());
+            var laminationCodesToMatch = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            if (!string.IsNullOrWhiteSpace(estimate.lamination_material_code))
+                laminationCodesToMatch.Add(estimate.lamination_material_code.Trim());
+
+            if (!string.IsNullOrWhiteSpace(laminationSnapshot?.code))
+                laminationCodesToMatch.Add(laminationSnapshot.code.Trim());
+
+            laminationCodesToMatch.Add("MANG_12MIC");
+            laminationCodesToMatch.Add("MANG_CAN");
+            laminationCodesToMatch.Add("LAMINATION");
+
+            foreach (var bom in allBoms.Where(x =>
+                         laminationCodesToMatch.Contains((x.material_code ?? "").Trim()) ||
+                         string.Equals((x.material_name ?? "").Trim(), "Màng cán", StringComparison.OrdinalIgnoreCase) ||
+                         (x.material_name ?? "").Trim().StartsWith("Màng cán", StringComparison.OrdinalIgnoreCase)))
+            {
+                bom.material_id = laminationMaterial?.material_id;
+                bom.material_code = EstimateHelper.Trunc20(laminationSnapshot?.code ?? "LAMINATION");
+                bom.material_name = laminationSnapshot?.name ?? "Màng cán";
+                bom.unit = laminationSnapshot?.unit ?? "kg";
+            }
             foreach (var bom in allBoms.Where(x =>
                          waveCodesToMatch.Contains((x.material_code ?? "").Trim()) ||
                          (x.material_name ?? "").Trim().StartsWith("Sóng ", StringComparison.OrdinalIgnoreCase)))

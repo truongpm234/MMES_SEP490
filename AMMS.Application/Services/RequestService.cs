@@ -761,6 +761,9 @@ namespace AMMS.Application.Services
                     wave_unit_price = est.wave_unit_price,
                     wave_cost = est.wave_cost,
                     total_process_cost = est.total_process_cost,
+                    lamination_material_id = est.lamination_material_id,
+                    lamination_material_code = est.lamination_material_code,
+                    lamination_material_name = est.lamination_material_name,
                 };
 
                 if (est.process_costs != null && est.process_costs.Count > 0)
@@ -1026,10 +1029,15 @@ namespace AMMS.Application.Services
     "KEO_PHU_NUOC",
     "KEO_PHU_DAU");
 
-            var laminationMaterial = await ResolveMaterialByCodesAsync(
-                "MANG_12MIC",
-                "MANG_CAN",
-                "LAMINATION");
+            var laminationSnapshot = await EstimateMaterialSnapshotHelper.ResolveAsync(
+    _materialRepo,
+    est.lamination_material_id,
+    est.lamination_material_code,
+    est.lamination_material_name,
+    defaultName: "Màng cán",
+    defaultUnit: "kg");
+
+            var laminationMaterial = laminationSnapshot?.material;
 
             var mountingGlueMaterial = await ResolveMaterialByCodesAsync(
                 "KEO_BOI",
@@ -1107,11 +1115,11 @@ namespace AMMS.Application.Services
                 est.mounting_glue_weight_kg);
 
             AddBomLine(
-                laminationMaterial,
-                "MANG_CAN",
-                "Màng cán",
-                "kg",
-                est.lamination_weight_kg);
+    laminationMaterial,
+    laminationSnapshot?.code ?? "LAMINATION",
+    laminationSnapshot?.name ?? "Màng cán",
+    laminationSnapshot?.unit ?? "kg",
+    est.lamination_weight_kg);
 
             foreach (var line in bomLines)
             {

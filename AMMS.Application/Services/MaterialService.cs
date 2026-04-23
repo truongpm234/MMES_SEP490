@@ -4,6 +4,7 @@ using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Boms;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Materials;
+using AMMS.Shared.DTOs.Orders;
 
 namespace AMMS.Application.Services
 {
@@ -83,5 +84,9 @@ namespace AMMS.Application.Services
         public Task<PagedResultLite<MaterialStockAlertDto>> GetMaterialStockAlertsPagedAsync(
     int page, int pageSize, decimal nearMinThresholdPercent = 0.2m, CancellationToken ct = default) =>
     _materialRepository.GetMaterialStockAlertsPagedAsync(page, pageSize, nearMinThresholdPercent, ct);
+        public async Task<OrderMaterialsResponse?> GetMaterialsByOrderIdAsync(int orderId, CancellationToken ct = default)
+        {
+            return await _materialRepository.GetMaterialsByOrderIdAsync(orderId, ct);
+        }
     }
 }

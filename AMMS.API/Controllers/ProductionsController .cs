@@ -19,22 +19,22 @@ namespace AMMS.API.Controllers
     {
         private readonly IProductionService _service;
         private readonly IProductionSchedulingService _svc;
-        private readonly IOrderMaterialService _orderMaterialService;
         private readonly IBackgroundJobClient _backgroundJobClient;
         private readonly ILogger<ProductionsController> _logger;
+        private readonly IMaterialService _materialService;
 
         public ProductionsController(
     IProductionService service,
     IProductionSchedulingService svc,
-    IOrderMaterialService orderMaterialService,
     IBackgroundJobClient backgroundJobClient,
-    ILogger<ProductionsController> logger)
+    ILogger<ProductionsController> logger,
+    IMaterialService materialService)
         {
             _service = service;
             _svc = svc;
-            _orderMaterialService = orderMaterialService;
             _backgroundJobClient = backgroundJobClient;
             _logger = logger;
+            _materialService = materialService;
         }
 
         private int? GetRoleId()
@@ -119,7 +119,7 @@ namespace AMMS.API.Controllers
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<OrderMaterialsResponse>> Get(int orderId, CancellationToken ct)
         {
-            var res = await _orderMaterialService.GetMaterialsByOrderIdAsync(orderId, ct);
+            var res = await _materialService.GetMaterialsByOrderIdAsync(orderId, ct);
             if (res == null) return NotFound();
             return Ok(res);
         }

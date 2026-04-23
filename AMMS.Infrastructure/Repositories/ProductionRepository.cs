@@ -608,7 +608,10 @@ namespace AMMS.Infrastructure.Repositories
     paperName: estimate?.paper_name,
     waveType: estimate?.wave_type,
     coatingType: estimate?.coating_type,
-    inkTypeNames: estimate?.ink_type_names
+    inkTypeNames: estimate?.ink_type_names,
+    laminationMaterialCode: estimate?.lamination_material_code,
+laminationMaterialName: estimate?.lamination_material_name,
+estLaminationWeightKg: estimate?.lamination_weight_kg ?? 0m
 );
 
                 var stage = new ProductionStageDto
@@ -926,7 +929,10 @@ namespace AMMS.Infrastructure.Repositories
     string? paperName,
     string? waveType,
     string? coatingType,
-    string? inkTypeNames)
+    string? inkTypeNames,
+    string? laminationMaterialCode,
+string? laminationMaterialName,
+decimal estLaminationWeightKg)
         {
             var inputs = new List<StageMaterialDto>();
             var code = (processCode ?? "").Trim().ToUpperInvariant();
@@ -1082,10 +1088,18 @@ namespace AMMS.Infrastructure.Repositories
 
             if (code == "CAN")
             {
+                var resolvedLaminationCode = string.IsNullOrWhiteSpace(laminationMaterialCode)
+                    ? "LAMINATION"
+                    : laminationMaterialCode.Trim();
+
+                var resolvedLaminationName = string.IsNullOrWhiteSpace(laminationMaterialName)
+                    ? "Màng cán"
+                    : laminationMaterialName.Trim();
+
                 inputs.Add(ProductionSHelper.BuildStageMaterial(
-                    name: "Màng cán",
-                    code: "MANG_CAN",
-                    estimatedQty: 0m,
+                    name: resolvedLaminationName,
+                    code: resolvedLaminationCode,
+                    estimatedQty: estLaminationWeightKg > 0 ? estLaminationWeightKg : 0m,
                     actualQty: null,
                     unit: "kg"));
 

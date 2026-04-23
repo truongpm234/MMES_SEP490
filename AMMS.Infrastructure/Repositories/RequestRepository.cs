@@ -125,6 +125,10 @@ namespace AMMS.Infrastructure.Repositories
                 actual_consultant_user_id = request.actual_consultant_user_id,
                 deposit_receipt_path = request.deposit_receipt_path,
                 remaining_receipt_path = request.remaining_receipt_path,
+
+                lamination_material_id = estimate?.lamination_material_id,
+                lamination_material_code = estimate?.lamination_material_code,
+                lamination_material_name = estimate?.lamination_material_name,
             };
         }
 

@@ -167,6 +167,9 @@ namespace AMMS.Infrastructure.Repositories
                     cost_note = ce.cost_note,
                     deposit_amount = ce.deposit_amount,
                     estimate_waved_sheet_used = ce.wave_sheets_used,
+                    lamination_material_id = ce.lamination_material_id,
+                    lamination_material_code = ce.lamination_material_code,
+                    lamination_material_name = ce.lamination_material_name,
                 };
 
             return await q.ToListAsync(ct);

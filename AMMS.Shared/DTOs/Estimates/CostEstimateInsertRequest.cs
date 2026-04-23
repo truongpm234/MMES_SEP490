@@ -41,6 +41,9 @@ namespace AMMS.Shared.DTOs.Estimates
         public decimal? lamination_cost { get; set; }
         public decimal? lamination_weight_kg { get; set; }
         public decimal? lamination_rate_per_m2 { get; set; }
+        public int? lamination_material_id { get; set; }
+        public string? lamination_material_code { get; set; }
+        public string? lamination_material_name { get; set; }
 
         // ----- Tổng vật liệu / khấu hao -----
         public decimal? material_cost { get; set; }

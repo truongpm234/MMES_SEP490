@@ -306,8 +306,6 @@ builder.Services.AddScoped<IBaseConfigService, BaseConfigService>();
 builder.Services.AddScoped<IMissingMaterialService, MissingMaterialService>();
 builder.Services.AddScoped<IMissingMaterialRepository, MissingMaterialRepository>();
 builder.Services.AddScoped<IOrderPlanningService, OrderPlanningService>();
-builder.Services.AddScoped<IOrderMaterialRepository, OrderMaterialRepository>();
-builder.Services.AddScoped<IOrderMaterialService, OrderMaterialService>();
 builder.Services.AddScoped<IProductRepository, ProductRepository>();
 builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddScoped<NotificationsRepository>();
