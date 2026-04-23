@@ -22,7 +22,6 @@ namespace AMMS.Application.Helpers
 
     public static class PaymentReceiptDocxHelper
     {
-        // Hỗ trợ cả {{KEY}} và {{ KEY }}
         private static readonly Regex PlaceholderRegex =
             new(@"\{\{\s*([A-Za-z0-9_]+)\s*\}\}", RegexOptions.Compiled);
 

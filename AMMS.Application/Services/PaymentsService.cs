@@ -762,11 +762,11 @@ namespace AMMS.Application.Services
             if (payment == null)
                 return null;
 
-            if (!string.Equals(payment.status, "PAID", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(payment.status, "SUCCESS", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException("Payment has not been completed yet.");
-            }
+            //if (!string.Equals(payment.status, "PAID", StringComparison.OrdinalIgnoreCase) &&
+            //    !string.Equals(payment.status, "SUCCESS", StringComparison.OrdinalIgnoreCase))
+            //{
+            //    throw new InvalidOperationException("Payment has not been completed yet.");
+            //}
 
             var request = await _db.order_requests
                 .AsNoTracking()
@@ -808,7 +808,7 @@ namespace AMMS.Application.Services
                 .Where(x =>
                     x.order_request_id == request.order_request_id &&
                     x.provider == "PAYOS" &&
-                    (x.status == "PAID" || x.status == "SUCCESS"))
+                    (x.status == "PAID" || x.status == "SUCCESS" || x.status == "PENDING"))
                 .ToListAsync(ct);
 
             static DateTime GetSortTime(payment x)
@@ -901,7 +901,8 @@ namespace AMMS.Application.Services
         private static bool IsSuccessfulPaymentStatus(string? status)
         {
             return string.Equals(status, "PAID", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(status, "SUCCESS", StringComparison.OrdinalIgnoreCase);
+                || string.Equals(status, "SUCCESS", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status, "PENDING", StringComparison.OrdinalIgnoreCase);
         }
 
         private async Task TryGenerateAndPersistReceiptAsync(
@@ -929,8 +930,6 @@ namespace AMMS.Application.Services
                 if (request == null)
                     return;
 
-                // Dùng method hiện tại của bạn.
-                // Nếu sau này method này thật sự trả PDF thì code dưới vẫn dùng được.
                 var generated = await GenerateReceiptPdfByOrderCodeAsync(orderCode, ct);
 
                 if (generated == null)
