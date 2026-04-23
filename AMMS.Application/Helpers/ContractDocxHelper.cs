@@ -86,8 +86,7 @@ namespace AMMS.Application.Helpers
                 ["{{VAT_PERCENT}}"] = amounts.VatPercent.ToString("0.##", CultureInfo.InvariantCulture),
                 ["{{VAT_AMOUNT}}"] = FormatNumber(amounts.VatAmount),
                 ["{{FINAL_TOTAL_COST}}"] = FormatNumber(amounts.FinalTotalCost),
-                ["{{FINAL_TOTAL_COST_TEXT}}"] = NumberToVietnameseText(
-                    (long)Math.Round(amounts.FinalTotalCost, 0, MidpointRounding.AwayFromZero)),
+                ["{{FINAL_TOTAL_COST_TEXT}}"] = NumberToVietnameseText((long)Math.Round(amounts.FinalTotalCost, 0, MidpointRounding.AwayFromZero)),
 
                 ["{{DELIVERY_DATE}}"] = FormatDate(request.delivery_date ?? estimate.desired_delivery_date),
                 ["{{DELIVERY_ADDRESS}}"] = request.detail_address ?? "",
