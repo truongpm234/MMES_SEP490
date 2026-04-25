@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace AMMS.Shared.DTOs.Productions
+﻿namespace AMMS.Shared.DTOs.Productions
 {
     public class ProducingOrderCardDto
     {
@@ -21,6 +15,7 @@ namespace AMMS.Shared.DTOs.Productions
         public string? stage_status { get; set; } = null;
         public DateTime? planned_start_date { get; set; }
         public DateTime? actual_start_date { get; set; }
+        public bool? is_production_ready { get; set; }
         public List<ProductionStageStatusDto> stage_statuses { get; set; } = new();
         public List<string> stages { get; set; } = new();
 
