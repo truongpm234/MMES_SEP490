@@ -10,7 +10,7 @@ namespace AMMS.Shared.DTOs.Productions
     {
         public int material_id { get; set; }
         public decimal quantity_used { get; set; }
-        public bool is_stock { get; set; }
+        public bool is_stock { get; set; } = true;
         public decimal quantity_left { get; set; }
     }
 }

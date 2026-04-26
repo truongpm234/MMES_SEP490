@@ -62,9 +62,13 @@ namespace AMMS.Application.Services
 
             var taskId = payload.task_id;
             var qtyGood = payload.qty_good;
-            var qrMaterials = NormalizeMaterialUsageInputs(payload.materials);
+
+            var rawQrMaterials = NormalizeMaterialUsageInputs(payload.materials);
 
             var expectedMaterials = await GetConsumableMaterialsForTaskAsync(taskId, ct);
+
+            var qrMaterials = BuildReportMaterialUsageInputs(expectedMaterials, rawQrMaterials);
+
             ValidateMaterialUsageInput(expectedMaterials, qrMaterials);
 
             var materialUsageSnapshot = BuildMaterialUsageSnapshot(expectedMaterials, qrMaterials);
@@ -1064,6 +1068,7 @@ namespace AMMS.Application.Services
         {
             return await GetConsumableMaterialsForTaskAsync(taskId, ct);
         }
+
         public async Task ValidateMaterialUsageForQrAsync(
     int taskId,
     List<TaskMaterialUsageInputDto> materials,
@@ -1072,7 +1077,10 @@ namespace AMMS.Application.Services
             var normalized = NormalizeMaterialUsageInputs(materials);
 
             var expectedMaterials = await GetConsumableMaterialsForTaskAsync(taskId, ct);
-            ValidateMaterialUsageInput(expectedMaterials, normalized);
+
+            var resolved = BuildReportMaterialUsageInputs(expectedMaterials, normalized);
+
+            ValidateMaterialUsageInput(expectedMaterials, resolved);
         }
 
         private static List<TaskMaterialUsageInputDto> NormalizeMaterialUsageInputs(
@@ -1087,6 +1095,98 @@ namespace AMMS.Application.Services
                     is_stock = x.is_stock
                 })
                 .ToList();
+        }
+
+        public async Task<List<TaskMaterialUsageInputDto>> BuildMaterialUsageForQrAsync(
+            int taskId,
+            List<TaskMaterialUsageInputDto>? materials,
+            CancellationToken ct = default)
+        {
+            var normalized = NormalizeMaterialUsageInputs(materials);
+
+            var expectedMaterials = await GetConsumableMaterialsForTaskAsync(taskId, ct);
+
+            var resolved = BuildReportMaterialUsageInputs(expectedMaterials, normalized);
+
+            ValidateMaterialUsageInput(expectedMaterials, resolved);
+
+            return resolved;
+        }
+
+        private static List<TaskMaterialUsageInputDto> BuildReportMaterialUsageInputs(
+    List<TaskConsumableMaterialDto> expectedMaterials,
+    List<TaskMaterialUsageInputDto> inputMaterials)
+        {
+            if (expectedMaterials.Any(x => !x.is_mapped))
+            {
+                var unmapped = string.Join(", ",
+                    expectedMaterials
+                        .Where(x => !x.is_mapped)
+                        .Select(x => x.material_code));
+
+                throw new InvalidOperationException(
+                    $"Có NVL chưa map sang materials: {unmapped}. Không thể tạo QR/finish task.");
+            }
+
+            if (expectedMaterials.Count == 0)
+            {
+                if (inputMaterials != null && inputMaterials.Count > 0)
+                    throw new InvalidOperationException("Task này không yêu cầu nhập NVL.");
+
+                return new List<TaskMaterialUsageInputDto>();
+            }
+
+            if (inputMaterials == null || inputMaterials.Count == 0)
+                throw new InvalidOperationException("Bắt buộc nhập danh sách NVL dư khi báo cáo công đoạn.");
+
+            if (inputMaterials.Count != expectedMaterials.Count)
+                throw new InvalidOperationException("Số lượng NVL nhập vào không khớp với số NVL ước tính.");
+
+            var duplicated = inputMaterials
+                .GroupBy(x => x.material_id)
+                .Any(g => g.Count() > 1);
+
+            if (duplicated)
+                throw new InvalidOperationException("Danh sách NVL bị trùng material_id.");
+
+            var result = new List<TaskMaterialUsageInputDto>();
+
+            foreach (var expected in expectedMaterials)
+            {
+                if (!expected.material_id.HasValue || expected.material_id.Value <= 0)
+                    throw new InvalidOperationException($"NVL {expected.material_code} chưa có material_id hợp lệ.");
+
+                var input = inputMaterials.FirstOrDefault(x => x.material_id == expected.material_id.Value);
+
+                if (input == null)
+                    throw new InvalidOperationException($"Thiếu dữ liệu NVL material_id={expected.material_id.Value}.");
+
+                if (input.quantity_left < 0)
+                    throw new InvalidOperationException(
+                        $"Số lượng NVL dư của {expected.material_code} không được nhỏ hơn 0.");
+
+                if (input.quantity_left > expected.estimated_input_qty)
+                {
+                    throw new InvalidOperationException(
+                        $"Số lượng NVL dư của {expected.material_code} vượt số lượng input ước tính. " +
+                        $"Left = {input.quantity_left}, Estimated = {expected.estimated_input_qty}");
+                }
+
+                var quantityLeft = Math.Round(input.quantity_left, 4);
+                var quantityUsed = expected.estimated_input_qty - quantityLeft;
+
+                if (quantityUsed < 0)
+                    quantityUsed = 0;
+
+                result.Add(new TaskMaterialUsageInputDto
+                {
+                    material_id = expected.material_id.Value,
+                    quantity_used = Math.Round(quantityUsed, 4),
+                    quantity_left = quantityLeft,
+                    is_stock = quantityLeft > 0 || input.is_stock
+                });
+            }
+            return result;
         }
     }
 }

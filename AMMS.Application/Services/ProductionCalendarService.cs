@@ -141,7 +141,6 @@ namespace AMMS.Application.Services
             return true;
         }
 
-        // Giữ code cũ của bạn
         public async Task UpsertAsync(ProductionCalendarDto dto, CancellationToken ct = default)
         {
             if (dto.calendar_date == default)

@@ -17,5 +17,9 @@ namespace AMMS.Application.Interfaces
             int taskId,
             List<TaskMaterialUsageInputDto> materials,
             CancellationToken ct = default);
+        Task<List<TaskMaterialUsageInputDto>> BuildMaterialUsageForQrAsync(
+    int taskId,
+    List<TaskMaterialUsageInputDto>? materials,
+    CancellationToken ct = default);
     }
 }

@@ -114,12 +114,13 @@ public class TasksController : ControllerBase
             }
         }
 
-        var inputMaterials = NormalizeQrMaterials(req.materials);
-
-        // validate vật tư ngay lúc tạo QR
-        await _scanSvc.ValidateMaterialUsageForQrAsync(req.task_id, inputMaterials, ct);
+        var inputMaterials = await _scanSvc.BuildMaterialUsageForQrAsync(
+            req.task_id,
+            req.materials,
+            ct);
 
         var token = _tokenSvc.CreateToken(req.task_id, qtyGood, inputMaterials, ttl);
+
         var expiresAt = DateTimeOffset.UtcNow.Add(ttl).ToUnixTimeSeconds();
 
         var qrMaterialBundle = await _scanSvc.GetTaskQrMaterialBundleAsync(req.task_id, ct);
