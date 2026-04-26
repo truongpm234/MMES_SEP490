@@ -201,9 +201,19 @@ namespace AMMS.Application.Services
                                 "Importing",
                                 new { message = $"Đơn hàng {ord.order_id} đã được sản xuất xong, chờ nhập kho" },
                                 innerCt);
+                            await _hub.Clients.Group(RealtimeGroups.ByRole("general manager")).SendAsync(
+                                "Importing",
+                                new { message = $"Đơn hàng {ord.order_id} đã được sản xuất xong, chờ nhập kho" },
+                                innerCt);
 
                             await _noti.CreateNotfi(
                                 4,
+                                $"Đơn hàng {ord.order_id} đã được sản xuất xong, chờ nhập kho",
+                                null,
+                                request.order_request_id,
+                                "Importing");
+                            await _noti.CreateNotfi(
+                                18,
                                 $"Đơn hàng {ord.order_id} đã được sản xuất xong, chờ nhập kho",
                                 null,
                                 request.order_request_id,

@@ -268,7 +268,7 @@ namespace AMMS.Infrastructure.Repositories
                     .ToList();
 
                 var progress = ComputeProgressByStages(visibleSteps, currentSeq, visibleTasks);
-
+                var ord = await _db.orders.SingleOrDefaultAsync(o => o.order_id == r.order_id);
                 result.Add(new ProducingOrderCardDto
                 {
                     order_id = r.order_id,
@@ -282,6 +282,7 @@ namespace AMMS.Infrastructure.Repositories
 
                     status = r.order_status,
                     production_status = r.production_status,
+                    is_production_ready = ord.is_production_ready,
 
                     stage_status = currentStageStatus,
                     stages = stages,
