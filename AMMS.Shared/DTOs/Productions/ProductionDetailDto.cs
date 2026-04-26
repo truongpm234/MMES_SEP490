@@ -36,6 +36,8 @@ namespace AMMS.Shared.DTOs.Productions
         public string? coating_type { get; set; }
         public string? paper_alternative { get; set; }
         public string? wave_alternative { get; set; }
+        public int n_up { get; set; }
+
         // Timeline stages
         public DateTime? created_at { get; set; }
         public DateTime? planned_start_date { get; set; }

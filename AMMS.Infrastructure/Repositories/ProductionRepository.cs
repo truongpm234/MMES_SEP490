@@ -444,6 +444,7 @@ namespace AMMS.Infrastructure.Repositories
                         sheetsTotal = estimate.sheets_total;
                         nUp = estimate.n_up > 0 ? estimate.n_up : 1;
                     }
+                    dto.n_up = nUp;
                 }
             }
 
@@ -462,7 +463,26 @@ namespace AMMS.Infrastructure.Repositories
                 estInkWeightKg = header.first_item.i_ink_weight_kg.Value;
 
             int? numberOfPlates = orderReq?.number_of_plates;
+            decimal estCoatingGlueWeightKg = estimate?.coating_glue_weight_kg ?? 0m;
 
+            material? coatingMaterial = null;
+
+            if (estimate != null &&
+                estCoatingGlueWeightKg > 0m &&
+                !IsNoCoatingType(estimate.coating_type))
+            {
+                coatingMaterial = await ResolveCoatingMaterialForDetailAsync(estimate, ct);
+            }
+
+            var coatingMaterialCode = coatingMaterial?.code
+                ?? ResolveCoatingMaterialCodeForDetail(estimate?.coating_type);
+
+            var coatingMaterialName = coatingMaterial?.name
+                ?? (!IsNoCoatingType(estimate?.coating_type)
+                    ? ProductionFlowHelper.ResolveCoatingDisplayName(estimate?.coating_type)
+                    : null);
+
+            var coatingMaterialUnit = coatingMaterial?.unit ?? "kg";
             var prodId = header.pr.prod_id;
 
             var tasks = await _db.tasks.AsNoTracking()
@@ -611,10 +631,14 @@ namespace AMMS.Infrastructure.Repositories
     paperName: estimate?.paper_name,
     waveType: estimate?.wave_type,
     coatingType: estimate?.coating_type,
+    coatingMaterialCode: coatingMaterialCode,
+    coatingMaterialName: coatingMaterialName,
+    coatingMaterialUnit: coatingMaterialUnit,
+    estCoatingGlueWeightKg: estCoatingGlueWeightKg,
     inkTypeNames: estimate?.ink_type_names,
     laminationMaterialCode: estimate?.lamination_material_code,
-laminationMaterialName: estimate?.lamination_material_name,
-estLaminationWeightKg: estimate?.lamination_weight_kg ?? 0m
+    laminationMaterialName: estimate?.lamination_material_name,
+    estLaminationWeightKg: estimate?.lamination_weight_kg ?? 0m
 );
 
                 var stage = new ProductionStageDto
@@ -638,7 +662,8 @@ estLaminationWeightKg: estimate?.lamination_weight_kg ?? 0m
                     planned_start_time = task?.planned_start_time,
                     planned_end_time = task?.planned_end_time,
                     estimated_output_quantity = io.output.estimated_quantity,
-                    actual_output_quantity = io.output.actual_quantity
+                    actual_output_quantity = io.output.actual_quantity,
+                    n_up = nUp,
                 };
 
                 stages.Add(stage);
@@ -932,10 +957,14 @@ estLaminationWeightKg: estimate?.lamination_weight_kg ?? 0m
     string? paperName,
     string? waveType,
     string? coatingType,
+    string? coatingMaterialCode,
+    string? coatingMaterialName,
+    string? coatingMaterialUnit,
+    decimal estCoatingGlueWeightKg,
     string? inkTypeNames,
     string? laminationMaterialCode,
-string? laminationMaterialName,
-decimal estLaminationWeightKg)
+    string? laminationMaterialName,
+    decimal estLaminationWeightKg)
         {
             var inputs = new List<StageMaterialDto>();
             var code = (processCode ?? "").Trim().ToUpperInvariant();
@@ -1067,17 +1096,34 @@ decimal estLaminationWeightKg)
 
             if (code == "PHU")
             {
-                var coatingDisplay = ProductionFlowHelper.ResolveCoatingDisplayName(coatingType);
+                var hasRealCoating =
+                    estCoatingGlueWeightKg > 0m &&
+                    !IsNoCoatingType(coatingType);
 
-                inputs.Add(ProductionSHelper.BuildStageMaterial(
-                    name: coatingDisplay,
-                    code: string.IsNullOrWhiteSpace(coatingType) ? "COATING" : coatingType.Trim(),
-                    estimatedQty: 0m,
-                    actualQty: null,
-                    unit: "kg"));
+                if (hasRealCoating)
+                {
+                    var resolvedCode = !string.IsNullOrWhiteSpace(coatingMaterialCode)
+                        ? coatingMaterialCode.Trim()
+                        : ResolveCoatingMaterialCodeForDetail(coatingType) ?? "COATING";
+
+                    var resolvedName = !string.IsNullOrWhiteSpace(coatingMaterialName)
+                        ? coatingMaterialName.Trim()
+                        : ProductionFlowHelper.ResolveCoatingDisplayName(coatingType);
+
+                    var resolvedUnit = !string.IsNullOrWhiteSpace(coatingMaterialUnit)
+                        ? coatingMaterialUnit.Trim()
+                        : "kg";
+
+                    inputs.Add(ProductionSHelper.BuildStageMaterial(
+                        name: resolvedName,
+                        code: resolvedCode,
+                        estimatedQty: estCoatingGlueWeightKg,
+                        actualQty: null,
+                        unit: resolvedUnit));
+                }
 
                 var output = ProductionSHelper.BuildStageMaterial(
-                    name: "Bán thành phẩm phủ",
+                    name: hasRealCoating ? "Bán thành phẩm phủ" : "Bán thành phẩm qua công đoạn phủ",
                     code: "PHU",
                     estimatedQty: stageEstimatedQty,
                     actualQty: stageActualQty,
@@ -1727,6 +1773,109 @@ decimal estLaminationWeightKg)
                 .Where(x => x.order_id == orderId)
                 .OrderByDescending(x => x.prod_id)
                 .FirstOrDefaultAsync(ct);
+        }
+
+        private static string RemoveDiacriticsForMaterial(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return "";
+
+            var normalized = text.Normalize(System.Text.NormalizationForm.FormD);
+            var sb = new System.Text.StringBuilder();
+
+            foreach (var ch in normalized)
+            {
+                var uc = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch);
+                if (uc != System.Globalization.UnicodeCategory.NonSpacingMark)
+                    sb.Append(ch);
+            }
+
+            return sb.ToString().Normalize(System.Text.NormalizationForm.FormC);
+        }
+
+        private static string NormalizeMaterialCodeForDetail(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return "";
+
+            var s = RemoveDiacriticsForMaterial(raw)
+                .Trim()
+                .ToUpperInvariant();
+
+            s = s.Replace("Đ", "D");
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"[^A-Z0-9]+", "_");
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"_+", "_").Trim('_');
+
+            return s switch
+            {
+                "KEO_NUOC" => "KEO_PHU_NUOC",
+                "KEO_PHU_NUOC" => "KEO_PHU_NUOC",
+
+                "KEO_DAU" => "KEO_PHU_DAU",
+                "KEO_PHU_DAU" => "KEO_PHU_DAU",
+
+                "UV" => "KEO_PHU_UV",
+                "KEO_UV" => "KEO_PHU_UV",
+                "PHU_UV" => "KEO_PHU_UV",
+                "KEO_PHU_UV" => "KEO_PHU_UV",
+
+                _ => s
+            };
+        }
+
+        private static bool IsNoCoatingType(string? coatingType)
+        {
+            var s = NormalizeMaterialCodeForDetail(coatingType);
+
+            return string.IsNullOrWhiteSpace(s)
+                   || s == "NONE"
+                   || s == "NO"
+                   || s == "NO_COATING"
+                   || s == "KHONG"
+                   || s == "KHONG_PHU"
+                   || s == "KHONG_COATING";
+        }
+
+        private static string? ResolveCoatingMaterialCodeForDetail(string? coatingType)
+        {
+            if (IsNoCoatingType(coatingType))
+                return null;
+
+            var code = NormalizeMaterialCodeForDetail(coatingType);
+
+            return string.IsNullOrWhiteSpace(code) ? null : code;
+        }
+
+        private async Task<material?> ResolveCoatingMaterialForDetailAsync(
+            cost_estimate est,
+            CancellationToken ct = default)
+        {
+            if (est.coating_glue_weight_kg <= 0m)
+                return null;
+
+            if (IsNoCoatingType(est.coating_type))
+                return null;
+
+            var code = ResolveCoatingMaterialCodeForDetail(est.coating_type);
+            var displayName = ProductionFlowHelper.ResolveCoatingDisplayName(est.coating_type);
+
+            var aliases = new List<string?> { code, est.coating_type, displayName }
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(NormalizeMaterialCodeForDetail)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (aliases.Count == 0)
+                return null;
+
+            var allMaterials = await _db.materials
+                .AsNoTracking()
+                .ToListAsync(ct);
+
+            return allMaterials.FirstOrDefault(m =>
+                aliases.Contains(NormalizeMaterialCodeForDetail(m.code)) ||
+                aliases.Contains(NormalizeMaterialCodeForDetail(m.name)));
         }
     }
 }

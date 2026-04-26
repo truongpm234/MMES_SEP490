@@ -114,13 +114,11 @@ public class TasksController : ControllerBase
             }
         }
 
-        var inputMaterials = await _scanSvc.BuildMaterialUsageForQrAsync(
-            req.task_id,
-            req.materials,
-            ct);
+        var inputMaterials = await _scanSvc.BuildMaterialUsageForQrAsync(req.task_id,
+    req.materials,
+    ct);
 
         var token = _tokenSvc.CreateToken(req.task_id, qtyGood, inputMaterials, ttl);
-
         var expiresAt = DateTimeOffset.UtcNow.Add(ttl).ToUnixTimeSeconds();
 
         var qrMaterialBundle = await _scanSvc.GetTaskQrMaterialBundleAsync(req.task_id, ct);

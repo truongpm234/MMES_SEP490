@@ -14,6 +14,7 @@ namespace AMMS.Shared.DTOs.Productions
         public string process_name { get; set; } = "";
         public string? process_code { get; set; }
         public string? machine { get; set; }
+        public int n_up { get; set; }
 
         // Task state
         public int? task_id { get; set; }

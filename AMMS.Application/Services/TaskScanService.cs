@@ -274,7 +274,7 @@ namespace AMMS.Application.Services
             }
 
             if (inputMaterials == null || inputMaterials.Count == 0)
-                throw new InvalidOperationException("Bắt buộc nhập danh sách NVL đã sử dụng.");
+                throw new InvalidOperationException("Bắt buộc nhập danh sách NVL dư khi báo cáo công đoạn.");
 
             if (inputMaterials.Count != expectedMaterials.Count)
                 throw new InvalidOperationException("Số lượng NVL nhập vào không khớp với số NVL ước tính.");
@@ -391,10 +391,6 @@ namespace AMMS.Application.Services
                 "KEO_PHU_UV" => "KEO_PHU_UV",
 
                 // Màng
-                "CAN_MANG" => "MANG_12MIC",
-                "MANG_CAN" => "MANG_12MIC",
-                "MANG" => "MANG_12MIC",
-                "LAMINATION" => "MANG_12MIC",
                 "MANG_12_MIC" => "MANG_12MIC",
 
                 // Keo bồi
@@ -473,10 +469,21 @@ namespace AMMS.Application.Services
 
                 case "IN":
                     {
+                        // 1. Giấy đưa vào máy in
+                        var paperMat = await ResolvePaperMaterialAsync(est, ct);
+
+                        await AddMaterialAsync(
+                            estimatedQty: est.sheets_total > 0 ? est.sheets_total : est.sheets_required,
+                            fallbackCode: est.paper_code ?? "PAPER",
+                            fallbackName: est.paper_name ?? "Giấy in",
+                            unit: "tờ",
+                            resolvedMaterial: paperMat);
+
+                        // 2. Mực in
                         var inkMat = await ResolveMaterialByCodesOrNamesAsync(
                             ct,
                             new[] { "INK" },
-                            new[] { "Mực tổng hợp" });
+                            new[] { "Mực tổng hợp", "Mực in" });
 
                         await AddMaterialAsync(
                             estimatedQty: est.ink_weight_kg,
@@ -484,6 +491,7 @@ namespace AMMS.Application.Services
                             fallbackName: "Mực tổng hợp",
                             unit: "kg",
                             resolvedMaterial: inkMat);
+
                         break;
                     }
 
@@ -503,17 +511,23 @@ namespace AMMS.Application.Services
                 case "CAN":
                 case "CAN_MANG":
                     {
-                        var filmMat = await ResolveMaterialByCodesOrNamesAsync(
-                            ct,
-                            new[] { "MANG_12MIC", "MANG_CAN", "LAMINATION" },
-                            new[] { "Màng cán 12 mic", "Màng cán" });
+                        var filmMat = await ResolveLaminationMaterialAsync(est, ct);
+
+                        var fallbackCode = !string.IsNullOrWhiteSpace(est.lamination_material_code)
+                            ? est.lamination_material_code
+                            : "LAMINATION_NOT_SELECTED";
+
+                        var fallbackName = !string.IsNullOrWhiteSpace(est.lamination_material_name)
+                            ? est.lamination_material_name
+                            : "Chưa chọn loại màng cán";
 
                         await AddMaterialAsync(
                             estimatedQty: est.lamination_weight_kg,
-                            fallbackCode: "MANG_12MIC",
-                            fallbackName: "Màng cán 12 mic",
-                            unit: "kg",
+                            fallbackCode: fallbackCode,
+                            fallbackName: fallbackName,
+                            unit: filmMat?.unit ?? "kg",
                             resolvedMaterial: filmMat);
+
                         break;
                     }
 
@@ -751,151 +765,11 @@ namespace AMMS.Application.Services
     int taskId,
     CancellationToken ct = default)
         {
-            var t = await _db.tasks
-                .AsNoTracking()
-                .Include(x => x.process)
-                .FirstOrDefaultAsync(x => x.task_id == taskId, ct);
-
-            if (t == null || !t.prod_id.HasValue)
+            var ctx = await GetTaskEstimateContextAsync(taskId, ct);
+            if (ctx == null)
                 return new List<TaskConsumableMaterialDto>();
 
-            var prod = await _db.productions
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.prod_id == t.prod_id.Value, ct);
-
-            if (prod?.order_id == null)
-                return new List<TaskConsumableMaterialDto>();
-
-            var req = await _db.order_requests
-                .AsNoTracking()
-                .Where(x => x.order_id == prod.order_id.Value)
-                .OrderByDescending(x => x.order_request_id)
-                .FirstOrDefaultAsync(ct);
-
-            if (req == null)
-                return new List<TaskConsumableMaterialDto>();
-
-            cost_estimate? est = null;
-
-            if (req.accepted_estimate_id.HasValue && req.accepted_estimate_id.Value > 0)
-            {
-                est = await _db.cost_estimates
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(x =>
-                        x.estimate_id == req.accepted_estimate_id.Value &&
-                        x.order_request_id == req.order_request_id, ct);
-            }
-
-            est ??= await _db.cost_estimates
-                .AsNoTracking()
-                .Where(x => x.order_request_id == req.order_request_id)
-                .OrderByDescending(x => x.is_active)
-                .ThenByDescending(x => x.estimate_id)
-                .FirstOrDefaultAsync(ct);
-
-            if (est == null)
-                return new List<TaskConsumableMaterialDto>();
-
-            var processCode = (t.process?.process_code ?? "").Trim().ToUpperInvariant();
-            var result = new List<TaskConsumableMaterialDto>();
-
-            async Task AddMaterialAsync(
-                decimal estimatedQty,
-                string fallbackCode,
-                string fallbackName,
-                string unit,
-                params string?[] lookupCodes)
-            {
-                if (estimatedQty <= 0)
-                    return;
-
-                var mat = await ResolveMaterialByCodesAsync(ct, lookupCodes);
-
-                result.Add(new TaskConsumableMaterialDto
-                {
-                    material_id = mat?.material_id,
-                    material_code = mat?.code ?? fallbackCode,
-                    material_name = mat?.name ?? fallbackName,
-                    unit = mat?.unit ?? unit,
-                    estimated_input_qty = Math.Round(estimatedQty, 4),
-                    is_mapped = mat != null
-                });
-            }
-
-            var resolvedPaperCode = EstimateMaterialAlternativeHelper.ResolvePaperCode(
-                est.paper_alternative,
-                est.paper_code);
-
-            var resolvedWaveType = EstimateMaterialAlternativeHelper.ResolveWaveType(
-                est.wave_alternative,
-                est.wave_type);
-
-            switch (processCode)
-            {
-                case "RALO":
-                    await AddMaterialAsync(
-                        estimatedQty: Math.Max(req.number_of_plates ?? 0, 1),
-                        fallbackCode: "PLATE",
-                        fallbackName: "Bản kẽm",
-                        unit: "bản",
-                        "PLATE", "PLATE_INPUT");
-                    break;
-
-                case "CAT":
-                    await AddMaterialAsync(
-                        estimatedQty: est.sheets_total > 0 ? est.sheets_total : est.sheets_required,
-                        fallbackCode: resolvedPaperCode ?? "PAPER",
-                        fallbackName: est.paper_name ?? "Giấy in",
-                        unit: "tờ",
-                        resolvedPaperCode, est.paper_code, est.paper_alternative);
-                    break;
-
-                case "IN":
-                    await AddMaterialAsync(
-                        estimatedQty: est.ink_weight_kg,
-                        fallbackCode: "INK",
-                        fallbackName: "Mực in",
-                        unit: "kg",
-                        "INK");
-                    break;
-
-                case "PHU":
-                    await AddMaterialAsync(
-                        estimatedQty: est.coating_glue_weight_kg,
-                        fallbackCode: NormalizeMaterialCode(est.coating_type),
-                        fallbackName: ProductionFlowHelper.ResolveCoatingDisplayName(est.coating_type),
-                        unit: "kg",
-                        est.coating_type, NormalizeMaterialCode(est.coating_type));
-                    break;
-
-                case "CAN":
-                case "CAN_MANG":
-                    await AddMaterialAsync(
-                        estimatedQty: est.lamination_weight_kg,
-                        fallbackCode: "MANG_12MIC",
-                        fallbackName: "Màng cán",
-                        unit: "kg",
-                        "MANG_12MIC", "MANG_CAN", "LAMINATION");
-                    break;
-
-                case "BOI":
-                    await AddMaterialAsync(
-                        estimatedQty: est.wave_sheets_used ?? est.wave_sheets_required ?? 0,
-                        fallbackCode: resolvedWaveType ?? "WAVE",
-                        fallbackName: string.IsNullOrWhiteSpace(resolvedWaveType) ? "Sóng carton" : $"Sóng {resolvedWaveType}",
-                        unit: "tờ",
-                        resolvedWaveType, est.wave_type, est.wave_alternative);
-
-                    await AddMaterialAsync(
-                        estimatedQty: est.mounting_glue_weight_kg,
-                        fallbackCode: "KEO_BOI",
-                        fallbackName: "Keo bồi",
-                        unit: "kg",
-                        "KEO_BOI", "MOUNTING_GLUE");
-                    break;
-            }
-
-            return result;
+            return await BuildConsumableMaterialsAsync(ctx, ct);
         }
 
         private static readonly JsonSerializerOptions _jsonOptions = new()
@@ -1138,19 +1012,15 @@ namespace AMMS.Application.Services
                     $"Có NVL chưa map sang materials: {unmapped}. Không thể tạo QR/finish task.");
             }
 
+            inputMaterials ??= new List<TaskMaterialUsageInputDto>();
+
             if (expectedMaterials.Count == 0)
             {
-                if (inputMaterials != null && inputMaterials.Count > 0)
+                if (inputMaterials.Count > 0)
                     throw new InvalidOperationException("Task này không yêu cầu nhập NVL.");
 
                 return new List<TaskMaterialUsageInputDto>();
             }
-
-            if (inputMaterials == null || inputMaterials.Count == 0)
-                throw new InvalidOperationException("Bắt buộc nhập danh sách NVL dư khi báo cáo công đoạn.");
-
-            if (inputMaterials.Count != expectedMaterials.Count)
-                throw new InvalidOperationException("Số lượng NVL nhập vào không khớp với số NVL ước tính.");
 
             var duplicated = inputMaterials
                 .GroupBy(x => x.material_id)
@@ -1159,6 +1029,23 @@ namespace AMMS.Application.Services
             if (duplicated)
                 throw new InvalidOperationException("Danh sách NVL bị trùng material_id.");
 
+            var expectedMaterialIds = expectedMaterials
+                .Where(x => x.material_id.HasValue && x.material_id.Value > 0)
+                .Select(x => x.material_id!.Value)
+                .ToHashSet();
+
+            var unexpectedMaterialIds = inputMaterials
+                .Where(x => !expectedMaterialIds.Contains(x.material_id))
+                .Select(x => x.material_id)
+                .Distinct()
+                .ToList();
+
+            if (unexpectedMaterialIds.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Có NVL không thuộc công đoạn này: material_id={string.Join(", ", unexpectedMaterialIds)}.");
+            }
+
             var result = new List<TaskMaterialUsageInputDto>();
 
             foreach (var expected in expectedMaterials)
@@ -1166,14 +1053,37 @@ namespace AMMS.Application.Services
                 if (!expected.material_id.HasValue || expected.material_id.Value <= 0)
                     throw new InvalidOperationException($"NVL {expected.material_code} chưa có material_id hợp lệ.");
 
-                var input = inputMaterials.FirstOrDefault(x => x.material_id == expected.material_id.Value);
+                var materialId = expected.material_id.Value;
+                var expectedCode = NormalizeMaterialCode(expected.material_code);
+                var isFixedPlate = expectedCode == "PLATE";
+
+                var input = inputMaterials.FirstOrDefault(x => x.material_id == materialId);
+
+                if (input == null && isFixedPlate)
+                {
+                    result.Add(new TaskMaterialUsageInputDto
+                    {
+                        material_id = materialId,
+                        quantity_used = Math.Round(expected.estimated_input_qty, 4),
+                        quantity_left = 0m,
+                        is_stock = false
+                    });
+
+                    continue;
+                }
 
                 if (input == null)
-                    throw new InvalidOperationException($"Thiếu dữ liệu NVL material_id={expected.material_id.Value}.");
+                {
+                    throw new InvalidOperationException(
+                        $"Thiếu dữ liệu NVL {expected.material_code} - {expected.material_name}. " +
+                        $"Công đoạn này bắt buộc nhập số lượng NVL dư.");
+                }
 
                 if (input.quantity_left < 0)
+                {
                     throw new InvalidOperationException(
                         $"Số lượng NVL dư của {expected.material_code} không được nhỏ hơn 0.");
+                }
 
                 if (input.quantity_left > expected.estimated_input_qty)
                 {
@@ -1190,13 +1100,45 @@ namespace AMMS.Application.Services
 
                 result.Add(new TaskMaterialUsageInputDto
                 {
-                    material_id = expected.material_id.Value,
+                    material_id = materialId,
                     quantity_used = Math.Round(quantityUsed, 4),
                     quantity_left = quantityLeft,
                     is_stock = quantityLeft > 0 || input.is_stock
                 });
             }
+
             return result;
+        }
+
+        private async Task<material?> ResolveLaminationMaterialAsync(cost_estimate est, CancellationToken ct)
+        {
+            if (est.lamination_material_id.HasValue && est.lamination_material_id.Value > 0)
+            {
+                var byId = await _db.materials
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.material_id == est.lamination_material_id.Value, ct);
+
+                if (byId != null)
+                    return byId;
+            }
+
+            var hasSelectedLamination =
+                !string.IsNullOrWhiteSpace(est.lamination_material_code) ||
+                !string.IsNullOrWhiteSpace(est.lamination_material_name);
+
+            if (!hasSelectedLamination)
+                return null;
+
+            return await ResolveMaterialByCodesOrNamesAsync(
+                ct,
+                new[]
+                {
+            est.lamination_material_code
+                },
+                new[]
+                {
+            est.lamination_material_name
+                });
         }
     }
 }
