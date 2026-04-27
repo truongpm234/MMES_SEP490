@@ -41,7 +41,8 @@ namespace AMMS.API.Controllers
             }
 
             if (!string.Equals(receipt.payment_status, "PAID", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(receipt.payment_status, "SUCCESS", StringComparison.OrdinalIgnoreCase))
+                !string.Equals(receipt.payment_status, "SUCCESS", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(receipt.payment_status, "PENDING", StringComparison.OrdinalIgnoreCase))
             {
                 return BadRequest(new
                 {
