@@ -73,7 +73,7 @@ namespace AMMS.Infrastructure.Repositories
                 // 2) chỉ tính cho order thiếu vật liệu và status = "Accepted"
                 var orderIds = await _db.orders.AsNoTracking()
                     .Where(o =>
-                        o.status == "Accepted" &&
+                        o.status == "LayoutPending" &&
                         (o.is_enough == null || o.is_enough == false))
                     .Select(o => o.order_id)
                     .Distinct()
