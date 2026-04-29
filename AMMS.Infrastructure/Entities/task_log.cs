@@ -21,6 +21,8 @@ public partial class task_log
 
     public DateTime? log_time { get; set; }
 
+    public string? reason { get; set; }
+
     [Column(TypeName = "jsonb")]
     public string? material_usage_json { get; set; }
 
