@@ -385,6 +385,8 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.end_time).HasColumnType("timestamp without time zone");
             entity.HasIndex(x => new { x.machine, x.planned_end_time })
              .HasDatabaseName("ix_tasks_machine_planned_end");
+            entity.Property(e => e.reason)
+    .HasColumnType("text");
         });
 
         modelBuilder.Entity<task_log>(entity =>
@@ -405,6 +407,8 @@ public partial class AppDbContext : DbContext
                 .HasConstraintName("task_logs_task_id_fkey");
             entity.Property(e => e.material_usage_json)
                 .HasColumnType("jsonb");
+            entity.Property(e => e.reason)
+    .HasColumnType("text");
         });
 
         modelBuilder.Entity<user>(entity =>

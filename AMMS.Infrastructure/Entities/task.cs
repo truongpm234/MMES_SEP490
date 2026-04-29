@@ -30,6 +30,8 @@ public partial class task
 
     public int? process_id { get; set; }
 
+    public string? reason { get; set; }
+
     public virtual product_type_process? process { get; set; }
 
     public virtual production? prod { get; set; }

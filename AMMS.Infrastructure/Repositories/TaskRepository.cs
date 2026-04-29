@@ -428,6 +428,20 @@ namespace AMMS.Infrastructure.Repositories
             m.busy_quantity += 1;
         }
 
+        public Task<task?> GetByIdTrackingAsync(int taskId, CancellationToken ct = default)
+    => _db.tasks.FirstOrDefaultAsync(x => x.task_id == taskId, ct);
+
+        public async Task MarkTaskFinishedFromStockAsync(int taskId, string reason, DateTime now, CancellationToken ct = default)
+        {
+            var entity = await _db.tasks.FirstOrDefaultAsync(x => x.task_id == taskId, ct);
+            if (entity == null)
+                return;
+
+            entity.status = "Finished";
+            entity.end_time = now;
+            entity.reason = reason;
+        }
+
         private static string Norm(string? code)
             => (code ?? "").Trim().ToUpperInvariant();
 
