@@ -216,6 +216,7 @@ public class TasksController : ControllerBase
             });
         }
     }
+
     private static List<TaskMaterialUsageInputDto> NormalizeQrMaterials(List<TaskMaterialUsageInputDto>? materials)
     {
         return (materials ?? new List<TaskMaterialUsageInputDto>())

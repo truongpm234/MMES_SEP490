@@ -31,7 +31,7 @@ namespace AMMS.Shared.Helpers
             => Norm(code) is "RALO" or "RA_LO";
 
         public static bool IsProductSplitStage(string? code)
-            => Norm(code) is "DUT" or "DAN";
+    => Norm(code) is "BE" or "DUT" or "DAN";
 
         public static int FindProductSplitStageIndex(IReadOnlyList<string?> routeProcessCodes)
         {
