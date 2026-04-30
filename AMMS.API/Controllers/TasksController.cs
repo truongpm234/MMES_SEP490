@@ -181,6 +181,41 @@ public class TasksController : ControllerBase
         }
     }
 
+    [HttpPost("cancel-finish/{taskId:int}")]
+    public async Task<IActionResult> CancelFinish(
+    int taskId,
+    [FromBody] CancelTaskFinishRequest? req,
+    CancellationToken ct)
+    {
+        try
+        {
+            var cancelledByUserId = GetCurrentUserId();
+
+            var result = await _scanSvc.CancelTaskFinishAsync(
+                taskId,
+                req,
+                cancelledByUserId,
+                ct);
+
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new
+            {
+                message = ex.Message,
+                task_id = taskId
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new
+            {
+                message = ex.Message,
+                task_id = taskId
+            });
+        }
+    }
     private static List<TaskMaterialUsageInputDto> NormalizeQrMaterials(List<TaskMaterialUsageInputDto>? materials)
     {
         return (materials ?? new List<TaskMaterialUsageInputDto>())

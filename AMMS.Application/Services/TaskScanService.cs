@@ -997,6 +997,130 @@ namespace AMMS.Application.Services
             return resolved;
         }
 
+        public async Task<CancelTaskFinishResultDto> CancelTaskFinishAsync(
+    int taskId,
+    CancelTaskFinishRequest? req,
+    int? cancelledByUserId,
+    CancellationToken ct = default)
+        {
+            var reason = string.IsNullOrWhiteSpace(req?.reason)
+                ? "Cancel task finish for recovery"
+                : req!.reason!.Trim();
+
+            return await _taskRepo.ExecuteInTransactionAsync(async innerCt =>
+            {
+                var t = await _db.tasks
+                    .Include(x => x.process)
+                    .FirstOrDefaultAsync(x => x.task_id == taskId, innerCt);
+
+                if (t == null)
+                    throw new KeyNotFoundException("Task not found.");
+
+                if (!t.prod_id.HasValue || !t.seq_num.HasValue)
+                    throw new InvalidOperationException("Task thiếu prod_id hoặc seq_num.");
+
+                if (!string.Equals(t.status, "Finished", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Chỉ có thể recovery task đang ở trạng thái Finished.");
+
+                // Chỉ cho cancel khi production/order đang InProcessing hoặc Importing.
+                var statusCtx = await ValidateCancelableProductionAndOrderStatusAsync(t, innerCt);
+
+                var flowTasks = await _db.tasks
+                    .Include(x => x.process)
+                    .Where(x => x.prod_id == t.prod_id.Value)
+                    .OrderBy(x => x.seq_num)
+                    .ThenBy(x => x.task_id)
+                    .ToListAsync(innerCt);
+
+                if (flowTasks.Count == 0)
+                    throw new InvalidOperationException("Không tìm thấy flow task của production.");
+
+                var currentSeq = t.seq_num.Value;
+
+                var laterTasks = flowTasks
+                    .Where(x => x.task_id != t.task_id)
+                    .Where(x => (x.seq_num ?? int.MaxValue) > currentSeq)
+                    .ToList();
+
+                var laterTaskIds = laterTasks
+                    .Select(x => x.task_id)
+                    .ToList();
+
+                var laterHasLog = laterTaskIds.Count > 0 &&
+                    await _db.task_logs
+                        .AsNoTracking()
+                        .AnyAsync(x => x.task_id.HasValue &&
+                                       laterTaskIds.Contains(x.task_id.Value), innerCt);
+
+                var laterProgressed = laterTasks.Any(x =>
+                    string.Equals(x.status, "Ready", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase) ||
+                    x.start_time != null ||
+                    x.end_time != null);
+
+                if (laterProgressed || laterHasLog)
+                {
+                    throw new InvalidOperationException(
+                        "Không thể recovery công đoạn này vì công đoạn phía sau đã bắt đầu hoặc đã có log. " +
+                        "Hãy recovery từ công đoạn sau cùng trước.");
+                }
+
+                var finishLogs = await _db.task_logs
+                    .Where(x => x.task_id == taskId &&
+                                string.Equals(x.action_type, "Finished"))
+                    .OrderBy(x => x.log_time)
+                    .ToListAsync(innerCt);
+
+                if (finishLogs.Count == 0)
+                    throw new InvalidOperationException("Task đã Finished nhưng không tìm thấy task_log Finished để recovery.");
+
+                // Chỉ được cancel trong vòng 5 phút sau khi task hoàn thành.
+                EnsureCancelWithinFiveMinutes(t, finishLogs);
+
+                var reversedStockMoveCount = await ReverseLeftoverStockFromTaskLogsAsync(
+                    taskId,
+                    finishLogs,
+                    cancelledByUserId,
+                    reason,
+                    innerCt);
+
+                _db.task_logs.RemoveRange(finishLogs);
+
+                t.status = "Ready";
+                t.end_time = null;
+
+                t.start_time ??= AppTime.NowVnUnspecified();
+
+                await ReserveMachineForRollbackReadyAsync(t, innerCt);
+
+                var statusResult = await RollbackFinalTaskStatusesIfNeededAsync(
+                    t,
+                    flowTasks,
+                    reason,
+                    innerCt);
+
+                await _db.SaveChangesAsync(innerCt);
+
+                await _hub.Clients.All.SendAsync(
+                    "update-ui",
+                    new { message = "update UI" },
+                    innerCt);
+
+                return new CancelTaskFinishResultDto
+                {
+                    task_id = t.task_id,
+                    prod_id = t.prod_id,
+                    deleted_log_count = finishLogs.Count,
+                    reversed_stock_move_count = reversedStockMoveCount,
+                    task_status = "Ready",
+                    production_status = statusResult.productionStatus ?? statusCtx.prod.status,
+                    order_status = statusResult.orderStatus ?? statusCtx.ord.status,
+                    request_status = statusResult.requestStatus,
+                    message = "Đã recovery task về Ready, xóa task_log Finished cũ và hoàn tác NVL dư đã nhập kho."
+                };
+            }, ct);
+        }
+
         private static List<TaskMaterialUsageInputDto> BuildReportMaterialUsageInputs(
     List<TaskConsumableMaterialDto> expectedMaterials,
     List<TaskMaterialUsageInputDto> inputMaterials)
@@ -1139,6 +1263,312 @@ namespace AMMS.Application.Services
                 {
             est.lamination_material_name
                 });
+        }
+        private static List<TaskMaterialUsageLogItemDto> ParseMaterialUsageLogItems(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+                return new List<TaskMaterialUsageLogItemDto>();
+
+            try
+            {
+                return JsonSerializer.Deserialize<List<TaskMaterialUsageLogItemDto>>(json, _jsonOptions)
+                       ?? new List<TaskMaterialUsageLogItemDto>();
+            }
+            catch
+            {
+                return new List<TaskMaterialUsageLogItemDto>();
+            }
+        }
+
+        private async Task<int> ReverseLeftoverStockFromTaskLogsAsync(
+    int taskId,
+    List<task_log> finishLogs,
+    int? cancelledByUserId,
+    string reason,
+    CancellationToken ct)
+        {
+            var now = AppTime.NowVnUnspecified();
+
+            var usageItems = finishLogs
+                .SelectMany(x => ParseMaterialUsageLogItems(x.material_usage_json))
+                .Where(x => x.material_id > 0)
+                .Where(x => x.quantity_left > 0m)
+                .Where(x => x.is_stock)
+                .GroupBy(x => new
+                {
+                    x.material_id,
+                    x.material_code,
+                    x.material_name,
+                    x.unit
+                })
+                .Select(g => new
+                {
+                    g.Key.material_id,
+                    g.Key.material_code,
+                    g.Key.material_name,
+                    g.Key.unit,
+                    quantity_left = Math.Round(g.Sum(x => x.quantity_left), 4)
+                })
+                .Where(x => x.quantity_left > 0m)
+                .ToList();
+
+            if (usageItems.Count == 0)
+                return 0;
+
+            var materialIds = usageItems
+                .Select(x => x.material_id)
+                .Distinct()
+                .ToList();
+
+            var materials = await _db.materials
+                .Where(x => materialIds.Contains(x.material_id))
+                .ToDictionaryAsync(x => x.material_id, ct);
+
+            foreach (var item in usageItems)
+            {
+                if (!materials.TryGetValue(item.material_id, out var mat))
+                {
+                    throw new InvalidOperationException(
+                        $"Không tìm thấy NVL để hoàn tác nhập kho. material_id={item.material_id}");
+                }
+
+                var currentStock = mat.stock_qty ?? 0m;
+
+                if (currentStock < item.quantity_left)
+                {
+                    throw new InvalidOperationException(
+                        $"Không thể recovery task vì NVL dư đã được sử dụng/không còn đủ trong kho. " +
+                        $"Material={mat.name} ({mat.code}), cần trừ lại={item.quantity_left}, tồn hiện tại={currentStock}");
+                }
+            }
+
+            var reversedCount = 0;
+
+            foreach (var item in usageItems)
+            {
+                var mat = materials[item.material_id];
+
+                mat.stock_qty = (mat.stock_qty ?? 0m) - item.quantity_left;
+
+                await _db.stock_moves.AddAsync(new stock_move
+                {
+                    material_id = item.material_id,
+                    type = "OUT",
+                    qty = item.quantity_left,
+                    ref_doc = $"TASK-LEFTOVER-CANCEL-{taskId}",
+                    user_id = cancelledByUserId,
+                    move_date = now,
+                    note = $"Cancel task finish. Reverse leftover stock from task_id={taskId}. Reason: {reason}",
+                    purchase_id = null
+                }, ct);
+
+                reversedCount++;
+            }
+
+            return reversedCount;
+        }
+
+        private async Task ReserveMachineForRollbackReadyAsync(task t, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(t.machine))
+                return;
+
+            var machineCode = t.machine.Trim();
+
+            var m = await _db.machines
+                .FirstOrDefaultAsync(x => x.machine_code == machineCode && x.is_active, ct);
+
+            if (m == null)
+                return;
+
+            m.busy_quantity ??= 0;
+            m.free_quantity ??= m.quantity - m.busy_quantity.Value;
+
+            if (m.free_quantity <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"Không thể recovery task về Ready vì máy {machineCode} hiện không còn slot rảnh để giữ lại cho công đoạn.");
+            }
+
+            m.free_quantity -= 1;
+            m.busy_quantity += 1;
+
+            if (m.free_quantity < 0)
+                m.free_quantity = 0;
+        }
+
+        private async Task<(string? productionStatus, string? orderStatus, string? requestStatus)>
+    RollbackFinalTaskStatusesIfNeededAsync(
+        task currentTask,
+        List<task> flowTasks,
+        string reason,
+        CancellationToken ct)
+        {
+            if (!currentTask.prod_id.HasValue || !currentTask.seq_num.HasValue)
+                return (null, null, null);
+
+            var currentSeq = currentTask.seq_num.Value;
+
+            var isLastTask = !flowTasks.Any(x =>
+                x.task_id != currentTask.task_id &&
+                (x.seq_num ?? int.MaxValue) > currentSeq);
+
+            if (!isLastTask)
+                return (null, null, null);
+
+            var prod = await _db.productions
+                .FirstOrDefaultAsync(x => x.prod_id == currentTask.prod_id.Value, ct);
+
+            if (prod == null)
+                return (null, null, null);
+
+            if (!prod.order_id.HasValue)
+                throw new InvalidOperationException("Production chưa gắn với order.");
+
+            var ord = await _db.orders
+                .FirstOrDefaultAsync(x => x.order_id == prod.order_id.Value, ct);
+
+            if (ord == null)
+                throw new InvalidOperationException("Không tìm thấy order của production.");
+
+            if (!IsCancelableProductionStatus(prod.status))
+            {
+                throw new InvalidOperationException(
+                    $"Không thể recovery công đoạn cuối. Production phải đang InProcessing hoặc Importing. " +
+                    $"Hiện tại: {ShowStatus(prod.status)}.");
+            }
+
+            if (!IsCancelableProductionStatus(ord.status))
+            {
+                throw new InvalidOperationException(
+                    $"Không thể recovery công đoạn cuối. Order phải đang InProcessing hoặc Importing. " +
+                    $"Hiện tại: {ShowStatus(ord.status)}.");
+            }
+
+            if (string.Equals(prod.status, "Importing", StringComparison.OrdinalIgnoreCase))
+            {
+                prod.status = "InProcessing";
+            }
+
+            prod.end_date = null;
+
+            if (string.Equals(ord.status, "Importing", StringComparison.OrdinalIgnoreCase))
+            {
+                ord.status = "InProcessing";
+            }
+
+            string? requestStatus = null;
+
+            var requests = await _db.order_requests
+                .Where(x => x.order_id == ord.order_id)
+                .ToListAsync(ct);
+
+            foreach (var request in requests)
+            {
+                if (string.Equals(request.process_status, "Importing", StringComparison.OrdinalIgnoreCase))
+                {
+                    request.process_status = "InProcessing";
+                    requestStatus = "InProcessing";
+                }
+            }
+
+            return (prod.status, ord.status, requestStatus);
+        }
+
+        private static bool IsCancelableProductionStatus(string? status)
+        {
+            return string.Equals(status, "InProcessing", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status, "Importing", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsLockedAfterProduction(string? status)
+        {
+            return string.Equals(status, "Delivery", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status, "Finished", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ShowStatus(string? status)
+        {
+            return string.IsNullOrWhiteSpace(status) ? "(null)" : status.Trim();
+        }
+
+        private static DateTime ResolveFinishedAtOrThrow(
+            task t,
+            List<task_log> finishLogs)
+        {
+            if (t.end_time.HasValue)
+                return t.end_time.Value;
+
+            var latestLogTime = finishLogs
+                .Where(x => x.log_time.HasValue)
+                .Select(x => x.log_time!.Value)
+                .OrderByDescending(x => x)
+                .FirstOrDefault();
+
+            if (latestLogTime == default)
+                throw new InvalidOperationException(
+                    "Không xác định được thời điểm hoàn thành task nên không thể cancel finish.");
+
+            return latestLogTime;
+        }
+
+        private static void EnsureCancelWithinFiveMinutes(
+            task t,
+            List<task_log> finishLogs)
+        {
+            var finishedAt = ResolveFinishedAtOrThrow(t, finishLogs);
+            var now = AppTime.NowVnUnspecified();
+
+            var deadline = finishedAt.AddMinutes(5);
+
+            if (now > deadline)
+            {
+                throw new InvalidOperationException(
+                    $"Không thể cancel finish vì đã quá 5 phút kể từ khi task hoàn thành. " +
+                    $"FinishedAt={finishedAt:yyyy-MM-dd HH:mm:ss}, " +
+                    $"Deadline={deadline:yyyy-MM-dd HH:mm:ss}, " +
+                    $"Now={now:yyyy-MM-dd HH:mm:ss}.");
+            }
+        }
+
+        private async Task<(production prod, order ord)> ValidateCancelableProductionAndOrderStatusAsync(
+            task t,
+            CancellationToken ct)
+        {
+            if (!t.prod_id.HasValue)
+                throw new InvalidOperationException("Task chưa gắn với production.");
+
+            var prod = await _db.productions
+                .FirstOrDefaultAsync(x => x.prod_id == t.prod_id.Value, ct);
+
+            if (prod == null)
+                throw new InvalidOperationException("Không tìm thấy production của task.");
+
+            if (!prod.order_id.HasValue)
+                throw new InvalidOperationException("Production chưa gắn với order.");
+
+            var ord = await _db.orders
+                .FirstOrDefaultAsync(x => x.order_id == prod.order_id.Value, ct);
+
+            if (ord == null)
+                throw new InvalidOperationException("Không tìm thấy order của production.");
+
+            if (!IsCancelableProductionStatus(prod.status))
+            {
+                throw new InvalidOperationException(
+                    $"Chỉ được cancel finish khi production đang InProcessing hoặc Importing. " +
+                    $"Trạng thái production hiện tại: {ShowStatus(prod.status)}.");
+            }
+
+            if (!IsCancelableProductionStatus(ord.status))
+            {
+                throw new InvalidOperationException(
+                    $"Chỉ được cancel finish khi order đang InProcessing hoặc Importing. " +
+                    $"Trạng thái order hiện tại: {ShowStatus(ord.status)}.");
+            }
+
+            return (prod, ord);
         }
     }
 }

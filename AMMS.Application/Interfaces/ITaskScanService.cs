@@ -21,5 +21,10 @@ namespace AMMS.Application.Interfaces
     int taskId,
     List<TaskMaterialUsageInputDto>? materials,
     CancellationToken ct = default);
+        Task<CancelTaskFinishResultDto> CancelTaskFinishAsync(
+    int taskId,
+    CancelTaskFinishRequest? req,
+    int? cancelledByUserId,
+    CancellationToken ct = default);
     }
 }
