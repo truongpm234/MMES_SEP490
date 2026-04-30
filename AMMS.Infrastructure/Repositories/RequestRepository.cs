@@ -41,7 +41,13 @@ namespace AMMS.Infrastructure.Repositories
 
             if (request == null)
                 return null;
-
+            var assignedFullName = request.assigned_consultant.HasValue
+    ? await _db.users
+        .AsNoTracking()
+        .Where(u => u.user_id == request.assigned_consultant.Value)
+        .Select(u => u.full_name)
+        .FirstOrDefaultAsync()
+    : null;
             var estimate = await _db.cost_estimates
                 .AsNoTracking()
                 .Where(x => x.order_request_id == id)
@@ -89,7 +95,7 @@ namespace AMMS.Infrastructure.Repositories
                 process_status = request.process_status,
                 product_type = request.product_type,
                 number_of_plates = request.number_of_plates,
-                assign_name = request.assign_name,
+                assign_name = string.IsNullOrWhiteSpace(assignedFullName) ? null : assignedFullName.Trim(),
                 paper_code = displayPaperCode,
                 paper_name = displayPaperName,
                 wave_type = displayWaveType,
@@ -298,7 +304,7 @@ namespace AMMS.Infrastructure.Repositories
                     wave_sheets_used = ce != null ? ce.wave_sheets_used : null,
                     paper_alternative = ce != null ? ce.paper_alternative : null,
                     wave_alternative = ce != null ? ce.wave_alternative : null,
-                    assign_name = r.assign_name,
+                    assign_name = _db.users.AsNoTracking().Where(u => u.user_id == r.assigned_consultant).Select(u => u.full_name).FirstOrDefault(),
                     lamination_material_id = ce != null ? ce.lamination_material_id : null,
                     lamination_material_code = ce != null ? ce.lamination_material_code : null,
                     lamination_material_name = ce != null ? ce.lamination_material_name : null,
@@ -415,7 +421,7 @@ namespace AMMS.Infrastructure.Repositories
                     wave_sheets_used = ce != null ? ce.wave_sheets_used : null,
                     paper_alternative = ce != null ? ce.paper_alternative : null,
                     wave_alternative = ce != null ? ce.wave_alternative : null,
-                    assign_name = r.assign_name,
+                    assign_name = _db.users.AsNoTracking().Where(u => u.user_id == r.assigned_consultant).Select(u => u.full_name).FirstOrDefault(),
                     lamination_material_id = ce != null ? ce.lamination_material_id : null,
                     lamination_material_code = ce != null ? ce.lamination_material_code : null,
                     lamination_material_name = ce != null ? ce.lamination_material_name : null,
@@ -684,7 +690,7 @@ namespace AMMS.Infrastructure.Repositories
                     actual_consultant_user_id = r.actual_consultant_user_id,
                     delivery_date_change_reason = r.delivery_date_change_reason,
                     estimate_finish_date = r.estimate_finish_date,
-                    assign_name = r.assign_name,
+                    assign_name = _db.users.AsNoTracking().Where(u => u.user_id == r.assigned_consultant).Select(u => u.full_name).FirstOrDefault(),
                     // ===== cost_estimate =====
                     estimate_id = ce != null ? ce.estimate_id : null,
                     estimate_order_request_id = ce != null ? ce.order_request_id : null,
@@ -782,7 +788,13 @@ namespace AMMS.Infrastructure.Repositories
 
             if (request == null)
                 return null;
-
+            var assignedFullName = request.assigned_consultant.HasValue
+    ? await _db.users
+        .AsNoTracking()
+        .Where(u => u.user_id == request.assigned_consultant.Value)
+        .Select(u => u.full_name)
+        .FirstOrDefaultAsync(ct)
+    : null;
             var estimates = await _db.cost_estimates
                 .AsNoTracking()
                 .Include(x => x.process_costs)
@@ -866,7 +878,7 @@ namespace AMMS.Infrastructure.Repositories
                 message_to_customer = SafeText(request.message_to_customer),
                 printer_ready_file_path = SafeText(request.print_ready_file),
                 actual_consultant_user_id = request.actual_consultant_user_id,
-                assign_name = SafeText(request.assign_name),
+                assign_name = SafeText(assignedFullName),
                 deposit_receipt_path = request.deposit_receipt_path,
                 remaining_receipt_path = request.remaining_receipt_path,
                 cost_estimate = estimates.Select(ce =>
@@ -981,7 +993,7 @@ namespace AMMS.Infrastructure.Repositories
                     print_length_mm = r.print_length_mm,
                     is_send_design = r.is_send_design,
                     message_to_customer = r.message_to_customer,
-                    assign_name = r.assign_name,
+                    assign_name = _db.users.AsNoTracking().Where(u => u.user_id == r.assigned_consultant).Select(u => u.full_name).FirstOrDefault(),
                 })
                 .FirstOrDefaultAsync(ct);
 

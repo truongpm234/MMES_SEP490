@@ -682,7 +682,7 @@ namespace AMMS.Application.Services
                 assigned_consultant = clonedAssignedConsultantId,
                 assigned_at = clonedAssignedConsultantId.HasValue ? now : null,
                 actual_consultant_user_id = GetActualConsultantUserId(),
-                assign_name = clonedAssignedConsultant?.full_name,
+                assign_name = ResolveAssignName(clonedAssignedConsultant),
             };
 
             await _requestRepo.AddAsync(clonedRequest);
@@ -1579,12 +1579,20 @@ namespace AMMS.Application.Services
             };
         }
 
+        private static string? ResolveAssignName(AssignedConsultantSummaryDto? consultant)
+        {
+            if (consultant == null)
+                return null;
+
+            return string.IsNullOrWhiteSpace(consultant.full_name)
+                ? null
+                : consultant.full_name.Trim();
+        }
+
         private static void ApplyAssignedConsultant(order_request entity, AssignedConsultantSummaryDto consultant, DateTime now)
         {
             entity.assigned_consultant = consultant.user_id;
-            entity.assign_name = string.IsNullOrWhiteSpace(consultant.full_name)
-                ? null
-                : consultant.username.Trim();
+            entity.assign_name = ResolveAssignName(consultant);
             entity.assigned_at = now;
         }
 
