@@ -1,5 +1,6 @@
 ﻿using AMMS.Application.Interfaces;
 using AMMS.Infrastructure.DBContext;
+using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
@@ -101,6 +102,25 @@ namespace AMMS.Application.Services
 
             var now = AppTime.NowVnUnspecified();
             await _taskRepo.MarkTaskReadyAsync(taskId, now, ct);
+            return true;
+        }
+
+        public async Task<bool> FinishTaskFromStockAsync(int taskId, int? scannedByUserId = null, CancellationToken ct = default)
+        {
+            const string fixedReason = "Bán thành phẩm đã có sẵn trong kho";
+
+            var task = await _taskRepo.GetByIdTrackingAsync(taskId, ct);
+            if (task == null)
+                return false;
+
+            if (string.Equals(task.status, "Finished", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Task đã ở trạng thái Finished.");
+
+            var now = AppTime.NowVnUnspecified();
+
+            await _taskRepo.MarkTaskFinishedFromStockAsync(taskId, fixedReason, now, ct);
+            await _taskRepo.SaveChangesAsync(ct);
+
             return true;
         }
     }

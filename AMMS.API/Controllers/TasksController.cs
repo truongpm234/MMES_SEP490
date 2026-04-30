@@ -228,4 +228,34 @@ public class TasksController : ControllerBase
             })
             .ToList();
     }
-}
+
+    [HttpPost("finish-from-stock")]
+    public async Task<IActionResult> FinishFromStock([FromBody] FinishTaskFromStockRequest req, CancellationToken ct)
+    {
+        if (req == null || req.task_id <= 0)
+            return BadRequest(new { message = "task_id is required" });
+
+        try
+        {
+            var ok = await _taskService.FinishTaskFromStockAsync(req.task_id, GetCurrentUserId(), ct);
+            if (!ok)
+                return NotFound(new { message = "Task not found", task_id = req.task_id });
+
+            return Ok(new
+            {
+                message = "Task status updated to Finished",
+                task_id = req.task_id,
+                status = "Finished",
+                reason = "Bán thành phẩm đã có sẵn trong kho"
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new
+            {
+                message = ex.Message,
+                task_id = req.task_id
+            });
+        }
+    }
+    }
