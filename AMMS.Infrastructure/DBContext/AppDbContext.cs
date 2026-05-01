@@ -73,6 +73,10 @@ public partial class AppDbContext : DbContext
     public virtual DbSet<product> products { get; set; } = null!;
 
     public virtual DbSet<sub_product> sub_products { get; set; } = null!;
+
+    public virtual DbSet<product_receipt> product_receipts { get; set; } = null!;
+
+    public virtual DbSet<product_receipt_item> product_receipt_items { get; set; } = null!;
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<bom>(entity =>
@@ -696,6 +700,10 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.updated_at)
                   .HasColumnType("timestamp without time zone");
 
+            entity.Property(e => e.stock_qty)
+                  .HasDefaultValue(0)
+                  .IsRequired();
+
             entity.HasOne(d => d.product_type)
                   .WithMany(p => p.products)
                   .HasForeignKey(d => d.product_type_id)
@@ -778,6 +786,61 @@ public partial class AppDbContext : DbContext
                   .HasForeignKey(d => d.product_type_id)
                   .OnDelete(DeleteBehavior.Restrict)
                   .HasConstraintName("fk_sub_product_product_type");
+        });
+
+        modelBuilder.Entity<product_receipt>(entity =>
+        {
+            entity.ToTable("product_receipts", "AMMS_DB");
+
+            entity.HasKey(e => e.receipt_id).HasName("product_receipts_pkey");
+
+            entity.HasIndex(e => e.code, "product_receipts_code_key").IsUnique();
+
+            entity.Property(e => e.receipt_id)
+                  .ValueGeneratedOnAdd();
+
+            entity.Property(e => e.code)
+                  .HasMaxLength(30)
+                  .IsRequired();
+
+            entity.Property(e => e.created_at)
+                  .HasColumnType("timestamp without time zone")
+                  .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.Property(e => e.note)
+                  .HasColumnType("text");
+
+            entity.HasOne(d => d.created_byNavigation)
+                  .WithMany()
+                  .HasForeignKey(d => d.created_by)
+                  .HasConstraintName("fk_product_receipts_created_by");
+        });
+
+        modelBuilder.Entity<product_receipt_item>(entity =>
+        {
+            entity.ToTable("product_receipt_items", "AMMS_DB");
+
+            entity.HasKey(e => e.id).HasName("product_receipt_items_pkey");
+
+            entity.Property(e => e.id)
+                  .ValueGeneratedOnAdd();
+
+            entity.Property(e => e.qty_received)
+                  .IsRequired();
+
+            entity.Property(e => e.note)
+                  .HasColumnType("text");
+
+            entity.HasOne(d => d.receipt)
+                  .WithMany(p => p.product_receipt_items)
+                  .HasForeignKey(d => d.receipt_id)
+                  .OnDelete(DeleteBehavior.Cascade)
+                  .HasConstraintName("fk_product_receipt_items_receipt");
+
+            entity.HasOne(d => d.product)
+                  .WithMany(p => p.product_receipt_items)
+                  .HasForeignKey(d => d.product_id)
+                  .HasConstraintName("fk_product_receipt_items_product");
         });
 
         OnModelCreatingPartial(modelBuilder);
