@@ -17,6 +17,8 @@ public partial class product_type
 
     public bool? is_active { get; set; }
 
+    public string? packaging_standard { get; set; }
+
     public virtual ICollection<order_item> order_items { get; set; } = new List<order_item>();
 
     public virtual ICollection<product_type_process> product_type_processes { get; set; } = new List<product_type_process>();
