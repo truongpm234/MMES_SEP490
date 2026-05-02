@@ -1,9 +1,10 @@
-﻿using AMMS.Application.Interfaces;
+﻿using AMMS.Application.Helpers;
+using AMMS.Application.Interfaces;
 using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Productions;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.SignalR;
 using System.Security.Claims;
 
 [ApiController]
@@ -15,9 +16,11 @@ public class TasksController : ControllerBase
     private readonly ITaskScanService _scanSvc;
     private readonly ITaskService _taskService;
     private readonly AppDbContext _db;
+    private readonly IHubContext<RealtimeHub> _hub;
 
     public TasksController(
         AppDbContext db,
+        IHubContext<RealtimeHub> hub,
         ITaskRepository taskRepo,
         ITaskQrTokenService tokenSvc,
         ITaskScanService scanSvc,
@@ -28,6 +31,7 @@ public class TasksController : ControllerBase
         _tokenSvc = tokenSvc;
         _scanSvc = scanSvc;
         _taskService = taskService;
+        _hub = hub;
     }
 
     private int? GetCurrentUserId()
@@ -163,7 +167,7 @@ public class TasksController : ControllerBase
 
             if (!ok)
                 return NotFound(new { message = "Task not found", task_id = req.task_id });
-
+            await _hub.Clients.All.SendAsync("update-ui", new { message = "Update UI" });
             return Ok(new
             {
                 message = "Task status updated to Ready",
@@ -259,4 +263,4 @@ public class TasksController : ControllerBase
             });
         }
     }
-    }
+}
