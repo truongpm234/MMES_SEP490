@@ -145,32 +145,89 @@ namespace AMMS.Application.Services
             if (ord == null)
                 return null;
 
+            var prod = await _db.productions
+                .AsNoTracking()
+                .Where(x => x.order_id == orderId)
+                .OrderByDescending(x => x.prod_id)
+                .FirstOrDefaultAsync(ct);
+
+            var req = await _db.order_requests
+                .AsNoTracking()
+                .Where(x => x.order_id == orderId)
+                .OrderByDescending(x => x.order_request_id)
+                .FirstOrDefaultAsync(ct);
+
             var materials = await GetMaterialReadinessAsync(orderId, ct);
             var machines = await GetMachineReadinessAsync(orderId, ct);
 
             var hasEnoughMaterial = materials.Count > 0 && materials.All(x => x.is_enough);
             var hasFreeMachine = machines.Count > 0 && machines.Any(x => x.is_available);
 
+            var matchedSubProduct = await FindMatchedSubProductAsync(orderId, ct);
+
+            var hasMatchedSubProduct = matchedSubProduct != null;
+
+            var subProductMessage = hasMatchedSubProduct
+                ? "Có bán thành phẩm phù hợp với đơn hàng."
+                : "Không có bán thành phẩm phù hợp với đơn hàng.";
+
             return new ProductionReadyCheckResponse
             {
                 order_id = orderId,
+                production_id = prod?.prod_id,
+
                 is_production_ready = ord.is_production_ready,
                 has_enough_material = hasEnoughMaterial,
                 has_free_machine = hasFreeMachine,
+
                 materials = materials,
-                machines = machines
+                machines = machines,
+
+                product_type_id = prod?.product_type_id,
+                request_print_width_mm = req?.print_width_mm,
+                request_print_length_mm = req?.print_length_mm,
+                order_quantity = req?.quantity,
+
+                is_full_process = prod?.is_full_process ?? true,
+
+                has_matched_sub_product = hasMatchedSubProduct,
+                sub_product_message = subProductMessage,
+                matched_sub_product = matchedSubProduct
             };
         }
 
-        public async Task<bool> SetProductionReadyAsync(int orderId, bool isProductionReady, CancellationToken ct = default)
+        public async Task<bool> SetProductionReadyAsync(
+    int orderId,
+    bool isProductionReady,
+    bool isFullProcess,
+    CancellationToken ct = default)
         {
             var ord = await _orderRepo.GetByIdForUpdateAsync(orderId, ct);
 
             if (ord == null)
                 return false;
 
+            var prod = await _db.productions
+                .Where(x => x.order_id == orderId)
+                .OrderByDescending(x => x.prod_id)
+                .FirstOrDefaultAsync(ct);
+
+            if (prod == null)
+                throw new InvalidOperationException("Production not found for this order.");
+
             if (isProductionReady)
             {
+                if (!isFullProcess)
+                {
+                    var matchedSubProduct = await FindMatchedSubProductAsync(orderId, ct);
+
+                    if (matchedSubProduct == null)
+                    {
+                        throw new InvalidOperationException(
+                            "Không thể xác nhận sẵn sàng sản xuất bằng bán thành phẩm vì không có bán thành phẩm phù hợp với đơn hàng.");
+                    }
+                }
+
                 var materials = await GetMaterialReadinessAsync(orderId, ct);
                 var machines = await GetMachineReadinessAsync(orderId, ct);
 
@@ -178,30 +235,39 @@ namespace AMMS.Application.Services
                 var hasFreeMachine = machines.Count > 0 && machines.Any(x => x.is_available);
 
                 if (!hasEnoughMaterial || !hasFreeMachine)
+                {
                     throw new InvalidOperationException(
                         "Order chưa đủ điều kiện sản xuất: thiếu nguyên vật liệu hoặc chưa có máy rảnh.");
+                }
 
                 ord.is_enough = hasEnoughMaterial;
             }
 
             ord.is_production_ready = isProductionReady;
-            await _orderRepo.SaveChangesAsync();
 
-            await _rt.Clients
-                .Group(RealtimeGroups.ByRole("production manager"))
-                .SendAsync("scheduled", new
-                {
-                    message = $"Đơn hàng {orderId} đã được lên lịch sản xuất có thể bắt đầu sản xuất"
-                });
+            prod.is_full_process = isFullProcess;
+
+            await _db.SaveChangesAsync(ct);
+
+            await _rt.Clients.Group(RealtimeGroups.ByRole("production manager")).SendAsync("scheduled", new
+            {
+                message = isFullProcess
+                        ? $"Đơn hàng {orderId} đã được xác nhận sản xuất với đầy đủ quy trình."
+                        : $"Đơn hàng {orderId} đã được xác nhận sản xuất bằng bán thành phẩm có sẵn."
+            });
 
             var req = await _requestRepo.GetByOderIdAsync(orderId);
+
             if (req != null)
             {
                 await _notiService.CreateNotfi(
                     6,
-                    $"Đơn hàng {orderId} đã được lên lịch sản xuất có thể bắt đầu sản xuất",
+                    isFullProcess
+                        ? $"Đơn hàng {orderId} đã được xác nhận sản xuất với đầy đủ quy trình."
+                        : $"Đơn hàng {orderId} đã được xác nhận sản xuất bằng bán thành phẩm có sẵn.",
                     null,
-                    req.order_request_id, "Scheduled");
+                    req.order_request_id,
+                    "Scheduled");
             }
 
             return true;
@@ -435,6 +501,63 @@ namespace AMMS.Application.Services
             }
 
             return result;
+        }
+
+        private async Task<MatchedSubProductDto?> FindMatchedSubProductAsync(
+    int orderId,
+    CancellationToken ct = default)
+        {
+            var prod = await _db.productions
+                .AsNoTracking()
+                .Where(x => x.order_id == orderId)
+                .OrderByDescending(x => x.prod_id)
+                .FirstOrDefaultAsync(ct);
+
+            if (prod == null || !prod.product_type_id.HasValue)
+                return null;
+
+            var req = await _db.order_requests
+                .AsNoTracking()
+                .Where(x => x.order_id == orderId)
+                .OrderByDescending(x => x.order_request_id)
+                .FirstOrDefaultAsync(ct);
+
+            if (req == null)
+                return null;
+
+            var printWidth = req.print_width_mm;
+            var printLength = req.print_length_mm;
+            var orderQty = req.quantity ?? 0;
+
+            if (!printWidth.HasValue || !printLength.HasValue || orderQty <= 0)
+                return null;
+
+            return await _db.sub_products
+                .AsNoTracking()
+                .Include(x => x.product_type)
+                .Where(x =>
+                    x.is_active == true &&
+                    x.product_type_id == prod.product_type_id.Value &&
+                    x.width == printWidth.Value &&
+                    x.length == printLength.Value &&
+                    x.quantity >= orderQty)
+                .OrderBy(x => x.quantity)
+                .ThenByDescending(x => x.updated_at)
+                .ThenByDescending(x => x.id)
+                .Select(x => new MatchedSubProductDto
+                {
+                    id = x.id,
+                    product_type_id = x.product_type_id,
+                    product_type_name = x.product_type != null ? x.product_type.name : null,
+                    width = x.width,
+                    length = x.length,
+                    product_process = x.product_process,
+                    quantity = x.quantity,
+                    is_active = x.is_active,
+                    description = x.description,
+                    updated_at = x.updated_at
+                })
+                .FirstOrDefaultAsync(ct);
         }
     }
 }

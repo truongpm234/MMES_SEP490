@@ -26,7 +26,7 @@ namespace AMMS.Infrastructure.Repositories
             var pt = await _db.product_types
                 .AsNoTracking()
                 .Where(x => x.product_type_id == productTypeId)
-                .Select(x => new { x.product_type_id, x.code, x.name, x.description })
+                .Select(x => new { x.product_type_id, x.code, x.name, x.description, x.packaging_standard })
                 .FirstOrDefaultAsync(ct);
 
             if (pt == null) return null;
@@ -53,7 +53,6 @@ namespace AMMS.Infrastructure.Repositories
                     coating_type = t.coating_type,
                     wave_type = t.wave_type,
                     number_of_plates = t.number_of_plates,
-
                     is_active = t.is_active
                 })
                 .ToListAsync(ct);
@@ -64,6 +63,7 @@ namespace AMMS.Infrastructure.Repositories
                 code = pt.code,
                 name = pt.name,
                 description = pt.description,
+                packaging_standard = pt.packaging_standard,
                 templates = templates
             };
         }

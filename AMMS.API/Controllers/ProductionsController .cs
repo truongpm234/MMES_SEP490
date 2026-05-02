@@ -137,20 +137,54 @@ namespace AMMS.API.Controllers
         }
 
         [HttpPut("start-ready/{orderId:int}")]
-        public async Task<IActionResult> SetProductionReady(int orderId, [FromBody] ConfirmProductionReadyRequest req, CancellationToken ct)
+        public async Task<IActionResult> SetProductionReady(
+    int orderId,
+    [FromBody] ConfirmProductionReadyRequest req,
+    CancellationToken ct)
         {
-            var ok = await _service.SetProductionReadyAsync(orderId, req.is_production_ready, ct);
-            if (!ok)
-                return NotFound(new { message = "Order not found" });
-
-            return Ok(new
+            try
             {
-                order_id = orderId,
-                is_production_ready = req.is_production_ready,
-                message = req.is_production_ready
-                    ? "General manager confirmed production readiness."
-                    : "Production readiness confirmation has been removed."
-            });
+                var ok = await _service.SetProductionReadyAsync(
+                    orderId,
+                    req.is_production_ready,
+                    req.is_full_process,
+                    ct);
+
+                if (!ok)
+                    return NotFound(new { message = "Order not found" });
+
+                return Ok(new
+                {
+                    order_id = orderId,
+                    is_production_ready = req.is_production_ready,
+                    is_full_process = req.is_full_process,
+                    production_method = req.is_full_process
+                        ? "FullProcess"
+                        : "UseSubProduct",
+                    message = req.is_production_ready
+                        ? req.is_full_process
+                            ? "General manager confirmed production readiness with full process."
+                            : "General manager confirmed production readiness using matched sub_product."
+                        : "Production readiness confirmation has been removed."
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new
+                {
+                    message = ex.Message,
+                    order_id = orderId
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Set production ready failed",
+                    detail = ex.Message,
+                    order_id = orderId
+                });
+            }
         }
 
         [HttpPost("start/{orderId:int}")]

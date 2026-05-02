@@ -9,20 +9,25 @@ namespace AMMS.Shared.DTOs.Productions
     public class ConfirmProductionReadyRequest
     {
         public bool is_production_ready { get; set; }
+        public bool is_full_process { get; set; } = true;
     }
 
     public class ProductionReadyCheckResponse
     {
         public int order_id { get; set; }
-
         public bool is_production_ready { get; set; }
-
         public bool has_enough_material { get; set; }
-
         public bool has_free_machine { get; set; }
-
+        public int? production_id { get; set; }
+        public int? product_type_id { get; set; }
+        public int? request_print_width_mm { get; set; }
+        public int? request_print_length_mm { get; set; }
+        public int? order_quantity { get; set; }
+        public bool is_full_process { get; set; } = true;
+        public bool has_matched_sub_product { get; set; }
+        public string? sub_product_message { get; set; }
+        public MatchedSubProductDto? matched_sub_product { get; set; }
         public List<ProductionReadyMaterialDto> materials { get; set; } = new();
-
         public List<ProductionReadyMachineDto> machines { get; set; } = new();
     }
 

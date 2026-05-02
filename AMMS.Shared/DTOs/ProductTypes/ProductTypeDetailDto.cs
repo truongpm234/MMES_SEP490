@@ -12,7 +12,7 @@ namespace AMMS.Shared.DTOs.ProductTypes
         public string code { get; set; } = "";
         public string name { get; set; } = "";
         public string? description { get; set; }
-
+        public string? packaging_standard { get; set; }
         public List<ProductTemplateDto> templates { get; set; } = new();
         public List<ProductTypeProcessDto> processes { get; set; } = new();
     }

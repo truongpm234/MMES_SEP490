@@ -24,6 +24,8 @@ namespace AMMS.Shared.DTOs.Productions
         // Product
         public string? product_name { get; set; }
         public int quantity { get; set; }
+        public string? packaging_standard { get; set; }
+        public int? product_type_id { get; set; }
 
         // Kích thước
         public int? length_mm { get; set; }

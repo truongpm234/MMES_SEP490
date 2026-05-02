@@ -24,7 +24,7 @@ namespace AMMS.Shared.DTOs.ProductTypes
         public string? coating_type { get; set; }
         public string? wave_type { get; set; }
         public int? number_of_plates { get; set; }
-
+        public string? packaging_standard { get; set; }
         public bool is_active { get; set; }
     }
 }

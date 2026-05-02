@@ -356,12 +356,17 @@ namespace AMMS.Infrastructure.Repositories
                 join q in _db.quotes.AsNoTracking() on o.quote_id equals q.quote_id into qj
                 from q in qj.DefaultIfEmpty()
 
+                join pt in _db.product_types.AsNoTracking() on pr.product_type_id equals pt.product_type_id into ptj
+                from pt in ptj.DefaultIfEmpty()
+
                 where pr.order_id == orderId
                 orderby (pr.planned_start_date ?? pr.created_at ?? pr.end_date)
                 select new
                 {
                     pr,
                     o,
+                    product_type_name = pt != null ? pt.name : null,
+                    packaging_standard = pt != null ? pt.packaging_standard : null,
                     customer_name = !string.IsNullOrWhiteSpace(r.customer_name) ? r.customer_name : "Khách hàng",
                     first_item = _db.order_items.AsNoTracking()
                         .Where(i => i.order_id == o.order_id)
@@ -398,7 +403,8 @@ namespace AMMS.Infrastructure.Repositories
                 customer_name = header.customer_name ?? "Khách ẩn tên",
                 product_name = header.first_item?.product_name,
                 quantity = header.first_item?.quantity ?? 0,
-
+                product_type_id = header.pr.product_type_id,
+                packaging_standard = header.packaging_standard,
                 length_mm = header.first_item?.i_length,
                 width_mm = header.first_item?.i_width,
                 height_mm = header.first_item?.i_height,

@@ -14,11 +14,11 @@ namespace AMMS.Shared.DTOs.ProductTypes
         public string? process_code { get; set; }
         public string? machine_code { get; set; }
 
-        // cost rule (optional)
+        // cost rule
         public string? unit { get; set; }
         public decimal? unit_price { get; set; }
 
-        // machine info (optional)
+        // machine info 
         public int? machine_quantity { get; set; }
         public int? capacity_per_hour { get; set; }
         public decimal? efficiency_percent { get; set; }
