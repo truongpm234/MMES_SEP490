@@ -11,5 +11,6 @@ namespace AMMS.Infrastructure.Interfaces
     {
         Task<product> GetByIdAsync(int productId, CancellationToken ct = default);
         Task<List<product>> GetAllActiveAsync(CancellationToken ct = default);
+
     }
 }
