@@ -43,5 +43,7 @@ public partial class production
 
     public virtual product_type? product_type { get; set; }
 
+    public string? import_recieve_path { get; set; }
+
     public virtual ICollection<task> tasks { get; set; } = new List<task>();
 }

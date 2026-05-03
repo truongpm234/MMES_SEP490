@@ -323,7 +323,10 @@ builder.Services.AddScoped<IProductionCalendarRepository, ProductionCalendarRepo
 builder.Services.AddScoped<IProductionCalendarService, ProductionCalendarService>();
 builder.Services.AddScoped<ISubProductRepository, SubProductRepository>();
 builder.Services.AddScoped<ISubProductService, SubProductService>();
+<<<<<<< HEAD
+=======
 
+>>>>>>> main
 
 // Logging
 builder.Logging.ClearProviders();
@@ -428,6 +431,7 @@ app.Use(async (context, next) =>
     }
 });
 
+app.UseStaticFiles();
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {

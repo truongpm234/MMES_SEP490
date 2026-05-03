@@ -73,10 +73,6 @@ public partial class AppDbContext : DbContext
     public virtual DbSet<product> products { get; set; } = null!;
 
     public virtual DbSet<sub_product> sub_products { get; set; } = null!;
-
-    public virtual DbSet<product_receipt> product_receipts { get; set; } = null!;
-
-    public virtual DbSet<product_receipt_item> product_receipt_items { get; set; } = null!;
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<bom>(entity =>
@@ -252,6 +248,8 @@ public partial class AppDbContext : DbContext
             entity.HasOne(d => d.product_type).WithMany(p => p.productions)
                 .HasForeignKey(d => d.product_type_id)
                 .HasConstraintName("productions_product_type_id_fkey");
+            entity.Property(e => e.import_recieve_path)
+    .HasColumnType("text");
         });
 
         modelBuilder.Entity<purchase>(entity =>

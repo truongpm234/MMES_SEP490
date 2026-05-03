@@ -27,6 +27,8 @@ namespace AMMS.Infrastructure.Interfaces
         Task<bool> SetCompletedByOrderIdAsync(int orderId, CancellationToken ct = default);
         Task<production?> GetLatestByOrderIdAsync(int orderId, CancellationToken ct = default);
         Task<int?> StartProductionByOrderIdOnlyAsync(int orderId, DateTime now, CancellationToken ct = default);
+        Task<ImportReceiveSourceDto?> GetImportReceiveSourceByOrderIdAsync(int orderId, CancellationToken ct = default);
+        Task<bool> SaveImportReceivePathAsync(int prodId, string path, CancellationToken ct = default);
 
     }
 }
