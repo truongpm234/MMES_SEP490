@@ -2,11 +2,13 @@
 using AMMS.Application.Interfaces;
 using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Interfaces;
+using AMMS.Infrastructure.Repositories;
 using AMMS.Shared.DTOs.Common;
 using AMMS.Shared.DTOs.Enums;
 using AMMS.Shared.DTOs.Productions;
 using AMMS.Shared.DTOs.Socket;
 using AMMS.Shared.Helpers;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
@@ -29,7 +31,8 @@ namespace AMMS.Application.Services
             AppDbContext db,
             IOrderRepository orderRepository,
             IRequestRepository requestRepository,
-            NotificationService notiService)
+            NotificationService notiService,
+            IWebHostEnvironment env)
         {
             _db = db;
             _rt = rt;
@@ -38,6 +41,7 @@ namespace AMMS.Application.Services
             _orderRepo = orderRepository;
             _notiService = notiService;
             _requestRepo = requestRepository;
+            _env = env;
         }
 
         public async Task<NearestDeliveryResponse> GetNearestDeliveryAsync()
@@ -559,5 +563,49 @@ namespace AMMS.Application.Services
                 })
                 .FirstOrDefaultAsync(ct);
         }
+
+        public async Task<GenerateImportReceiveResponse?> GenerateImportReceiveAsync(int orderId, CancellationToken ct = default)
+        {
+            var source = await _repo.GetImportReceiveSourceByOrderIdAsync(orderId, ct);
+            if (source == null)
+                return null;
+
+            if (source.items == null || source.items.Count == 0)
+                throw new InvalidOperationException("Đơn hàng không có item để tạo phiếu nhập kho.");
+
+            var root = _env.WebRootPath;
+            if (string.IsNullOrWhiteSpace(root))
+                root = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+
+            var folder = Path.Combine(root, "import-receives");
+            Directory.CreateDirectory(folder);
+
+            var safeOrderCode = string.IsNullOrWhiteSpace(source.order_code) ? "NO_CODE" : source.order_code.Trim();
+            var fileName = $"phieu_nhap_kho_{safeOrderCode}_{source.prod_id}.docx";
+            var filePath = Path.Combine(folder, fileName);
+
+            ImportReceiveDocxHelper.Generate(filePath, source);
+
+            var relativePath = $"/import-receives/{fileName}";
+
+            var saved = await _repo.SaveImportReceivePathAsync(source.prod_id, relativePath, ct);
+            if (!saved)
+                throw new InvalidOperationException("Không lưu được đường dẫn phiếu nhập kho vào production.");
+
+            return new GenerateImportReceiveResponse
+            {
+                success = true,
+                prod_id = source.prod_id,
+                order_id = source.order_id,
+                order_code = source.order_code,
+                import_recieve_path = relativePath,
+                message = "Tạo phiếu nhập kho thành công"
+            };
+        }
+
+
+
+
+        private readonly IWebHostEnvironment _env;
     }
 }

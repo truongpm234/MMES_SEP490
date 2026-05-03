@@ -1897,5 +1897,58 @@ namespace AMMS.Infrastructure.Repositories
                 aliases.Contains(NormalizeMaterialCodeForDetail(m.code)) ||
                 aliases.Contains(NormalizeMaterialCodeForDetail(m.name)));
         }
+
+        public async Task<ImportReceiveSourceDto?> GetImportReceiveSourceByOrderIdAsync(int orderId, CancellationToken ct = default)
+        {
+            var prod = await _db.productions
+                .AsNoTracking()
+                .Where(x => x.order_id == orderId)
+                .OrderByDescending(x => x.prod_id)
+                .FirstOrDefaultAsync(ct);
+
+            if (prod == null || !prod.order_id.HasValue)
+                return null;
+
+            var order = await _db.orders
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.order_id == orderId, ct);
+
+            if (order == null)
+                return null;
+
+            var items = await (
+                from oi in _db.order_items.AsNoTracking()
+                join pt in _db.product_types.AsNoTracking()
+                    on oi.product_type_id equals pt.product_type_id into ptJoin
+                from pt in ptJoin.DefaultIfEmpty()
+                where oi.order_id == orderId
+                orderby oi.item_id
+                select new ImportReceiveItemDto
+                {
+                    item_id = oi.item_id,
+                    product_name = oi.product_name,
+                    quantity = oi.quantity,
+                    packaging_standard = pt != null ? pt.packaging_standard : null
+                }
+            ).ToListAsync(ct);
+
+            return new ImportReceiveSourceDto
+            {
+                prod_id = prod.prod_id,
+                order_id = order.order_id,
+                order_code = order.code ?? string.Empty,
+                items = items
+            };
+        }
+
+        public async Task<bool> SaveImportReceivePathAsync(int prodId, string path, CancellationToken ct = default)
+        {
+            var prod = await _db.productions.FirstOrDefaultAsync(x => x.prod_id == prodId, ct);
+            if (prod == null) return false;
+
+            prod.import_recieve_path = path;
+            await _db.SaveChangesAsync(ct);
+            return true;
+        }
     }
 }

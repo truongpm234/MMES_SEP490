@@ -1,6 +1,7 @@
 ﻿using AMMS.API.Jobs;
 using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
+using AMMS.Application.Services;
 using AMMS.Shared.DTOs.Exceptions;
 using AMMS.Shared.DTOs.Orders;
 using AMMS.Shared.DTOs.Productions;
@@ -289,6 +290,37 @@ namespace AMMS.API.Controllers
                 to = rangeTo,
                 machines = data
             });
+        }
+
+        [HttpPost("generate-import-receive")]
+        public async Task<IActionResult> GenerateImportReceive(
+    [FromBody] GenerateImportReceiveRequest req,
+    CancellationToken ct)
+        {
+            if (req == null || req.orderId <= 0)
+            {
+                return BadRequest(new
+                {
+                    message = "orderId is required"
+                });
+            }
+
+            try
+            {
+                var result = await _service.GenerateImportReceiveAsync(req.orderId, ct);
+                if (result == null)
+                    return NotFound(new { message = "Production or order not found", orderId = req.orderId });
+
+                return Ok(result);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new
+                {
+                    message = ex.Message,
+                    orderId = req.orderId
+                });
+            }
         }
     }
 }
