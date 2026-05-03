@@ -10,6 +10,7 @@ namespace AMMS.Shared.DTOs.Productions
     {
         public bool is_production_ready { get; set; }
         public bool is_full_process { get; set; } = true;
+        public int? sub_id { get; set; }
     }
 
     public class ProductionReadyCheckResponse
@@ -26,6 +27,8 @@ namespace AMMS.Shared.DTOs.Productions
         public bool is_full_process { get; set; } = true;
         public bool has_matched_sub_product { get; set; }
         public string? sub_product_message { get; set; }
+        public int? selected_sub_product_id { get; set; }
+        public int sub_product_used_qty { get; set; }
         public MatchedSubProductDto? matched_sub_product { get; set; }
         public List<ProductionReadyMaterialDto> materials { get; set; } = new();
         public List<ProductionReadyMachineDto> machines { get; set; } = new();

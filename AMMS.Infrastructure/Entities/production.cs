@@ -31,6 +31,12 @@ public partial class production
 
     public bool is_full_process { get; set; } = true;
 
+    public int? sub_product_id { get; set; }
+
+    public int sub_product_used_qty { get; set; } = 0;
+
+    public virtual sub_product? sub_product { get; set; }
+
     public virtual user? manager { get; set; }
 
     public virtual order? order { get; set; }

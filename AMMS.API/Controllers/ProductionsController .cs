@@ -148,6 +148,7 @@ namespace AMMS.API.Controllers
                     orderId,
                     req.is_production_ready,
                     req.is_full_process,
+                    req.sub_id,
                     ct);
 
                 if (!ok)
@@ -158,13 +159,14 @@ namespace AMMS.API.Controllers
                     order_id = orderId,
                     is_production_ready = req.is_production_ready,
                     is_full_process = req.is_full_process,
+                    sub_id = req.sub_id,
                     production_method = req.is_full_process
                         ? "FullProcess"
                         : "UseSubProduct",
                     message = req.is_production_ready
                         ? req.is_full_process
                             ? "General manager confirmed production readiness with full process."
-                            : "General manager confirmed production readiness using matched sub_product."
+                            : "General manager confirmed production readiness using selected sub_product."
                         : "Production readiness confirmation has been removed."
                 });
             }
