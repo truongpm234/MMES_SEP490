@@ -34,6 +34,6 @@ namespace AMMS.Infrastructure.Interfaces
         Task<T> ExecuteInTransactionAsync<T>(Func<CancellationToken, Task<T>> action, CancellationToken ct = default);
 
         Task<task?> GetByIdTrackingAsync(int taskId, CancellationToken ct = default);
-        Task MarkTaskFinishedFromStockAsync(int taskId, string reason, DateTime now, CancellationToken ct = default);
+        Task MarkTaskFinishedFromStockAsync(int taskId, string reason, DateTime now, bool isTakenSubProduct, CancellationToken ct = default);
     }
 }

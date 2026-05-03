@@ -431,7 +431,7 @@ namespace AMMS.Infrastructure.Repositories
         public Task<task?> GetByIdTrackingAsync(int taskId, CancellationToken ct = default)
     => _db.tasks.FirstOrDefaultAsync(x => x.task_id == taskId, ct);
 
-        public async Task MarkTaskFinishedFromStockAsync(int taskId, string reason, DateTime now, CancellationToken ct = default)
+        public async Task MarkTaskFinishedFromStockAsync(int taskId, string reason, DateTime now, bool isTakenSubProduct, CancellationToken ct = default)
         {
             var entity = await _db.tasks.FirstOrDefaultAsync(x => x.task_id == taskId, ct);
             if (entity == null)
@@ -440,6 +440,7 @@ namespace AMMS.Infrastructure.Repositories
             entity.status = "Finished";
             entity.end_time = now;
             entity.reason = reason;
+            entity.is_taken_sub_product = isTakenSubProduct;
         }
 
         private static string Norm(string? code)

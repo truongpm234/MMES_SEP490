@@ -140,7 +140,7 @@ namespace AMMS.Application.Services
                     continue;
                 }
 
-                await _taskRepo.MarkTaskFinishedFromStockAsync(taskId, fixedReason, now, ct);
+                await _taskRepo.MarkTaskFinishedFromStockAsync(taskId, fixedReason, now, true, ct);
                 result.finished_task_ids.Add(taskId);
             }
 

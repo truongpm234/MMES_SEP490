@@ -395,6 +395,9 @@ public partial class AppDbContext : DbContext
              .HasDatabaseName("ix_tasks_machine_planned_end");
             entity.Property(e => e.reason)
     .HasColumnType("text");
+            entity.Property(e => e.is_taken_sub_product)
+             .IsRequired()
+             .HasDefaultValue(false);
         });
 
         modelBuilder.Entity<task_log>(entity =>
