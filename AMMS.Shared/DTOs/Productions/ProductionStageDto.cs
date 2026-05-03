@@ -20,6 +20,7 @@ namespace AMMS.Shared.DTOs.Productions
         public int? task_id { get; set; }
         public string? task_name { get; set; }
         public string? status { get; set; }
+        public bool is_taken_sub_product { get; set; }
         public int? assigned_to { get; set; }
         public string? assigned_to_name { get; set; }
         public DateTime? start_time { get; set; }
