@@ -493,22 +493,23 @@ namespace AMMS.Infrastructure.Repositories
             var prodId = header.pr.prod_id;
 
             var tasks = await _db.tasks.AsNoTracking()
-                .Where(t => t.prod_id == prodId)
-                .Select(t => new
-                {
-                    t.task_id,
-                    t.prod_id,
-                    t.seq_num,
-                    t.name,
-                    t.status,
-                    t.machine,
-                    t.start_time,
-                    t.end_time,
-                    t.planned_start_time,
-                    t.planned_end_time,
-                    t.process_id
-                })
-                .ToListAsync(ct);
+    .Where(t => t.prod_id == prodId)
+    .Select(t => new
+    {
+        t.task_id,
+        t.prod_id,
+        t.seq_num,
+        t.name,
+        t.status,
+        t.machine,
+        t.start_time,
+        t.end_time,
+        t.planned_start_time,
+        t.planned_end_time,
+        t.process_id,
+        t.is_taken_sub_product
+    })
+    .ToListAsync(ct);
 
             var lastTask = tasks
                 .OrderByDescending(t => t.seq_num ?? 0)
@@ -671,6 +672,7 @@ namespace AMMS.Infrastructure.Repositories
                     estimated_output_quantity = io.output.estimated_quantity,
                     actual_output_quantity = io.output.actual_quantity,
                     n_up = nUp,
+                    is_taken_sub_product = task?.is_taken_sub_product ?? false
                 };
 
                 stages.Add(stage);
