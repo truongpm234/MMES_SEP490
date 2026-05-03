@@ -8,6 +8,6 @@ namespace AMMS.Shared.DTOs.Productions
 {
     public class GenerateImportReceiveRequest
     {
-        public int orderId { get; set; }
+        public int order_id { get; set; }
     }
 }
