@@ -18,7 +18,7 @@ namespace AMMS.Shared.Helpers
                 if (lanes[i] <= start)
                 {
                     bestIndex = i;
-                    bestAvailable = lanes[i];
+                    bestAvailable = lanes[i]; 
                     break;
                 }
 
