@@ -48,7 +48,7 @@ namespace AMMS.Application.Helpers
             table.AppendChild(props);
 
             table.Append(
-                CreateHeaderRow("STT", "ID", "Mã đơn", "Tên thành phẩm", "Quy cách đóng gói", "Số lượng")
+                CreateHeaderRow("STT", "ID", "Mã đơn", "Tên thành phẩm", "Quy cách đóng gói", "Tổng số lượng đơn hàng")
             );
 
             int stt = 1;
