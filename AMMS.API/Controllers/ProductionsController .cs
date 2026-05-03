@@ -299,7 +299,7 @@ namespace AMMS.API.Controllers
     [FromBody] GenerateImportReceiveRequest req,
     CancellationToken ct)
         {
-            if (req == null || req.orderId <= 0)
+            if (req == null || req.order_id <= 0)
             {
                 return BadRequest(new
                 {
@@ -309,9 +309,9 @@ namespace AMMS.API.Controllers
 
             try
             {
-                var result = await _service.GenerateImportReceiveAsync(req.orderId, ct);
+                var result = await _service.GenerateImportReceiveAsync(req.order_id, ct);
                 if (result == null)
-                    return NotFound(new { message = "Production or order not found", orderId = req.orderId });
+                    return NotFound(new { message = "Production or order not found", orderId = req.order_id });
 
                 return Ok(result);
             }
@@ -320,7 +320,7 @@ namespace AMMS.API.Controllers
                 return BadRequest(new
                 {
                     message = ex.Message,
-                    orderId = req.orderId
+                    orderId = req.order_id
                 });
             }
         }
