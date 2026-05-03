@@ -235,21 +235,41 @@ public class TasksController : ControllerBase
     }
 
     [HttpPost("finish-from-stock")]
-    public async Task<IActionResult> FinishFromStock([FromBody] FinishTaskFromStockRequest req, CancellationToken ct)
+    public async Task<IActionResult> FinishFromStock(
+    [FromBody] FinishTasksFromStockRequest req,
+    CancellationToken ct)
     {
-        if (req == null || req.task_id <= 0)
-            return BadRequest(new { message = "task_id is required" });
+        if (req == null || req.task_ids == null || req.task_ids.Count == 0)
+            return BadRequest(new { message = "task_ids is required" });
+
+        var taskIds = req.task_ids
+            .Where(x => x > 0)
+            .Distinct()
+            .ToList();
+
+        if (taskIds.Count == 0)
+            return BadRequest(new { message = "task_ids must contain valid positive integers" });
 
         try
         {
-            var ok = await _taskService.FinishTaskFromStockAsync(req.task_id, GetCurrentUserId(), ct);
-            if (!ok)
-                return NotFound(new { message = "Task not found", task_id = req.task_id });
+            var result = await _taskService.FinishTasksFromStockAsync(taskIds, GetCurrentUserId(), ct);
+
+            if (result.not_found_task_ids.Any())
+            {
+                return NotFound(new
+                {
+                    message = "Some tasks were not found",
+                    not_found_task_ids = result.not_found_task_ids,
+                    finished_task_ids = result.finished_task_ids,
+                    already_finished_task_ids = result.already_finished_task_ids
+                });
+            }
 
             return Ok(new
             {
-                message = "Task status updated to Finished",
-                task_id = req.task_id,
+                message = "Tasks status updated to Finished",
+                finished_task_ids = result.finished_task_ids,
+                already_finished_task_ids = result.already_finished_task_ids,
                 status = "Finished",
                 reason = "Bán thành phẩm đã có sẵn trong kho"
             });
@@ -259,7 +279,7 @@ public class TasksController : ControllerBase
             return BadRequest(new
             {
                 message = ex.Message,
-                task_id = req.task_id
+                task_ids = taskIds
             });
         }
     }
