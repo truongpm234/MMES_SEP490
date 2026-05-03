@@ -38,37 +38,49 @@ namespace AMMS.Infrastructure.Repositories
             }
 
             var orders = await (
-                from o in _db.orders.AsNoTracking()
-                join q in _db.quotes.AsNoTracking() on o.quote_id equals q.quote_id into qj
-                from q in qj.DefaultIfEmpty()
-                join r in _db.order_requests.AsNoTracking() on o.order_id equals r.order_id into rj
-                from r in rj.DefaultIfEmpty()
-                orderby o.order_date descending, o.order_id descending
-                select new
-                {
-                    o.order_id,
-                    o.code,
-                    o.order_date,
-                    o.delivery_date,
-                    Status = o.status ?? "",
-                    is_production_ready = o.is_production_ready,
-                    customer_name = r != null ? (r.customer_name ?? "") : "Khách hàng",
+    from o in _db.orders.AsNoTracking()
 
-                    FirstItem = _db.order_items.AsNoTracking()
-        .Where(i => i.order_id == o.order_id)
-        .OrderBy(i => i.item_id)
-        .Select(i => new
-        {
-            i.product_name,
-            i.product_type_id,
-            i.quantity
-        })
-        .FirstOrDefault()
-                }
-            )
-            .Skip(skip)
-            .Take(take)
-            .ToListAsync(ct);
+    join q in _db.quotes.AsNoTracking()
+        on o.quote_id equals q.quote_id into qj
+    from q in qj.DefaultIfEmpty()
+
+    join r in _db.order_requests.AsNoTracking()
+        on o.order_id equals r.order_id into rj
+    from r in rj.DefaultIfEmpty()
+
+    join p in _db.productions.AsNoTracking()
+        on o.production_id equals p.prod_id into pj
+    from p in pj.DefaultIfEmpty()
+
+    orderby o.order_date descending, o.order_id descending
+
+    select new
+    {
+        o.order_id,
+        o.code,
+        o.order_date,
+        o.delivery_date,
+        Status = o.status ?? "",
+        is_production_ready = o.is_production_ready,
+        customer_name = r != null ? (r.customer_name ?? "") : "Khách hàng",
+
+        import_recieve_path = p != null ? p.import_recieve_path : null,
+
+        FirstItem = _db.order_items.AsNoTracking()
+            .Where(i => i.order_id == o.order_id)
+            .OrderBy(i => i.item_id)
+            .Select(i => new
+            {
+                i.product_name,
+                i.product_type_id,
+                i.quantity
+            })
+            .FirstOrDefault()
+    }
+)
+.Skip(skip)
+.Take(take)
+.ToListAsync(ct);
 
             if (orders.Count == 0) return new List<OrderResponseDto>();
 
@@ -201,7 +213,7 @@ namespace AMMS.Infrastructure.Repositories
                     }
                     else
                     {
-                        canFulfill = (missingMaterials == null || missingMaterials.Count == 0);
+                        canFulfill = missingMaterials == null || missingMaterials.Count == 0;
                     }
                 }
                 else
@@ -224,7 +236,9 @@ namespace AMMS.Infrastructure.Repositories
                     is_production_ready = o.is_production_ready,
                     missing_materials = canFulfill == false
                         ? (missingMaterials ?? new List<MissingMaterialDto>())
-                        : null
+                        : null,
+
+                    import_recieve_path = o.import_recieve_path
                 };
             }).ToList();
         }
