@@ -391,6 +391,7 @@ namespace AMMS.Infrastructure.Repositories
             var dto = new ProductionDetailDto
             {
                 prod_id = header.pr.prod_id,
+                import_recieve_path = header.pr.import_recieve_path,
                 production_code = header.pr.code,
                 production_status = header.pr.status,
                 created_at = header.pr.created_at,
