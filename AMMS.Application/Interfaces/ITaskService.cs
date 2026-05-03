@@ -1,4 +1,5 @@
-﻿using System;
+﻿using AMMS.Shared.DTOs.Productions;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -9,6 +10,6 @@ namespace AMMS.Application.Interfaces
     public interface ITaskService
     {
         Task<bool> SetTaskReadyAsync(int taskId, CancellationToken ct = default);
-        Task<bool> FinishTaskFromStockAsync(int taskId, int? scannedByUserId = null, CancellationToken ct = default);
+        Task<FinishTasksFromStockResponse> FinishTasksFromStockAsync(List<int> taskIds,int? scannedByUserId = null, CancellationToken ct = default);
     }
 }

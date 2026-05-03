@@ -2,6 +2,7 @@
 using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
+using AMMS.Shared.DTOs.Productions;
 using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
 
@@ -105,23 +106,47 @@ namespace AMMS.Application.Services
             return true;
         }
 
-        public async Task<bool> FinishTaskFromStockAsync(int taskId, int? scannedByUserId = null, CancellationToken ct = default)
+        public async Task<FinishTasksFromStockResponse> FinishTasksFromStockAsync(
+    List<int> taskIds,
+    int? scannedByUserId = null,
+    CancellationToken ct = default)
         {
             const string fixedReason = "Bán thành phẩm đã có sẵn trong kho";
 
-            var task = await _taskRepo.GetByIdTrackingAsync(taskId, ct);
-            if (task == null)
-                return false;
+            if (taskIds == null || taskIds.Count == 0)
+                throw new InvalidOperationException("task_ids is required.");
 
-            if (string.Equals(task.status, "Finished", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Task đã ở trạng thái Finished.");
+            var distinctTaskIds = taskIds
+                .Where(x => x > 0)
+                .Distinct()
+                .ToList();
 
+            var result = new FinishTasksFromStockResponse();
             var now = AppTime.NowVnUnspecified();
 
-            await _taskRepo.MarkTaskFinishedFromStockAsync(taskId, fixedReason, now, ct);
+            foreach (var taskId in distinctTaskIds)
+            {
+                var task = await _taskRepo.GetByIdTrackingAsync(taskId, ct);
+
+                if (task == null)
+                {
+                    result.not_found_task_ids.Add(taskId);
+                    continue;
+                }
+
+                if (string.Equals(task.status, "Finished", StringComparison.OrdinalIgnoreCase))
+                {
+                    result.already_finished_task_ids.Add(taskId);
+                    continue;
+                }
+
+                await _taskRepo.MarkTaskFinishedFromStockAsync(taskId, fixedReason, now, ct);
+                result.finished_task_ids.Add(taskId);
+            }
+
             await _taskRepo.SaveChangesAsync(ct);
 
-            return true;
+            return result;
         }
     }
 }
