@@ -26,8 +26,6 @@ namespace AMMS.Infrastructure.Entities
 
         [ForeignKey(nameof(product_type_id))]
         public virtual product_type product_type { get; set; } = null!;
-
-        public virtual ICollection<product_receipt_item> product_receipt_items { get; set; } = new List<product_receipt_item>();
     }
 }
 
