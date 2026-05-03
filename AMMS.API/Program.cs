@@ -323,8 +323,7 @@ builder.Services.AddScoped<IProductionCalendarRepository, ProductionCalendarRepo
 builder.Services.AddScoped<IProductionCalendarService, ProductionCalendarService>();
 builder.Services.AddScoped<ISubProductRepository, SubProductRepository>();
 builder.Services.AddScoped<ISubProductService, SubProductService>();
-builder.Services.AddScoped<IProductReceiptRepository, ProductReceiptRepository>();
-builder.Services.AddScoped<IProductReceiptService, ProductReceiptService>();
+
 
 // Logging
 builder.Logging.ClearProviders();
