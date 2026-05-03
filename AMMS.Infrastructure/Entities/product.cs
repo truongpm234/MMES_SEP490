@@ -22,8 +22,6 @@ namespace AMMS.Infrastructure.Entities
 
         public DateTime? updated_at { get; set; }
 
-        public int stock_qty { get; set; }
-
         [ForeignKey(nameof(product_type_id))]
         public virtual product_type product_type { get; set; } = null!;
     }

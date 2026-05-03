@@ -704,10 +704,6 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.updated_at)
                   .HasColumnType("timestamp without time zone");
 
-            entity.Property(e => e.stock_qty)
-                  .HasDefaultValue(0)
-                  .IsRequired();
-
             entity.HasOne(d => d.product_type)
                   .WithMany(p => p.products)
                   .HasForeignKey(d => d.product_type_id)
