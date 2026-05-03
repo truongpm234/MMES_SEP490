@@ -23,6 +23,7 @@ namespace AMMS.Application.Services
         private readonly IHubContext<RealtimeHub> _rt;
         private readonly NotificationService _notiService;
         private readonly IRequestRepository _requestRepo;
+        private readonly ICloudinaryFileStorageService _fileStorage;
 
         public ProductionService(
             IHubContext<RealtimeHub> rt,
@@ -32,7 +33,8 @@ namespace AMMS.Application.Services
             IOrderRepository orderRepository,
             IRequestRepository requestRepository,
             NotificationService notiService,
-            IWebHostEnvironment env)
+            IWebHostEnvironment env,
+            ICloudinaryFileStorageService fileStorage)
         {
             _db = db;
             _rt = rt;
@@ -42,6 +44,7 @@ namespace AMMS.Application.Services
             _notiService = notiService;
             _requestRepo = requestRepository;
             _env = env;
+            _fileStorage = fileStorage;
         }
 
         public async Task<NearestDeliveryResponse> GetNearestDeliveryAsync()
@@ -733,24 +736,41 @@ namespace AMMS.Application.Services
             if (source.items == null || source.items.Count == 0)
                 throw new InvalidOperationException("Đơn hàng không có item để tạo phiếu nhập kho.");
 
-            var root = _env.WebRootPath;
-            if (string.IsNullOrWhiteSpace(root))
-                root = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+            var safeOrderCode = string.IsNullOrWhiteSpace(source.order_code)
+                ? "NO_CODE"
+                : source.order_code.Trim();
 
-            var folder = Path.Combine(root, "import-receives");
-            Directory.CreateDirectory(folder);
-
-            var safeOrderCode = string.IsNullOrWhiteSpace(source.order_code) ? "NO_CODE" : source.order_code.Trim();
             var fileName = $"phieu_nhap_kho_{safeOrderCode}_{source.prod_id}.docx";
-            var filePath = Path.Combine(folder, fileName);
 
-            ImportReceiveDocxHelper.Generate(filePath, source);
+            var tempFolder = Path.Combine(Path.GetTempPath(), "amms-import-receives");
+            Directory.CreateDirectory(tempFolder);
 
-            var relativePath = $"/import-receives/{fileName}";
+            var tempFilePath = Path.Combine(tempFolder, fileName);
 
-            var saved = await _repo.SaveImportReceivePathAsync(source.prod_id, relativePath, ct);
+            ImportReceiveDocxHelper.Generate(tempFilePath, source);
+
+            var publicId = $"import-receives/phieu_nhap_kho_{safeOrderCode}_{source.prod_id}";
+
+            await using var fs = new FileStream(tempFilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+            var cloudUrl = await _fileStorage.UploadRawWithPublicIdAsync(
+                fs,
+                fileName,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                publicId);
+
+            var saved = await _repo.SaveImportReceivePathAsync(source.prod_id, cloudUrl, ct);
             if (!saved)
                 throw new InvalidOperationException("Không lưu được đường dẫn phiếu nhập kho vào production.");
+
+            try
+            {
+                if (File.Exists(tempFilePath))
+                    File.Delete(tempFilePath);
+            }
+            catch
+            {
+            }
 
             return new GenerateImportReceiveResponse
             {
@@ -758,7 +778,7 @@ namespace AMMS.Application.Services
                 prod_id = source.prod_id,
                 order_id = source.order_id,
                 order_code = source.order_code,
-                import_recieve_path = relativePath,
+                import_recieve_path = cloudUrl,
                 message = "Tạo phiếu nhập kho thành công"
             };
         }
