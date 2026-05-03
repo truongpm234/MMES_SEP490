@@ -250,6 +250,12 @@ public partial class AppDbContext : DbContext
                 .HasConstraintName("productions_product_type_id_fkey");
             entity.Property(e => e.import_recieve_path)
     .HasColumnType("text");
+            entity.Property(e => e.sub_product_id);
+
+            entity.HasOne(d => d.sub_product)
+                .WithMany()
+                .HasForeignKey(d => d.sub_product_id)
+                .HasConstraintName("fk_productions_sub_product");
         });
 
         modelBuilder.Entity<purchase>(entity =>

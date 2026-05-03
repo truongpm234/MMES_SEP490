@@ -763,8 +763,10 @@ namespace AMMS.Application.Services
             };
         }
 
-
-
+        public Task<bool> SetProductionReadyAsync(int orderId, bool isProductionReady, bool isFullProcess, CancellationToken ct = default)
+        {
+            throw new NotImplementedException();
+        }
 
         private readonly IWebHostEnvironment _env;
     }
