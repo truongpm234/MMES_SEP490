@@ -193,6 +193,8 @@ namespace AMMS.Application.Services
                 order_quantity = req?.quantity,
 
                 is_full_process = prod?.is_full_process ?? true,
+                selected_sub_product_id = prod?.sub_product_id,
+                sub_product_used_qty = prod?.sub_product_used_qty ?? 0,
 
                 has_matched_sub_product = hasMatchedSubProduct,
                 sub_product_message = subProductMessage,
@@ -204,61 +206,223 @@ namespace AMMS.Application.Services
     int orderId,
     bool isProductionReady,
     bool isFullProcess,
+    int? subId,
     CancellationToken ct = default)
         {
-            var ord = await _orderRepo.GetByIdForUpdateAsync(orderId, ct);
+            var strategy = _db.Database.CreateExecutionStrategy();
 
-            if (ord == null)
-                return false;
-
-            var prod = await _db.productions
-                .Where(x => x.order_id == orderId)
-                .OrderByDescending(x => x.prod_id)
-                .FirstOrDefaultAsync(ct);
-
-            if (prod == null)
-                throw new InvalidOperationException("Production not found for this order.");
-
-            if (isProductionReady)
+            return await strategy.ExecuteAsync(async () =>
             {
-                if (!isFullProcess)
-                {
-                    var matchedSubProduct = await FindMatchedSubProductAsync(orderId, ct);
+                await using var tx = await _db.Database.BeginTransactionAsync(ct);
 
-                    if (matchedSubProduct == null)
-                    {
-                        throw new InvalidOperationException(
-                            "Không thể xác nhận sẵn sàng sản xuất bằng bán thành phẩm vì không có bán thành phẩm phù hợp với đơn hàng.");
-                    }
-                }
+                var ord = await _db.orders
+                    .FirstOrDefaultAsync(x => x.order_id == orderId, ct);
 
-                var materials = await GetMaterialReadinessAsync(orderId, ct);
-                var machines = await GetMachineReadinessAsync(orderId, ct);
+                if (ord == null)
+                    return false;
 
-                var hasEnoughMaterial = materials.Count > 0 && materials.All(x => x.is_enough);
-                var hasFreeMachine = machines.Count > 0 && machines.Any(x => x.is_available);
+                var prod = await _db.productions
+                    .Where(x => x.order_id == orderId)
+                    .OrderByDescending(x => x.prod_id)
+                    .FirstOrDefaultAsync(ct);
 
-                if (!hasEnoughMaterial || !hasFreeMachine)
+                if (prod == null)
+                    throw new InvalidOperationException("Production not found for this order.");
+
+                if (string.Equals(prod.status, "InProcessing", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(prod.status, "Importing", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(prod.status, "Delivery", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(prod.status, "Completed", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new InvalidOperationException(
-                        "Order chưa đủ điều kiện sản xuất: thiếu nguyên vật liệu hoặc chưa có máy rảnh.");
+                        "Không thể thay đổi phương thức sản xuất vì đơn hàng đã bắt đầu hoặc đã hoàn tất sản xuất.");
                 }
 
-                ord.is_enough = hasEnoughMaterial;
-            }
+                if (!isProductionReady)
+                {
+                    ord.is_production_ready = false;
+                    ord.is_enough = false;
 
-            ord.is_production_ready = isProductionReady;
+                    prod.is_full_process = true;
+                    prod.sub_product_id = null;
 
-            prod.is_full_process = isFullProcess;
+                    await _db.SaveChangesAsync(ct);
+                    await tx.CommitAsync(ct);
 
-            await _db.SaveChangesAsync(ct);
+                    return true;
+                }
 
-            await _rt.Clients.Group(RealtimeGroups.ByRole("production manager")).SendAsync("scheduled", new
-            {
-                message = isFullProcess
-                        ? $"Đơn hàng {orderId} đã được xác nhận sản xuất với đầy đủ quy trình."
-                        : $"Đơn hàng {orderId} đã được xác nhận sản xuất bằng bán thành phẩm có sẵn."
+                if (isFullProcess)
+                {
+                    var fullProcessMaterials = await GetMaterialReadinessAsync(orderId, ct);
+                    var fullProcessMachines = await GetMachineReadinessAsync(orderId, ct);
+
+                    var hasEnoughMaterialForFullProcess = fullProcessMaterials.Count > 0
+                                                          && fullProcessMaterials.All(x => x.is_enough);
+
+                    var hasFreeMachineForFullProcess = fullProcessMachines.Count > 0
+                                                       && fullProcessMachines.Any(x => x.is_available);
+
+                    if (!hasEnoughMaterialForFullProcess || !hasFreeMachineForFullProcess)
+                    {
+                        throw new InvalidOperationException(
+                            "Order chưa đủ điều kiện sản xuất: thiếu nguyên vật liệu hoặc chưa có máy rảnh.");
+                    }
+
+                    ord.is_enough = hasEnoughMaterialForFullProcess;
+                    ord.is_production_ready = true;
+
+                    prod.is_full_process = true;
+                    prod.sub_product_id = null;
+                    prod.sub_product_used_qty = 0;
+
+                    await _db.SaveChangesAsync(ct);
+                    await tx.CommitAsync(ct);
+
+                    await SendProductionReadyNotificationAsync(orderId, true);
+
+                    return true;
+                }
+
+                if (!subId.HasValue || subId.Value <= 0)
+                {
+                    throw new InvalidOperationException(
+                        "Vui lòng truyền sub_id khi chọn phương thức sản xuất bằng bán thành phẩm.");
+                }
+
+                var req = await _db.order_requests
+                    .AsNoTracking()
+                    .Where(x => x.order_id == orderId)
+                    .OrderByDescending(x => x.order_request_id)
+                    .FirstOrDefaultAsync(ct);
+
+                if (req == null)
+                    throw new InvalidOperationException("Order request not found for this order.");
+
+                if (!prod.product_type_id.HasValue || prod.product_type_id.Value <= 0)
+                {
+                    throw new InvalidOperationException(
+                        "Production chưa có product_type_id nên không thể kiểm tra bán thành phẩm.");
+                }
+
+                if (!req.print_width_mm.HasValue || req.print_width_mm.Value <= 0)
+                {
+                    throw new InvalidOperationException(
+                        "Order request chưa có print_width_mm nên không thể kiểm tra bán thành phẩm.");
+                }
+
+                if (!req.print_length_mm.HasValue || req.print_length_mm.Value <= 0)
+                {
+                    throw new InvalidOperationException(
+                        "Order request chưa có print_length_mm nên không thể kiểm tra bán thành phẩm.");
+                }
+
+                var orderQty = req.quantity ?? 0;
+
+                if (orderQty <= 0)
+                {
+                    throw new InvalidOperationException(
+                        "Số lượng đơn hàng không hợp lệ nên không thể sử dụng bán thành phẩm.");
+                }
+
+                var selectedSubProduct = await _db.sub_products
+                    .Include(x => x.product_type)
+                    .FirstOrDefaultAsync(x => x.id == subId.Value, ct);
+
+                if (selectedSubProduct == null)
+                {
+                    throw new InvalidOperationException(
+                        $"Không tìm thấy bán thành phẩm có id = {subId.Value}.");
+                }
+
+                if (!selectedSubProduct.is_active)
+                {
+                    throw new InvalidOperationException(
+                        "Bán thành phẩm đã chọn đang không hoạt động.");
+                }
+
+                if (selectedSubProduct.product_type_id != prod.product_type_id.Value)
+                {
+                    throw new InvalidOperationException(
+                        "Bán thành phẩm đã chọn không cùng loại sản phẩm với production.");
+                }
+
+                if (selectedSubProduct.width != req.print_width_mm.Value)
+                {
+                    throw new InvalidOperationException(
+                        $"Bán thành phẩm đã chọn không đúng chiều rộng. Yêu cầu: {req.print_width_mm.Value}, thực tế: {selectedSubProduct.width}.");
+                }
+
+                if (selectedSubProduct.length != req.print_length_mm.Value)
+                {
+                    throw new InvalidOperationException(
+                        $"Bán thành phẩm đã chọn không đúng chiều dài. Yêu cầu: {req.print_length_mm.Value}, thực tế: {selectedSubProduct.length}.");
+                }
+
+                if (selectedSubProduct.quantity < orderQty)
+                {
+                    throw new InvalidOperationException(
+                        $"Số lượng bán thành phẩm không đủ. Cần: {orderQty}, hiện có: {selectedSubProduct.quantity}.");
+                }
+
+                var subProductMachines = await GetMachineReadinessAsync(orderId, ct);
+                var hasFreeMachineForSubProduct = subProductMachines.Count > 0
+                                                  && subProductMachines.Any(x => x.is_available);
+
+                if (!hasFreeMachineForSubProduct)
+                {
+                    throw new InvalidOperationException(
+                        "Order chưa đủ điều kiện sản xuất: chưa có máy rảnh.");
+                }
+
+                var alreadyUsedSameSubProduct =
+                    ord.is_production_ready
+                    && prod.is_full_process == false
+                    && prod.sub_product_id == selectedSubProduct.id
+                    && prod.sub_product_used_qty == orderQty;
+
+                if (!alreadyUsedSameSubProduct)
+                {
+                    if (ord.is_production_ready
+                        && prod.is_full_process == false
+                        && prod.sub_product_id.HasValue
+                        && prod.sub_product_id.Value != selectedSubProduct.id)
+                    {
+                        throw new InvalidOperationException(
+                            "Đơn hàng đã được xác nhận dùng bán thành phẩm khác. Vui lòng hủy xác nhận trước khi đổi bán thành phẩm.");
+                    }
+
+                    selectedSubProduct.quantity -= orderQty;
+                }
+
+                ord.is_enough = true;
+                ord.is_production_ready = true;
+
+                prod.is_full_process = false;
+                prod.sub_product_id = selectedSubProduct.id;
+                prod.sub_product_used_qty = orderQty;
+
+                await _db.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+
+                await SendProductionReadyNotificationAsync(orderId, false);
+
+                return true;
             });
+        }
+
+        private async Task SendProductionReadyNotificationAsync(int orderId, bool isFullProcess)
+        {
+            var message = isFullProcess
+                ? $"Đơn hàng {orderId} đã được xác nhận sản xuất với đầy đủ quy trình."
+                : $"Đơn hàng {orderId} đã được xác nhận sản xuất bằng bán thành phẩm có sẵn.";
+
+            await _rt.Clients
+                .Group(RealtimeGroups.ByRole("production manager"))
+                .SendAsync("scheduled", new
+                {
+                    message = message
+                });
 
             var req = await _requestRepo.GetByOderIdAsync(orderId);
 
@@ -266,15 +430,11 @@ namespace AMMS.Application.Services
             {
                 await _notiService.CreateNotfi(
                     6,
-                    isFullProcess
-                        ? $"Đơn hàng {orderId} đã được xác nhận sản xuất với đầy đủ quy trình."
-                        : $"Đơn hàng {orderId} đã được xác nhận sản xuất bằng bán thành phẩm có sẵn.",
+                    message,
                     null,
                     req.order_request_id,
                     "Scheduled");
             }
-
-            return true;
         }
 
         private async Task<List<ProductionReadyMaterialDto>> GetMaterialReadinessAsync(
