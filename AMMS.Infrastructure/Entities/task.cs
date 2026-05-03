@@ -36,5 +36,7 @@ public partial class task
 
     public virtual production? prod { get; set; }
 
+    public bool is_taken_sub_product { get; set; } = false;
+
     public virtual ICollection<task_log> task_logs { get; set; } = new List<task_log>();
 }

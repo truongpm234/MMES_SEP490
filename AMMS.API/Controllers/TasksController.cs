@@ -271,7 +271,8 @@ public class TasksController : ControllerBase
                 finished_task_ids = result.finished_task_ids,
                 already_finished_task_ids = result.already_finished_task_ids,
                 status = "Finished",
-                reason = "Bán thành phẩm đã có sẵn trong kho"
+                reason = "Bán thành phẩm đã có sẵn trong kho",
+                is_taken_sub_product = true
             });
         }
         catch (InvalidOperationException ex)
