@@ -22,5 +22,6 @@ namespace AMMS.Shared.DTOs.Orders
         public bool layout_confirmed { get; set; }
         public bool is_production_ready { get; set; }
         public DateTime? confirmed_delivery_at { get; set; }
+        public string? import_recieve_path { get; set; }
     }
 }
