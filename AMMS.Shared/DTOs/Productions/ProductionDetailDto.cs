@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace AMMS.Shared.DTOs.Productions
+﻿namespace AMMS.Shared.DTOs.Productions
 {
     public sealed class ProductionDetailDto
     {
@@ -14,6 +8,7 @@ namespace AMMS.Shared.DTOs.Productions
         public string? production_status { get; set; }
         public DateTime? start_date { get; set; }
         public DateTime? end_date { get; set; }
+        public string? import_recieve_path { get; set; }
 
         // Order / Customer
         public int? order_id { get; set; }
