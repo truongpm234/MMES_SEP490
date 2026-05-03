@@ -280,26 +280,36 @@ namespace AMMS.Infrastructure.Repositories
                 .AsNoTracking()
                 .FirstOrDefaultAsync(x => x.prod_id == taskRow.prod_id.Value, ct);
 
-            order_request? req = null;
+            if (prod == null || !prod.order_id.HasValue)
+                return null;
+
+            var req = await _db.order_requests
+                .AsNoTracking()
+                .Where(x => x.order_id == prod.order_id.Value)
+                .OrderByDescending(x => x.order_request_id)
+                .FirstOrDefaultAsync(ct);
+
+            if (req == null)
+                return null;
+
             cost_estimate? est = null;
 
-            if (prod?.order_id.HasValue == true)
+            if (req.accepted_estimate_id.HasValue && req.accepted_estimate_id.Value > 0)
             {
-                req = await _db.order_requests
+                est = await _db.cost_estimates
                     .AsNoTracking()
-                    .Where(x => x.order_id == prod.order_id.Value)
-                    .OrderByDescending(x => x.order_request_id)
-                    .FirstOrDefaultAsync(ct);
-
-                if (req != null)
-                {
-                    est = await _db.cost_estimates
-                        .AsNoTracking()
-                        .Where(x => x.order_request_id == req.order_request_id)
-                        .OrderByDescending(x => x.estimate_id)
-                        .FirstOrDefaultAsync(ct);
-                }
+                    .FirstOrDefaultAsync(x =>
+                        x.estimate_id == req.accepted_estimate_id.Value &&
+                        x.order_request_id == req.order_request_id,
+                        ct);
             }
+
+            est ??= await _db.cost_estimates
+                .AsNoTracking()
+                .Where(x => x.order_request_id == req.order_request_id)
+                .OrderByDescending(x => x.is_active)
+                .ThenByDescending(x => x.estimate_id)
+                .FirstOrDefaultAsync(ct);
 
             var route = await _db.tasks
                 .AsNoTracking()
@@ -317,18 +327,19 @@ namespace AMMS.Infrastructure.Repositories
                 currentIndex = 0;
 
             var stage = route[currentIndex];
+
             var pcode = Norm(stage.process?.process_code);
             var pname = string.IsNullOrWhiteSpace(stage.process?.process_name)
                 ? pcode
                 : stage.process!.process_name!;
 
-            var orderQty = SafePositive(req?.quantity ?? 0, 1);
+            var orderQty = SafePositive(req.quantity ?? 0, 1);
 
             var sheetsRequired = Math.Max(est?.sheets_required ?? 0, 0);
             var sheetsWaste = Math.Max(est?.sheets_waste ?? 0, 0);
             var sheetsTotal = Math.Max(est?.sheets_total ?? 0, sheetsRequired + sheetsWaste);
             var nUp = SafePositive(est?.n_up ?? 0, 1);
-            var numberOfPlates = SafePositive(req?.number_of_plates ?? 0, 1);
+            var numberOfPlates = SafePositive(req.number_of_plates ?? 0, 1);
 
             if (sheetsRequired <= 0)
                 sheetsRequired = Math.Max(1, (int)Math.Ceiling(orderQty / (decimal)nUp));
@@ -343,8 +354,8 @@ namespace AMMS.Infrastructure.Repositories
                 sheetsTotal = 1;
 
             var routeCodes = route
-    .Select(x => (string?)x.process?.process_code)
-    .ToList();
+                .Select(x => (string?)x.process?.process_code)
+                .ToList();
 
             var qtyProfile = StageQuantityHelper.BuildPolicy(
                 currentCode: pcode,

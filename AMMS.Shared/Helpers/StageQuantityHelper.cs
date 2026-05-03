@@ -119,13 +119,13 @@ namespace AMMS.Shared.Helpers
         }
 
         public static int GetProductionOutputCap(
-            string? currentCode,
-            int currentStageIndex,
-            IReadOnlyList<string?> routeProcessCodes,
-            int sheetsTotal,
-            int nUp,
-            int numberOfPlates,
-            int tokenQtyMax = int.MaxValue)
+    string? currentCode,
+    int currentStageIndex,
+    IReadOnlyList<string?> routeProcessCodes,
+    int sheetsTotal,
+    int nUp,
+    int numberOfPlates,
+    int tokenQtyMax = int.MaxValue)
         {
             var mode = ResolveStageQtyMode(
                 currentCode,
@@ -150,9 +150,9 @@ namespace AMMS.Shared.Helpers
         }
 
         public static string ResolveQtyUnitLikeProduction(
-            string? currentCode,
-            int currentStageIndex,
-            IReadOnlyList<string?> routeProcessCodes)
+    string? currentCode,
+    int currentStageIndex,
+    IReadOnlyList<string?> routeProcessCodes)
         {
             var mode = ResolveStageQtyMode(
                 currentCode,

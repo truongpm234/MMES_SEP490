@@ -581,11 +581,13 @@ namespace AMMS.Application.Services
             if (previousCtx == null)
                 return new List<TaskReferenceInputDto>();
 
+            var currentStageIndex = previousCtx.previous_stage_index + 1;
+
             var (unit, qty) = ResolveReferenceInputShape(
-                previousCtx.previous_process_code,
-                previousCtx.previous_stage_index,
-                previousCtx.route_process_codes,
-                ctx);
+                currentProcessCode: currentCode,
+                currentStageIndex: currentStageIndex,
+                routeProcessCodes: previousCtx.route_process_codes,
+                ctx: ctx);
 
             var result = new List<TaskReferenceInputDto>();
 
@@ -594,6 +596,7 @@ namespace AMMS.Application.Services
                 case "IN":
                 case "PHU":
                 case "CAN":
+                case "CAN_MANG":
                 case "BOI":
                 case "BE":
                 case "DUT":
@@ -964,8 +967,8 @@ namespace AMMS.Application.Services
         }
 
         private static (string unit, decimal qty) ResolveReferenceInputShape(
-    string? previousProcessCode,
-    int previousStageIndex,
+    string? currentProcessCode,
+    int currentStageIndex,
     IReadOnlyList<string?> routeProcessCodes,
     TaskEstimateContext ctx)
         {
@@ -993,13 +996,13 @@ namespace AMMS.Application.Services
                 sheetsTotal = 1;
 
             var unit = StageQuantityHelper.ResolveQtyUnitLikeProduction(
-                currentCode: previousProcessCode,
-                currentStageIndex: previousStageIndex,
+                currentCode: currentProcessCode,
+                currentStageIndex: currentStageIndex,
                 routeProcessCodes: routeProcessCodes);
 
             var qty = StageQuantityHelper.GetProductionOutputCap(
-                currentCode: previousProcessCode,
-                currentStageIndex: previousStageIndex,
+                currentCode: currentProcessCode,
+                currentStageIndex: currentStageIndex,
                 routeProcessCodes: routeProcessCodes,
                 sheetsTotal: sheetsTotal,
                 nUp: nUp,

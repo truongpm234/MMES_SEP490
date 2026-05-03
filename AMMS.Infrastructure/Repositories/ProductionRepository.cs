@@ -976,6 +976,7 @@ namespace AMMS.Infrastructure.Repositories
     decimal estLaminationWeightKg)
         {
             var inputs = new List<StageMaterialDto>();
+
             var code = (processCode ?? "").Trim().ToUpperInvariant();
             var productName = string.IsNullOrWhiteSpace(detail.product_name)
                 ? "sản phẩm"
@@ -986,104 +987,119 @@ namespace AMMS.Infrastructure.Repositories
             sheetsTotal = Math.Max(sheetsTotal, Math.Max(sheetsRequired + sheetsWaste, 1));
             nUp = Math.Max(nUp, 1);
 
-            var resolvedPaperCode = string.IsNullOrWhiteSpace(paperCode) ? "PAPER" : paperCode.Trim();
-            var resolvedPaperName = string.IsNullOrWhiteSpace(paperName) ? "Giấy in" : paperName.Trim();
+            var plateQty = Math.Max(1, numberOfPlates ?? 1);
+            var sheetQty = Math.Max(1, sheetsTotal);
+            var productionOutputQty = StageQuantityHelper.GetProductCap(sheetQty, nUp);
 
-            var qtyMode = StageQuantityHelper.ResolveStageQtyMode(
-                code,
-                currentStageIndex,
-                routeProcessCodes);
+            var resolvedPaperCode = string.IsNullOrWhiteSpace(paperCode)
+                ? "PAPER"
+                : paperCode.Trim();
 
-            var stageOutputUnit = ResolveStageOutputUnit(qtyMode);
-            var stageEstimatedQty = ResolveStageEstimatedOutputQty(
-                qtyMode,
-                prevOutput,
-                sheetsTotal,
-                nUp,
-                numberOfPlates);
+            var resolvedPaperName = string.IsNullOrWhiteSpace(paperName)
+                ? "Giấy in"
+                : paperName.Trim();
 
-            var stageActualQty = ResolveStageActualOutputQty(
-                qtyMode,
-                prevOutput,
-                qtyGood,
-                sheetsTotal,
-                nUp,
-                numberOfPlates);
-
-            if (code == "RALO")
+            static decimal? ActualFromQtyGood(int qtyGood, decimal cap)
             {
-                var plateBreakdown = ProductionFlowHelper.ResolveRaloPlateBreakdown(numberOfPlates);
+                if (qtyGood <= 0)
+                    return null;
 
+                return Math.Min(qtyGood, cap);
+            }
+
+            static decimal? ActualFromPrevious(StageOutputRef? prevOutput, decimal cap)
+            {
+                if (prevOutput?.ActualQuantity == null)
+                    return null;
+
+                return Math.Min(prevOutput.ActualQuantity.Value, cap);
+            }
+
+            void AddMainInputFromPrevious(
+                string fallbackName,
+                string fallbackCode,
+                decimal estimatedQty,
+                string unit)
+            {
+                inputs.Add(ProductionSHelper.BuildStageMaterial(
+                    name: !string.IsNullOrWhiteSpace(prevOutput?.Name)
+                        ? prevOutput!.Name
+                        : fallbackName,
+                    code: !string.IsNullOrWhiteSpace(prevOutput?.Code)
+                        ? prevOutput!.Code
+                        : fallbackCode,
+                    estimatedQty: estimatedQty,
+                    actualQty: ActualFromPrevious(prevOutput, estimatedQty),
+                    unit: unit));
+            }
+
+            // =========================
+            // RALO
+            // input = số bản kẽm
+            // output = số bản kẽm
+            // =========================
+            if (code == "RALO" || code == "RA_LO")
+            {
                 inputs.Add(ProductionSHelper.BuildStageMaterial(
                     name: "Bản kẽm cần ralo",
-                    code: "PLATE_REQUIRED",
-                    estimatedQty: plateBreakdown.requiredPlates,
+                    code: "PLATE",
+                    estimatedQty: plateQty,
                     actualQty: null,
                     unit: "bản"));
-
-                if (plateBreakdown.wastePlates > 0)
-                {
-                    inputs.Add(ProductionSHelper.BuildStageMaterial(
-                        name: "Bản kẽm hao phí dự trù",
-                        code: "PLATE_WASTE",
-                        estimatedQty: plateBreakdown.wastePlates,
-                        actualQty: null,
-                        unit: "bản"));
-                }
 
                 var output = ProductionSHelper.BuildStageMaterial(
                     name: "Bản kẽm đã ralo",
                     code: "RALO",
-                    estimatedQty: plateBreakdown.totalPlates,
-                    actualQty: stageActualQty,
+                    estimatedQty: plateQty,
+                    actualQty: ActualFromQtyGood(qtyGood, plateQty),
                     unit: "bản");
 
                 return (
                     inputs,
                     output,
-                    BuildNextOutputRef(output, plateBreakdown.totalPlates, stageActualQty));
+                    BuildNextOutputRef(output, plateQty, output.actual_quantity));
             }
 
-            if (code == "CAT")
+            // =========================
+            // CAT
+            // input = sheets_total
+            // output = sheets_total * n_up
+            // unit = tờ
+            // =========================
+            if (code == "CAT" || code == "CUT")
             {
                 inputs.Add(ProductionSHelper.BuildStageMaterial(
                     name: resolvedPaperName,
                     code: resolvedPaperCode,
-                    estimatedQty: sheetsTotal,
+                    estimatedQty: sheetQty,
                     actualQty: null,
                     unit: "tờ"));
 
-                var displayEstimatedQty = ProductionFlowHelper.MultiplyByNUp(stageEstimatedQty, nUp);
-                var displayActualQty = ProductionFlowHelper.MultiplyByNUp(stageActualQty, nUp);
-
-                var displayOutput = ProductionSHelper.BuildStageMaterial(
-                    name: $"Bán thành phẩm sau cắt",
+                var output = ProductionSHelper.BuildStageMaterial(
+                    name: "Bán thành phẩm sau cắt",
                     code: "CAT",
-                    estimatedQty: displayEstimatedQty,
-                    actualQty: displayActualQty,
+                    estimatedQty: productionOutputQty,
+                    actualQty: ActualFromQtyGood(qtyGood, productionOutputQty),
                     unit: "tờ");
+
                 return (
                     inputs,
-                    displayOutput,
-                    BuildNextOutputRef(displayOutput, displayEstimatedQty, displayActualQty));
+                    output,
+                    BuildNextOutputRef(output, productionOutputQty, output.actual_quantity));
             }
 
-            var mainInputName = prevOutput?.Name ?? $"Bán thành phẩm trước {processName}";
-            var mainInputCode = prevOutput?.Code ?? "PREV";
-            var mainInputUnit = prevOutput?.Unit ?? "tờ";
-            var mainInputEstimatedQty = prevOutput?.EstimatedQuantity
-                ?? StageQuantityHelper.GetSheetCap(sheetsTotal);
-            var mainInputActualQty = prevOutput?.ActualQuantity;
-
-            inputs.Add(ProductionSHelper.BuildStageMaterial(
-                name: mainInputName,
-                code: mainInputCode,
-                estimatedQty: mainInputEstimatedQty,
-                actualQty: mainInputActualQty,
-                unit: mainInputUnit));
-
+            // =========================
+            // IN
+            // input/output chính = sheets_total * n_up, unit = tờ
+            // =========================
             if (code == "IN")
             {
+                AddMainInputFromPrevious(
+                    fallbackName: "Bán thành phẩm sau cắt",
+                    fallbackCode: "CAT",
+                    estimatedQty: productionOutputQty,
+                    unit: "tờ");
+
                 if (!string.IsNullOrWhiteSpace(inkTypeNames))
                 {
                     inputs.Add(ProductionSHelper.BuildStageMaterial(
@@ -1107,18 +1123,28 @@ namespace AMMS.Infrastructure.Repositories
                 var output = ProductionSHelper.BuildStageMaterial(
                     name: "Bán thành phẩm in",
                     code: "IN",
-                    estimatedQty: stageEstimatedQty,
-                    actualQty: stageActualQty,
-                    unit: stageOutputUnit);
+                    estimatedQty: productionOutputQty,
+                    actualQty: ActualFromQtyGood(qtyGood, productionOutputQty),
+                    unit: "tờ");
 
                 return (
                     inputs,
                     output,
-                    BuildNextOutputRef(output, stageEstimatedQty, stageActualQty));
+                    BuildNextOutputRef(output, productionOutputQty, output.actual_quantity));
             }
 
+            // =========================
+            // PHU
+            // input/output chính = sheets_total * n_up, unit = tờ
+            // =========================
             if (code == "PHU")
             {
+                AddMainInputFromPrevious(
+                    fallbackName: "Bán thành phẩm in",
+                    fallbackCode: "IN",
+                    estimatedQty: productionOutputQty,
+                    unit: "tờ");
+
                 var hasRealCoating =
                     estCoatingGlueWeightKg > 0m &&
                     !IsNoCoatingType(coatingType);
@@ -1148,18 +1174,28 @@ namespace AMMS.Infrastructure.Repositories
                 var output = ProductionSHelper.BuildStageMaterial(
                     name: hasRealCoating ? "Bán thành phẩm phủ" : "Bán thành phẩm qua công đoạn phủ",
                     code: "PHU",
-                    estimatedQty: stageEstimatedQty,
-                    actualQty: stageActualQty,
-                    unit: stageOutputUnit);
+                    estimatedQty: productionOutputQty,
+                    actualQty: ActualFromQtyGood(qtyGood, productionOutputQty),
+                    unit: "tờ");
 
                 return (
                     inputs,
                     output,
-                    BuildNextOutputRef(output, stageEstimatedQty, stageActualQty));
+                    BuildNextOutputRef(output, productionOutputQty, output.actual_quantity));
             }
 
-            if (code == "CAN")
+            // =========================
+            // CAN
+            // input/output chính = sheets_total * n_up, unit = tờ
+            // =========================
+            if (code == "CAN" || code == "CAN_MANG")
             {
+                AddMainInputFromPrevious(
+                    fallbackName: "Bán thành phẩm phủ",
+                    fallbackCode: "PHU",
+                    estimatedQty: productionOutputQty,
+                    unit: "tờ");
+
                 var resolvedLaminationCode = string.IsNullOrWhiteSpace(laminationMaterialCode)
                     ? "LAMINATION"
                     : laminationMaterialCode.Trim();
@@ -1178,18 +1214,28 @@ namespace AMMS.Infrastructure.Repositories
                 var output = ProductionSHelper.BuildStageMaterial(
                     name: "Bán thành phẩm đã cán",
                     code: "CAN",
-                    estimatedQty: stageEstimatedQty,
-                    actualQty: stageActualQty,
-                    unit: stageOutputUnit);
+                    estimatedQty: productionOutputQty,
+                    actualQty: ActualFromQtyGood(qtyGood, productionOutputQty),
+                    unit: "tờ");
 
                 return (
                     inputs,
                     output,
-                    BuildNextOutputRef(output, stageEstimatedQty, stageActualQty));
+                    BuildNextOutputRef(output, productionOutputQty, output.actual_quantity));
             }
 
+            // =========================
+            // BOI
+            // input/output chính = sheets_total * n_up, unit = tờ
+            // =========================
             if (code == "BOI")
             {
+                AddMainInputFromPrevious(
+                    fallbackName: "Bán thành phẩm trước bồi",
+                    fallbackCode: "PREV",
+                    estimatedQty: productionOutputQty,
+                    unit: "tờ");
+
                 inputs.Add(ProductionSHelper.BuildStageMaterial(
                     name: string.IsNullOrWhiteSpace(waveType) ? "Sóng carton" : waveType.Trim(),
                     code: string.IsNullOrWhiteSpace(waveType) ? "WAVE" : waveType.Trim(),
@@ -1207,72 +1253,109 @@ namespace AMMS.Infrastructure.Repositories
                 var output = ProductionSHelper.BuildStageMaterial(
                     name: "Bán thành phẩm đã bồi",
                     code: "BOI",
-                    estimatedQty: stageEstimatedQty,
-                    actualQty: stageActualQty,
-                    unit: stageOutputUnit);
+                    estimatedQty: productionOutputQty,
+                    actualQty: ActualFromQtyGood(qtyGood, productionOutputQty),
+                    unit: "tờ");
 
                 return (
                     inputs,
                     output,
-                    BuildNextOutputRef(output, stageEstimatedQty, stageActualQty));
+                    BuildNextOutputRef(output, productionOutputQty, output.actual_quantity));
             }
 
+            // =========================
+            // BE
+            // input/output = sheets_total * n_up, unit = sp
+            // =========================
             if (code == "BE")
             {
+                AddMainInputFromPrevious(
+                    fallbackName: "Bán thành phẩm trước bế",
+                    fallbackCode: "PREV",
+                    estimatedQty: productionOutputQty,
+                    unit: "sp");
+
                 var output = ProductionSHelper.BuildStageMaterial(
                     name: "Bán thành phẩm đã bế",
                     code: "BE",
-                    estimatedQty: stageEstimatedQty,
-                    actualQty: stageActualQty,
-                    unit: stageOutputUnit);
+                    estimatedQty: productionOutputQty,
+                    actualQty: ActualFromQtyGood(qtyGood, productionOutputQty),
+                    unit: "sp");
 
                 return (
                     inputs,
                     output,
-                    BuildNextOutputRef(output, stageEstimatedQty, stageActualQty));
+                    BuildNextOutputRef(output, productionOutputQty, output.actual_quantity));
             }
 
+            // =========================
+            // DUT
+            // input/output = sheets_total * n_up, unit = sp
+            // =========================
             if (code == "DUT")
             {
+                AddMainInputFromPrevious(
+                    fallbackName: "Bán thành phẩm trước dứt",
+                    fallbackCode: "BE",
+                    estimatedQty: productionOutputQty,
+                    unit: "sp");
+
                 var output = ProductionSHelper.BuildStageMaterial(
                     name: $"Bán thành phẩm đã dứt {productName}",
                     code: "DUT",
-                    estimatedQty: stageEstimatedQty,
-                    actualQty: stageActualQty,
+                    estimatedQty: productionOutputQty,
+                    actualQty: ActualFromQtyGood(qtyGood, productionOutputQty),
                     unit: "sp");
 
                 return (
                     inputs,
                     output,
-                    BuildNextOutputRef(output, stageEstimatedQty, stageActualQty));
+                    BuildNextOutputRef(output, productionOutputQty, output.actual_quantity));
             }
 
+            // =========================
+            // DAN
+            // input/output = sheets_total * n_up, unit = sp
+            // =========================
             if (code == "DAN")
             {
+                AddMainInputFromPrevious(
+                    fallbackName: "Bán thành phẩm trước dán",
+                    fallbackCode: "DUT",
+                    estimatedQty: productionOutputQty,
+                    unit: "sp");
+
                 var output = ProductionSHelper.BuildStageMaterial(
                     name: $"Thành phẩm hoàn chỉnh {productName}",
                     code: "DAN",
-                    estimatedQty: stageEstimatedQty,
-                    actualQty: stageActualQty,
+                    estimatedQty: productionOutputQty,
+                    actualQty: ActualFromQtyGood(qtyGood, productionOutputQty),
                     unit: "sp");
 
                 return (
                     inputs,
                     output,
-                    BuildNextOutputRef(output, stageEstimatedQty, stageActualQty));
+                    BuildNextOutputRef(output, productionOutputQty, output.actual_quantity));
             }
+
+            // Fallback
+            AddMainInputFromPrevious(
+                fallbackName: $"Bán thành phẩm trước {processName}",
+                fallbackCode: "PREV",
+                estimatedQty: productionOutputQty,
+                unit: "tờ");
 
             var fallbackOutput = ProductionSHelper.BuildStageMaterial(
                 name: $"Bán thành phẩm sau {processName}",
                 code: processCode,
-                estimatedQty: stageEstimatedQty,
-                actualQty: stageActualQty,
-                unit: stageOutputUnit);
+                estimatedQty: productionOutputQty,
+                actualQty: ActualFromQtyGood(qtyGood, productionOutputQty),
+                unit: "tờ");
 
             return (
                 inputs,
                 fallbackOutput,
-                BuildNextOutputRef(fallbackOutput, stageEstimatedQty, stageActualQty));
+                BuildNextOutputRef(fallbackOutput, productionOutputQty, fallbackOutput.actual_quantity));
         }
 
         private static string ResolveStageOutputUnit(StageQtyMode mode)
