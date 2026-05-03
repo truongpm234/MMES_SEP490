@@ -577,24 +577,31 @@ namespace AMMS.Application.Services
             var t = ctx.Task;
             var currentCode = ProductionFlowHelper.Norm(t.process?.process_code);
 
-            var previousProcessCode = await GetPreviousProcessCodeAsync(t, ct);
-            if (string.IsNullOrWhiteSpace(previousProcessCode))
+            var previousCtx = await GetPreviousProcessContextAsync(t, ct);
+            if (previousCtx == null)
                 return new List<TaskReferenceInputDto>();
 
-            var (unit, qty) = ResolveReferenceInputShape(previousProcessCode, ctx);
+            var (unit, qty) = ResolveReferenceInputShape(
+                previousCtx.previous_process_code,
+                previousCtx.previous_stage_index,
+                previousCtx.route_process_codes,
+                ctx);
 
             var result = new List<TaskReferenceInputDto>();
 
             switch (currentCode)
             {
                 case "IN":
+                case "PHU":
+                case "CAN":
+                case "BOI":
                 case "BE":
                 case "DUT":
                 case "DAN":
                     result.Add(new TaskReferenceInputDto
                     {
-                        input_code = previousProcessCode,
-                        input_name = $"Bán thành phẩm từ công đoạn {previousProcessCode}",
+                        input_code = previousCtx.previous_process_code,
+                        input_name = $"Bán thành phẩm từ công đoạn {previousCtx.previous_process_code}",
                         unit = unit,
                         estimated_qty = Math.Round(qty, 4)
                     });
@@ -602,6 +609,45 @@ namespace AMMS.Application.Services
             }
 
             return result;
+        }
+
+        private async Task<PreviousProcessContext?> GetPreviousProcessContextAsync(
+    task currentTask,
+    CancellationToken ct = default)
+        {
+            if (!currentTask.prod_id.HasValue)
+                return null;
+
+            var flow = await _db.tasks
+                .AsNoTracking()
+                .Include(x => x.process)
+                .Where(x => x.prod_id == currentTask.prod_id.Value)
+                .OrderBy(x => x.seq_num)
+                .ThenBy(x => x.task_id)
+                .Select(x => new TaskFlowRefItem
+                {
+                    task_id = x.task_id,
+                    seq_num = x.seq_num,
+                    process_code = x.process != null ? x.process.process_code : null,
+                    process_name = x.process != null ? x.process.process_name : null
+                })
+                .ToListAsync(ct);
+
+            if (flow.Count == 0)
+                return null;
+
+            var currentIndex = flow.FindIndex(x => x.task_id == currentTask.task_id);
+            if (currentIndex <= 0)
+                return null;
+
+            var prev = flow[currentIndex - 1];
+
+            return new PreviousProcessContext
+            {
+                previous_process_code = ProductionFlowHelper.Norm(prev.process_code),
+                previous_stage_index = currentIndex - 1,
+                route_process_codes = flow.Select(x => x.process_code).ToList()
+            };
         }
 
         private async Task<material?> ResolveCoatingMaterialAsync(cost_estimate est, CancellationToken ct)
@@ -660,7 +706,6 @@ namespace AMMS.Application.Services
 
                 case "E":
                 case "SONG_E":
-                    // nếu estimate chỉ lưu E thì đây là mapping gần đúng
                     result.Add("SONG_E_NAU");
                     result.Add("SONG_E_MOC");
                     break;
@@ -920,33 +965,51 @@ namespace AMMS.Application.Services
 
         private static (string unit, decimal qty) ResolveReferenceInputShape(
     string? previousProcessCode,
+    int previousStageIndex,
+    IReadOnlyList<string?> routeProcessCodes,
     TaskEstimateContext ctx)
         {
-            var prevCode = ProductionFlowHelper.Norm(previousProcessCode);
-
             var req = ctx.Request;
             var est = ctx.Estimate;
 
-            decimal sheetQty = est.sheets_total > 0
-                ? est.sheets_total
-                : est.sheets_required > 0 ? est.sheets_required : 1;
+            var orderQty = SafePositive(req.quantity ?? 0, 1);
 
-            decimal productQty = req.quantity.HasValue && req.quantity.Value > 0
-                ? req.quantity.Value
-                : 1;
+            var sheetsRequired = Math.Max(est.sheets_required, 0);
+            var sheetsWaste = Math.Max(est.sheets_waste, 0);
+            var sheetsTotal = Math.Max(est.sheets_total, sheetsRequired + sheetsWaste);
+            var nUp = SafePositive(est.n_up, 1);
+            var numberOfPlates = SafePositive(req.number_of_plates ?? 0, 1);
 
-            decimal plateQty = req.number_of_plates.HasValue && req.number_of_plates.Value > 0
-                ? req.number_of_plates.Value
-                : 1;
+            if (sheetsRequired <= 0)
+                sheetsRequired = Math.Max(1, (int)Math.Ceiling(orderQty / (decimal)nUp));
 
-            return prevCode switch
-            {
-                "RALO" => ("bản", plateQty),
-                "DUT" => ("sp", productQty),
-                "DAN" => ("sp", productQty),
-                _ => ("tờ", sheetQty)
-            };
+            if (sheetsTotal <= 0)
+                sheetsTotal = sheetsRequired + sheetsWaste;
+
+            if (sheetsTotal <= 0)
+                sheetsTotal = sheetsRequired;
+
+            if (sheetsTotal <= 0)
+                sheetsTotal = 1;
+
+            var unit = StageQuantityHelper.ResolveQtyUnitLikeProduction(
+                currentCode: previousProcessCode,
+                currentStageIndex: previousStageIndex,
+                routeProcessCodes: routeProcessCodes);
+
+            var qty = StageQuantityHelper.GetProductionOutputCap(
+                currentCode: previousProcessCode,
+                currentStageIndex: previousStageIndex,
+                routeProcessCodes: routeProcessCodes,
+                sheetsTotal: sheetsTotal,
+                nUp: nUp,
+                numberOfPlates: numberOfPlates);
+
+            return (unit, qty);
         }
+
+        private static int SafePositive(int value, int fallback = 1)
+    => value > 0 ? value : fallback;
 
         public async Task<List<TaskConsumableMaterialDto>> GetConsumableMaterialsForTaskPublicAsync(int taskId, CancellationToken ct = default)
         {
@@ -1570,5 +1633,6 @@ namespace AMMS.Application.Services
 
             return (prod, ord);
         }
+
     }
 }

@@ -47,31 +47,101 @@ public class TasksController : ControllerBase
     [HttpGet("qr-prepare/{taskId:int}")]
     public async Task<IActionResult> GetQrPrepare(int taskId, CancellationToken ct)
     {
+        if (taskId <= 0)
+        {
+            return BadRequest(new
+            {
+                message = "task_id không hợp lệ.",
+                task_id = taskId
+            });
+        }
+
         var t = await _taskRepo.GetByIdAsync(taskId);
-        if (t == null) return NotFound(new { message = "Task not found", task_id = taskId });
+        if (t == null)
+        {
+            return NotFound(new
+            {
+                message = "Task not found",
+                task_id = taskId
+            });
+        }
 
         var policy = await _taskRepo.GetQtyPolicyAsync(taskId, ct);
+        if (policy == null)
+        {
+            return BadRequest(new
+            {
+                message = "Không xác định được policy số lượng cho task.",
+                task_id = taskId
+            });
+        }
+
         var bundle = await _scanSvc.GetTaskQrMaterialBundleAsync(taskId, ct);
 
         return Ok(new
         {
             task_id = taskId,
-            process_code = policy?.process_code,
-            process_name = policy?.process_name,
-            qty_unit = policy?.qty_unit,
-            min_allowed = policy?.min_allowed,
-            max_allowed = policy?.max_allowed,
-            suggested_qty = policy?.suggested_qty,
+
+            process_code = policy.process_code,
+            process_name = policy.process_name,
+
+            qty_unit = policy.qty_unit,
+            min_allowed = policy.min_allowed,
+            max_allowed = policy.max_allowed,
+            suggested_qty = policy.suggested_qty,
+            happy_case_qty = policy.happy_case_qty,
+
+            // Các field này giúp FE đối chiếu với Production Detail
+            order_qty = policy.order_qty,
+            sheets_required = policy.sheets_required,
+            sheets_waste = policy.sheets_waste,
+            sheets_total = policy.sheets_total,
+            n_up = policy.n_up,
+            number_of_plates = policy.number_of_plates,
+
+            stage_index = policy.stage_index,
+            stage_count = policy.stage_count,
+
+            // Dễ hiểu hơn cho FE: số lượng output production đang dùng cho QR
+            production_output_qty = policy.suggested_qty,
+            production_output_unit = policy.qty_unit,
+
             consumable_materials = bundle.consumable_materials,
             reference_inputs = bundle.reference_inputs
         });
     }
 
     [HttpPost("qr")]
-    public async Task<ActionResult<TaskQrResponse>> CreateQr([FromBody] CreateTaskQrRequest req, CancellationToken ct)
+    public async Task<ActionResult<TaskQrResponse>> CreateQr(
+        [FromBody] CreateTaskQrRequest req,
+        CancellationToken ct)
     {
+        if (req == null)
+        {
+            return BadRequest(new
+            {
+                message = "Request body is required."
+            });
+        }
+
+        if (req.task_id <= 0)
+        {
+            return BadRequest(new
+            {
+                message = "task_id không hợp lệ.",
+                task_id = req.task_id
+            });
+        }
+
         var t = await _taskRepo.GetByIdAsync(req.task_id);
-        if (t == null) return NotFound();
+        if (t == null)
+        {
+            return NotFound(new
+            {
+                message = "Task not found",
+                task_id = req.task_id
+            });
+        }
 
         var policy = await _taskRepo.GetQtyPolicyAsync(req.task_id, ct);
         if (policy == null)
@@ -83,14 +153,25 @@ public class TasksController : ControllerBase
             });
         }
 
-        var ttl = TimeSpan.FromMinutes(Math.Max(1, req.ttl_minutes));
+        var ttlMinutes = req.ttl_minutes <= 0 ? 10 : req.ttl_minutes;
+        var ttl = TimeSpan.FromMinutes(ttlMinutes);
+
         var isAuto = !req.qty_good.HasValue || req.qty_good.Value <= 0;
 
         int qtyGood;
+
         if (isAuto)
         {
+            // Quan trọng:
+            // Không tự tính qty trong controller.
+            // Luôn lấy suggested_qty từ TaskRepository.GetQtyPolicyAsync().
+            // suggested_qty đã được đồng bộ theo logic Production:
+            // - RALO: number_of_plates
+            // - Từ CAT trở đi: sheets_total * n_up
             qtyGood = policy.suggested_qty;
-            if (qtyGood <= 0) qtyGood = 1;
+
+            if (qtyGood <= 0)
+                qtyGood = 1;
         }
         else
         {
@@ -100,74 +181,179 @@ public class TasksController : ControllerBase
             {
                 return BadRequest(new
                 {
-                    message = $"Số lượng báo cáo không hợp lệ. Công đoạn [{policy.process_code} - {policy.process_name}] chỉ cho phép trong khoảng {policy.min_allowed} ---> {policy.max_allowed} {policy.qty_unit}.",
+                    message =
+                        $"Số lượng báo cáo không hợp lệ. " +
+                        $"Công đoạn [{policy.process_code} - {policy.process_name}] " +
+                        $"chỉ cho phép trong khoảng {policy.min_allowed} -> {policy.max_allowed} {policy.qty_unit}.",
+
                     task_id = req.task_id,
+                    input_qty_good = qtyGood,
+
                     process_code = policy.process_code,
                     process_name = policy.process_name,
                     qty_unit = policy.qty_unit,
+
                     min_allowed = policy.min_allowed,
                     max_allowed = policy.max_allowed,
                     suggested_qty = policy.suggested_qty,
+                    happy_case_qty = policy.happy_case_qty,
+
                     order_qty = policy.order_qty,
                     sheets_required = policy.sheets_required,
                     sheets_waste = policy.sheets_waste,
                     sheets_total = policy.sheets_total,
                     n_up = policy.n_up,
-                    number_of_plates = policy.number_of_plates
+                    number_of_plates = policy.number_of_plates,
+
+                    stage_index = policy.stage_index,
+                    stage_count = policy.stage_count,
+
+                    production_output_qty = policy.suggested_qty,
+                    production_output_unit = policy.qty_unit
                 });
             }
         }
 
-        var inputMaterials = await _scanSvc.BuildMaterialUsageForQrAsync(req.task_id,
-    req.materials,
-    ct);
+        List<TaskMaterialUsageInputDto> inputMaterials;
 
-        var token = _tokenSvc.CreateToken(req.task_id, qtyGood, inputMaterials, ttl);
+        try
+        {
+            inputMaterials = await _scanSvc.BuildMaterialUsageForQrAsync(
+                req.task_id,
+                req.materials,
+                ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new
+            {
+                message = ex.Message,
+                task_id = req.task_id,
+
+                process_code = policy.process_code,
+                process_name = policy.process_name,
+
+                suggested_qty = policy.suggested_qty,
+                qty_unit = policy.qty_unit
+            });
+        }
+
+        var token = _tokenSvc.CreateToken(
+            req.task_id,
+            qtyGood,
+            inputMaterials,
+            ttl);
+
         var expiresAt = DateTimeOffset.UtcNow.Add(ttl).ToUnixTimeSeconds();
 
         var qrMaterialBundle = await _scanSvc.GetTaskQrMaterialBundleAsync(req.task_id, ct);
 
-        return new TaskQrResponse
+        return Ok(new TaskQrResponse
         {
             task_id = req.task_id,
             token = token,
             expires_at_unix = expiresAt,
+
             qty_good_used = qtyGood,
             is_auto_filled = isAuto,
+
             min_allowed = policy.min_allowed,
             max_allowed = policy.max_allowed,
             suggested_qty = policy.suggested_qty,
             qty_unit = policy.qty_unit,
+
             process_code = policy.process_code,
             process_name = policy.process_name,
+
             embedded_material_count = inputMaterials.Count,
+
             consumable_materials = qrMaterialBundle.consumable_materials,
             reference_inputs = qrMaterialBundle.reference_inputs
-        };
+        });
     }
 
     [HttpPost("finish")]
     public async Task<ActionResult<ScanTaskResult>> Finish([FromBody] ScanTaskRequest req)
     {
-        if (req == null || string.IsNullOrEmpty(req.token))
-            return BadRequest("Invalid request or missing token.");
+        if (req == null || string.IsNullOrWhiteSpace(req.token))
+        {
+            return BadRequest(new
+            {
+                message = "Invalid request or missing token."
+            });
+        }
 
-        var scannedByUserId = GetCurrentUserId();
-        var res = await _scanSvc.ScanFinishAsync(req, scannedByUserId);
+        try
+        {
+            var scannedByUserId = GetCurrentUserId();
 
-        return Ok(res);
+            var res = await _scanSvc.ScanFinishAsync(
+                req,
+                scannedByUserId);
+
+            return Ok(res);
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return BadRequest(new
+            {
+                message = ex.Message
+            });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new
+            {
+                message = ex.Message
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new
+            {
+                message = ex.Message
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new
+            {
+                message = ex.Message
+            });
+        }
     }
 
     [HttpPut("ready")]
-    public async Task<IActionResult> SetTaskReady([FromBody] SetTaskReadyRequest req, CancellationToken ct)
+    public async Task<IActionResult> SetTaskReady(
+        [FromBody] SetTaskReadyRequest req,
+        CancellationToken ct)
     {
+        if (req == null || req.task_id <= 0)
+        {
+            return BadRequest(new
+            {
+                message = "task_id không hợp lệ."
+            });
+        }
+
         try
         {
             var ok = await _taskService.SetTaskReadyAsync(req.task_id, ct);
 
             if (!ok)
-                return NotFound(new { message = "Task not found", task_id = req.task_id });
-            await _hub.Clients.All.SendAsync("update-ui", new { message = "Update UI" });
+            {
+                return NotFound(new
+                {
+                    message = "Task not found",
+                    task_id = req.task_id
+                });
+            }
+
+            await _hub.Clients.All.SendAsync(
+                "update-ui",
+                new { message = "Update UI" },
+                ct);
+
             return Ok(new
             {
                 message = "Task status updated to Ready",
@@ -187,10 +373,19 @@ public class TasksController : ControllerBase
 
     [HttpPost("cancel-finish/{taskId:int}")]
     public async Task<IActionResult> CancelFinish(
-    int taskId,
-    [FromBody] CancelTaskFinishRequest? req,
-    CancellationToken ct)
+        int taskId,
+        [FromBody] CancelTaskFinishRequest? req,
+        CancellationToken ct)
     {
+        if (taskId <= 0)
+        {
+            return BadRequest(new
+            {
+                message = "task_id không hợp lệ.",
+                task_id = taskId
+            });
+        }
+
         try
         {
             var cancelledByUserId = GetCurrentUserId();
@@ -221,26 +416,18 @@ public class TasksController : ControllerBase
         }
     }
 
-    private static List<TaskMaterialUsageInputDto> NormalizeQrMaterials(List<TaskMaterialUsageInputDto>? materials)
-    {
-        return (materials ?? new List<TaskMaterialUsageInputDto>())
-            .Select(x => new TaskMaterialUsageInputDto
-            {
-                material_id = x.material_id,
-                quantity_used = Math.Round(x.quantity_used, 4),
-                quantity_left = Math.Round(x.quantity_left, 4),
-                is_stock = x.is_stock
-            })
-            .ToList();
-    }
-
     [HttpPost("finish-from-stock")]
     public async Task<IActionResult> FinishFromStock(
-    [FromBody] FinishTasksFromStockRequest req,
-    CancellationToken ct)
+        [FromBody] FinishTasksFromStockRequest req,
+        CancellationToken ct)
     {
         if (req == null || req.task_ids == null || req.task_ids.Count == 0)
-            return BadRequest(new { message = "task_ids is required" });
+        {
+            return BadRequest(new
+            {
+                message = "task_ids is required"
+            });
+        }
 
         var taskIds = req.task_ids
             .Where(x => x > 0)
@@ -248,11 +435,19 @@ public class TasksController : ControllerBase
             .ToList();
 
         if (taskIds.Count == 0)
-            return BadRequest(new { message = "task_ids must contain valid positive integers" });
+        {
+            return BadRequest(new
+            {
+                message = "task_ids must contain valid positive integers"
+            });
+        }
 
         try
         {
-            var result = await _taskService.FinishTasksFromStockAsync(taskIds, GetCurrentUserId(), ct);
+            var result = await _taskService.FinishTasksFromStockAsync(
+                taskIds,
+                GetCurrentUserId(),
+                ct);
 
             if (result.not_found_task_ids.Any())
             {

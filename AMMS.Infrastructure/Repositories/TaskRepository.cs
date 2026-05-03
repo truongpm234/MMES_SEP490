@@ -9,8 +9,7 @@ namespace AMMS.Infrastructure.Repositories
 {
     public class TaskRepository : ITaskRepository
     {
-        private const int TokenQtyMax = 65535;
-
+        private const int TokenQtyMax = int.MaxValue;
         private readonly AppDbContext _db;
 
         public TaskRepository(AppDbContext db)
@@ -344,8 +343,8 @@ namespace AMMS.Infrastructure.Repositories
                 sheetsTotal = 1;
 
             var routeCodes = route
-                .Select(x => (string?)x.process?.process_code)
-                .ToList();
+    .Select(x => (string?)x.process?.process_code)
+    .ToList();
 
             var qtyProfile = StageQuantityHelper.BuildPolicy(
                 currentCode: pcode,

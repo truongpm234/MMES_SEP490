@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace AMMS.Shared.Helpers
 {
@@ -30,8 +28,25 @@ namespace AMMS.Shared.Helpers
         public static bool IsRalo(string? code)
             => Norm(code) is "RALO" or "RA_LO";
 
+        public static bool IsCutStage(string? code)
+            => Norm(code) is "CAT" or "CUT";
+
         public static bool IsProductSplitStage(string? code)
-    => Norm(code) is "BE" or "DUT" or "DAN";
+            => Norm(code) is "BE" or "DUT" or "DAN";
+
+        public static int FindCutStageIndex(IReadOnlyList<string?> routeProcessCodes)
+        {
+            if (routeProcessCodes == null || routeProcessCodes.Count == 0)
+                return -1;
+
+            for (var i = 0; i < routeProcessCodes.Count; i++)
+            {
+                if (IsCutStage(routeProcessCodes[i]))
+                    return i;
+            }
+
+            return -1;
+        }
 
         public static int FindProductSplitStageIndex(IReadOnlyList<string?> routeProcessCodes)
         {
@@ -45,6 +60,19 @@ namespace AMMS.Shared.Helpers
             }
 
             return -1;
+        }
+
+        public static bool IsAtOrAfterCutStage(
+            string? currentCode,
+            int currentStageIndex,
+            IReadOnlyList<string?> routeProcessCodes)
+        {
+            if (IsCutStage(currentCode))
+                return true;
+
+            var cutIndex = FindCutStageIndex(routeProcessCodes);
+
+            return cutIndex >= 0 && currentStageIndex >= cutIndex;
         }
 
         public static StageQtyMode ResolveStageQtyMode(
@@ -84,6 +112,61 @@ namespace AMMS.Shared.Helpers
             }
         }
 
+        private static int CapByTokenMax(int value, int tokenQtyMax)
+        {
+            var safeTokenMax = tokenQtyMax <= 0 ? int.MaxValue : tokenQtyMax;
+            return Math.Max(1, Math.Min(value, safeTokenMax));
+        }
+
+        public static int GetProductionOutputCap(
+            string? currentCode,
+            int currentStageIndex,
+            IReadOnlyList<string?> routeProcessCodes,
+            int sheetsTotal,
+            int nUp,
+            int numberOfPlates,
+            int tokenQtyMax = int.MaxValue)
+        {
+            var mode = ResolveStageQtyMode(
+                currentCode,
+                currentStageIndex,
+                routeProcessCodes);
+
+            if (mode == StageQtyMode.Plate)
+            {
+                return CapByTokenMax(GetPlateCap(numberOfPlates), tokenQtyMax);
+            }
+
+            var isAtOrAfterCut = IsAtOrAfterCutStage(
+                currentCode,
+                currentStageIndex,
+                routeProcessCodes);
+
+            var cap = isAtOrAfterCut || mode == StageQtyMode.Product
+                ? GetProductCap(sheetsTotal, nUp)
+                : GetSheetCap(sheetsTotal);
+
+            return CapByTokenMax(cap, tokenQtyMax);
+        }
+
+        public static string ResolveQtyUnitLikeProduction(
+            string? currentCode,
+            int currentStageIndex,
+            IReadOnlyList<string?> routeProcessCodes)
+        {
+            var mode = ResolveStageQtyMode(
+                currentCode,
+                currentStageIndex,
+                routeProcessCodes);
+
+            return mode switch
+            {
+                StageQtyMode.Plate => "bản",
+                StageQtyMode.Product => "sp",
+                _ => "tờ"
+            };
+        }
+
         public static StageQtyProfile BuildPolicy(
             string? currentCode,
             int currentStageIndex,
@@ -93,35 +176,44 @@ namespace AMMS.Shared.Helpers
             int numberOfPlates,
             int tokenQtyMax = int.MaxValue)
         {
-            var mode = ResolveStageQtyMode(currentCode, currentStageIndex, routeProcessCodes);
+            var mode = ResolveStageQtyMode(
+                currentCode,
+                currentStageIndex,
+                routeProcessCodes);
+
+            var maxQty = GetProductionOutputCap(
+                currentCode,
+                currentStageIndex,
+                routeProcessCodes,
+                sheetsTotal,
+                nUp,
+                numberOfPlates,
+                tokenQtyMax);
+
+            var unit = ResolveQtyUnitLikeProduction(
+                currentCode,
+                currentStageIndex,
+                routeProcessCodes);
 
             if (mode == StageQtyMode.Plate)
             {
-                var plateQty = Math.Min(GetPlateCap(numberOfPlates), tokenQtyMax);
-
                 return new StageQtyProfile
                 {
                     Mode = mode,
-                    QtyUnit = "bản",
-                    MinAllowed = plateQty,
-                    MaxAllowed = plateQty,
-                    SuggestedQty = plateQty
+                    QtyUnit = unit,
+                    MinAllowed = maxQty,
+                    MaxAllowed = maxQty,
+                    SuggestedQty = maxQty
                 };
             }
-
-            var cap = mode == StageQtyMode.Product
-                ? GetProductCap(sheetsTotal, nUp)
-                : GetSheetCap(sheetsTotal);
-
-            cap = Math.Min(cap, tokenQtyMax);
 
             return new StageQtyProfile
             {
                 Mode = mode,
-                QtyUnit = mode == StageQtyMode.Product ? "sp" : "tờ",
+                QtyUnit = unit,
                 MinAllowed = 1,
-                MaxAllowed = cap,
-                SuggestedQty = cap
+                MaxAllowed = maxQty,
+                SuggestedQty = maxQty
             };
         }
     }

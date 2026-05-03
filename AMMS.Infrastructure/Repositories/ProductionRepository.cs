@@ -1057,11 +1057,11 @@ namespace AMMS.Infrastructure.Repositories
                 var displayActualQty = ProductionFlowHelper.MultiplyByNUp(stageActualQty, nUp);
 
                 var displayOutput = ProductionSHelper.BuildStageMaterial(
-                    name: $"Bán thành phẩm sau cắt {productName}",
+                    name: $"Bán thành phẩm sau cắt",
                     code: "CAT",
                     estimatedQty: displayEstimatedQty,
                     actualQty: displayActualQty,
-                    unit: "sp");
+                    unit: "tờ");
                 return (
                     inputs,
                     displayOutput,

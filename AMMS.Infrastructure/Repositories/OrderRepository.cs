@@ -385,7 +385,7 @@ namespace AMMS.Infrastructure.Repositories
 
             static string FormatVND(decimal? amount)
                 => string.Format("{0:N0}", amount ?? 0).Replace(",", ".");
-            
+
             var order = await _db.orders
                 .AsNoTracking()
                 .Include(o => o.order_items)
