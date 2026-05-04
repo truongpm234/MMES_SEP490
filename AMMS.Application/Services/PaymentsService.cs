@@ -808,7 +808,7 @@ namespace AMMS.Application.Services
                 .Where(x =>
                     x.order_request_id == request.order_request_id &&
                     x.provider == "PAYOS" &&
-                    (x.status == "PAID" || x.status == "SUCCESS" || x.status == "PENDING"))
+                    (x.status == "PAID" || x.status == "SUCCESS" || x.status == "PendingPaid" || x.status == "PENDING"))
                 .ToListAsync(ct);
 
             static DateTime GetSortTime(payment x)

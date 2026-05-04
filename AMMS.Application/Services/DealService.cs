@@ -730,7 +730,9 @@ namespace AMMS.Application.Services
                 string.Equals(prodStatus, "PendingPaid", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(prodStatus, "Paid", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(prodStatus, "Scheduled", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(prodStatus, "Delivery", StringComparison.OrdinalIgnoreCase);
+                string.Equals(prodStatus, "Delivery", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(prodStatus, "Completed", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(prodStatus, "Importing", StringComparison.OrdinalIgnoreCase);
 
             if (!allowRemainingPayment)
             {

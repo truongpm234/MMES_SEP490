@@ -206,7 +206,7 @@ CancellationToken ct)
             var backend = GetBackendBaseUrl();
 
             var frontendPaidUrl =
-                $"{fe}/request-detail/{req.order_request_id}?payos=paid&orderCode={latest.order_code}";
+                $"{fe}/payment-success/{req.order_request_id}?payos=paid&orderCode={latest.order_code}";
 
             var returnApiUrl =
                 $"{backend}/api/requests/payos/return?order_code={latest.order_code}&status=PAID";
