@@ -15,6 +15,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting;
+using System.Text.Json;
 
 namespace AMMS.Application.Services
 {
@@ -349,7 +350,12 @@ namespace AMMS.Application.Services
 
                 await tx.CommitAsync(ct);
 
-                await TryGenerateAndPersistReceiptAsync(orderCode, PaymentTypes.Deposit, ct);
+                await TryGenerateAndPersistReceiptAsync(
+                    orderCode,
+                    PaymentTypes.Deposit,
+                    ct,
+                    payosRawJson: rawJson,
+                    forceGenerateWhenPayOsPaid: PayOsRawIndicatesPaid(rawJson));
 
                 if (shouldSendPaidEmail)
                 {
@@ -428,7 +434,6 @@ namespace AMMS.Application.Services
 
                 var now = AppTime.NowVnUnspecified();
 
-                // PHẢI lấy req trước rồi mới dùng req
                 var req = await _requestService.GetRequestForUpdateAsync(existing.order_request_id, ct);
                 if (req == null)
                 {
@@ -449,7 +454,31 @@ namespace AMMS.Application.Services
                     return (false, "Accepted estimate not found for remaining payment");
                 }
 
-                var actualRemainingAmount = existing.amount > 0 ? existing.amount : PaymentAmountHelper.GetRemainingAmount(est);
+                var ord = await _db.orders
+                    .FirstOrDefaultAsync(x => x.order_id == req.order_id.Value, ct);
+
+                if (ord == null)
+                {
+                    await tx.RollbackAsync(ct);
+                    return (false, "Order not found for remaining payment");
+                }
+
+                var prod = await _db.productions
+                    .Where(x => x.order_id == ord.order_id)
+                    .OrderByDescending(x => x.prod_id)
+                    .FirstOrDefaultAsync(ct);
+
+                var actualRemainingAmount = existing.amount > 0
+                    ? existing.amount
+                    : PaymentAmountHelper.GetRemainingAmount(est);
+
+                req.process_status = "Paid";
+
+                ord.status = "Paid";
+                ord.payment_status = "Paid";
+
+                if (prod != null)
+                    prod.status = "Paid";
 
                 existing.status = "PAID";
                 existing.payment_type = "Remaining";
@@ -467,28 +496,15 @@ namespace AMMS.Application.Services
                 if (!string.IsNullOrWhiteSpace(rawJson))
                     existing.payos_raw = rawJson;
 
-                var ord = await _db.orders.FirstOrDefaultAsync(x => x.order_id == req.order_id.Value, ct);
-                if (ord == null)
-                {
-                    await tx.RollbackAsync(ct);
-                    return (false, "Order not found for remaining payment");
-                }
-
-                var prod = await _db.productions
-                    .Where(x => x.order_id == ord.order_id)
-                    .OrderByDescending(x => x.prod_id)
-                    .FirstOrDefaultAsync(ct);
-
-                req.process_status = "Paid";
-                ord.status = "Paid";
-                ord.payment_status = "Paid";
-
-                if (prod != null)
-                    prod.status = "Paid";
-
                 await _db.SaveChangesAsync(ct);
                 await tx.CommitAsync(ct);
-                await TryGenerateAndPersistReceiptAsync(orderCode, PaymentTypes.Remaining, ct);
+
+                await TryGenerateAndPersistReceiptAsync(
+                    orderCode,
+                    PaymentTypes.Remaining,
+                    ct,
+                    payosRawJson: rawJson,
+                    forceGenerateWhenPayOsPaid: PayOsRawIndicatesPaid(rawJson));
 
                 return (true, $"Remaining payment recorded successfully: order_id={ord.order_id}");
             });
@@ -900,15 +916,84 @@ namespace AMMS.Application.Services
 
         private static bool IsSuccessfulPaymentStatus(string? status)
         {
-            return string.Equals(status, "PAID", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(status, "SUCCESS", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(status, "PENDING", StringComparison.OrdinalIgnoreCase);
+            var st = (status ?? "").Trim().ToUpperInvariant();
+
+            return st is "PAID" or "SUCCESS";
+        }
+
+        private static bool IsPaidStatusFromText(string? status)
+        {
+            var st = (status ?? "").Trim().ToUpperInvariant();
+
+            return st is "PAID" or "SUCCESS";
+        }
+
+        private static bool PayOsRawIndicatesPaid(string? rawJson)
+        {
+            if (string.IsNullOrWhiteSpace(rawJson))
+                return false;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(rawJson);
+                var root = doc.RootElement;
+
+                if (root.TryGetProperty("data", out var dataNode))
+                {
+                    var dataStatus = dataNode.TryGetProperty("status", out var st)
+                        ? st.GetString()
+                        : null;
+
+                    var dataCode = dataNode.TryGetProperty("code", out var dc)
+                        ? dc.GetString()
+                        : null;
+
+                    var dataDesc = dataNode.TryGetProperty("desc", out var dd)
+                        ? dd.GetString()
+                        : null;
+
+                    if (IsPaidStatusFromText(dataStatus))
+                        return true;
+
+                    if (string.Equals(dataCode, "00", StringComparison.OrdinalIgnoreCase))
+                        return true;
+
+                    if (!string.IsNullOrWhiteSpace(dataDesc) &&
+                        dataDesc.Contains("thành công", StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+
+                var rootStatus = root.TryGetProperty("status", out var rs)
+                    ? rs.GetString()
+                    : null;
+
+                if (IsPaidStatusFromText(rootStatus))
+                    return true;
+
+                var rootCode = root.TryGetProperty("code", out var rc)
+                    ? rc.GetString()
+                    : null;
+
+                var rootSuccess = root.TryGetProperty("success", out var s)
+                                  && s.ValueKind == JsonValueKind.True;
+
+                if (rootSuccess && string.Equals(rootCode, "00", StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private async Task TryGenerateAndPersistReceiptAsync(
     long orderCode,
     string paymentType,
-    CancellationToken ct = default)
+    CancellationToken ct = default,
+    string? payosRawJson = null,
+    bool forceGenerateWhenPayOsPaid = false)
         {
             try
             {
@@ -921,7 +1006,14 @@ namespace AMMS.Application.Services
                 if (payment == null)
                     return;
 
-                if (!IsSuccessfulPaymentStatus(payment.status))
+                var dbPaymentPaid = IsSuccessfulPaymentStatus(payment.status);
+
+                var payosSaysPaid =
+                    forceGenerateWhenPayOsPaid ||
+                    PayOsRawIndicatesPaid(payosRawJson) ||
+                    PayOsRawIndicatesPaid(payment.payos_raw);
+
+                if (!dbPaymentPaid && !payosSaysPaid)
                     return;
 
                 var request = await _db.order_requests
