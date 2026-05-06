@@ -6,6 +6,7 @@ using AMMS.Shared.DTOs.Exceptions;
 using AMMS.Shared.DTOs.Productions;
 using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
+using System;
 using System.Text.Json;
 
 namespace AMMS.Infrastructure.Repositories
@@ -1965,6 +1966,8 @@ namespace AMMS.Infrastructure.Repositories
                 // CASE 1: Sản xuất đầy đủ quy trình
                 if (req.is_full_process)
                 {
+                    await RollbackSubProductFinishedTasksAsync(prod.prod_id, ct);
+
                     prod.is_full_process = true;
                     prod.sub_product_id = null;
                     prod.sub_product_used_qty = 0;
@@ -2061,6 +2064,12 @@ namespace AMMS.Infrastructure.Repositories
                 prod.sub_product_id = selectedSubProduct.id;
                 prod.sub_product_used_qty = orderQty;
 
+                await ApplySubProductToExistingTasksAsync(
+                    prod,
+                    selectedSubProduct,
+                    orderQty,
+                    ct);
+
                 await _db.SaveChangesAsync(ct);
                 await tx.CommitAsync(ct);
 
@@ -2079,6 +2088,262 @@ namespace AMMS.Infrastructure.Repositories
                     message = "Đã chọn phương thức sản xuất bằng bán thành phẩm."
                 };
             });
+        }
+
+        private async Task RollbackSubProductFinishedTasksAsync(
+    int prodId,
+    CancellationToken ct)
+        {
+            var tasks = await _db.tasks
+                .Where(x =>
+                    x.prod_id == prodId &&
+                    x.is_taken_sub_product == true)
+                .ToListAsync(ct);
+
+            if (tasks.Count == 0)
+                return;
+
+            var taskIds = tasks.Select(x => x.task_id).ToList();
+
+            var logs = await _db.task_logs
+                .Where(x =>
+                    x.task_id.HasValue &&
+                    taskIds.Contains(x.task_id.Value) &&
+                    x.action_type == "Finished" &&
+                    x.scanned_code != null &&
+                    x.scanned_code.StartsWith("SUB_PRODUCT-"))
+                .ToListAsync(ct);
+
+            _db.task_logs.RemoveRange(logs);
+
+            foreach (var t in tasks)
+            {
+                t.status = "Unassigned";
+                t.start_time = null;
+                t.end_time = null;
+                t.reason = null;
+                t.is_taken_sub_product = false;
+            }
+        }
+
+        private static string NormProcessCodeForSubProduct(string? code)
+        {
+            return (code ?? "")
+                .Trim()
+                .ToUpperInvariant()
+                .Replace(" ", "_")
+                .Replace("-", "_");
+        }
+
+        private static HashSet<string> ParseSubProductProcessCodes(string? csv)
+        {
+            if (string.IsNullOrWhiteSpace(csv))
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            return csv
+                .Split(
+                    new[] { ',', ';', '|', '/', '\\' },
+                    StringSplitOptions.RemoveEmptyEntries)
+                .Select(NormProcessCodeForSubProduct)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private sealed class ProductionQtyContext
+        {
+            public int order_qty { get; init; } = 1;
+            public int sheets_total { get; init; } = 1;
+            public int sheets_required { get; init; } = 1;
+            public int n_up { get; init; } = 1;
+            public int number_of_plates { get; init; } = 1;
+        }
+
+        private async Task<ProductionQtyContext> GetProductionQtyContextAsync(
+            int orderId,
+            CancellationToken ct)
+        {
+            var req = await _db.order_requests
+                .AsNoTracking()
+                .Where(x => x.order_id == orderId)
+                .OrderByDescending(x => x.order_request_id)
+                .FirstOrDefaultAsync(ct);
+
+            var orderQty = req?.quantity ?? 0;
+
+            if (orderQty <= 0)
+            {
+                orderQty = await _db.order_items
+                    .AsNoTracking()
+                    .Where(x => x.order_id == orderId)
+                    .OrderBy(x => x.item_id)
+                    .Select(x => x.quantity)
+                    .FirstOrDefaultAsync(ct);
+            }
+
+            if (orderQty <= 0)
+                orderQty = 1;
+
+            cost_estimate? est = null;
+
+            if (req != null)
+            {
+                if (req.accepted_estimate_id.HasValue && req.accepted_estimate_id.Value > 0)
+                {
+                    est = await _db.cost_estimates
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(x =>
+                            x.estimate_id == req.accepted_estimate_id.Value &&
+                            x.order_request_id == req.order_request_id,
+                            ct);
+                }
+
+                est ??= await _db.cost_estimates
+                    .AsNoTracking()
+                    .Where(x => x.order_request_id == req.order_request_id)
+                    .OrderByDescending(x => x.is_active)
+                    .ThenByDescending(x => x.estimate_id)
+                    .FirstOrDefaultAsync(ct);
+            }
+
+            var sheetsRequired = Math.Max(est?.sheets_required ?? 0, 0);
+            var sheetsTotal = Math.Max(est?.sheets_total ?? 0, sheetsRequired);
+            var nUp = est?.n_up > 0 ? est.n_up : 1;
+            var numberOfPlates = req?.number_of_plates ?? 1;
+
+            if (sheetsRequired <= 0)
+                sheetsRequired = Math.Max(1, (int)Math.Ceiling(orderQty / (decimal)nUp));
+
+            if (sheetsTotal <= 0)
+                sheetsTotal = sheetsRequired;
+
+            if (sheetsTotal <= 0)
+                sheetsTotal = 1;
+
+            if (numberOfPlates <= 0)
+                numberOfPlates = 1;
+
+            return new ProductionQtyContext
+            {
+                order_qty = orderQty,
+                sheets_required = sheetsRequired,
+                sheets_total = sheetsTotal,
+                n_up = nUp,
+                number_of_plates = numberOfPlates
+            };
+        }
+
+        private static int ResolveQtyGoodForSubProductTask(
+            string? processCode,
+            int stageIndex,
+            IReadOnlyList<string?> routeProcessCodes,
+            ProductionQtyContext ctx)
+        {
+            return StageQuantityHelper.GetProductionOutputCap(
+                currentCode: processCode,
+                currentStageIndex: stageIndex,
+                routeProcessCodes: routeProcessCodes,
+                sheetsTotal: ctx.sheets_total,
+                nUp: ctx.n_up,
+                numberOfPlates: ctx.number_of_plates);
+        }
+
+        /// <summary>
+        /// Khi production đã có task rồi, chọn sub_product sẽ tự Finished các task từ đầu route
+        /// đến công đoạn được ghi trong sub_product.product_process.
+        /// Ví dụ product_process = "CAT" => Finished RALO + CAT.
+        /// Ví dụ product_process = "CAN" => Finished RALO + CAT + IN + PHU + CAN.
+        /// </summary>
+        private async Task ApplySubProductToExistingTasksAsync(
+            production prod,
+            sub_product selectedSubProduct,
+            int orderQty,
+            CancellationToken ct)
+        {
+            if (prod.is_full_process)
+                return;
+
+            if (string.IsNullOrWhiteSpace(selectedSubProduct.product_process))
+                return;
+
+            if (!prod.order_id.HasValue)
+                return;
+
+            var selectedCodes = ParseSubProductProcessCodes(selectedSubProduct.product_process);
+            if (selectedCodes.Count == 0)
+                return;
+
+            var tasks = await _db.tasks
+                .Include(x => x.process)
+                .Where(x => x.prod_id == prod.prod_id)
+                .OrderBy(x => x.seq_num)
+                .ThenBy(x => x.task_id)
+                .ToListAsync(ct);
+
+            if (tasks.Count == 0)
+                return;
+
+            var maxCompletedSeq = tasks
+                .Where(x => selectedCodes.Contains(NormProcessCodeForSubProduct(x.process?.process_code)))
+                .Select(x => x.seq_num)
+                .Where(x => x.HasValue)
+                .Select(x => (int?)x!.Value)
+                .Max();
+
+            if (!maxCompletedSeq.HasValue)
+                return;
+
+            var now = AppTime.NowVnUnspecified();
+            var reason = "Bán thành phẩm đã có sẵn trong kho";
+
+            var routeCodes = tasks
+                .Select(x => (string?)x.process?.process_code)
+                .ToList();
+
+            var qtyCtx = await GetProductionQtyContextAsync(prod.order_id.Value, ct);
+
+            for (var i = 0; i < tasks.Count; i++)
+            {
+                var t = tasks[i];
+
+                if (!t.seq_num.HasValue || t.seq_num.Value > maxCompletedSeq.Value)
+                    continue;
+
+                if (string.Equals(t.status, "Finished", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                t.status = "Finished";
+                t.start_time ??= now;
+                t.end_time = now;
+                t.reason = reason;
+                t.is_taken_sub_product = true;
+
+                var alreadyHasLog = await _db.task_logs
+                    .AsNoTracking()
+                    .AnyAsync(x =>
+                        x.task_id == t.task_id &&
+                        x.action_type == "Finished",
+                        ct);
+
+                if (!alreadyHasLog)
+                {
+                    var qtyGood = ResolveQtyGoodForSubProductTask(
+                        t.process?.process_code,
+                        i,
+                        routeCodes,
+                        qtyCtx);
+
+                    await _db.task_logs.AddAsync(new task_log
+                    {
+                        task_id = t.task_id,
+                        scanned_code = $"SUB_PRODUCT-{selectedSubProduct.id}",
+                        action_type = "Finished",
+                        qty_good = qtyGood,
+                        log_time = now,
+                        scanned_by_user_id = null,
+                        material_usage_json = null
+                    }, ct);
+                }
+            }
         }
 
         private static string RemoveDiacriticsForMaterial(string? text)

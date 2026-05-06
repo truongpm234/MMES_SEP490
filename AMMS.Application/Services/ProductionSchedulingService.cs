@@ -1,14 +1,15 @@
 ﻿using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
+using AMMS.Infrastructure.Configurations;
 using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Planning;
+using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using AMMS.Infrastructure.Configurations;
 using Microsoft.Extensions.Options;
-using AMMS.Shared.Helpers;
+using System;
 
 namespace AMMS.Application.Services
 {
@@ -20,6 +21,7 @@ namespace AMMS.Application.Services
         private readonly WorkCalendar _cal;
         private readonly ILogger<ProductionSchedulingService> _logger;
         private readonly SchedulingOptions _opt;
+        private readonly IProductionRepository _prodRepo;
 
         public ProductionSchedulingService(
             AppDbContext db,
@@ -36,6 +38,7 @@ namespace AMMS.Application.Services
             _cal = cal;
             _logger = logger;
             _opt = opt.Value ?? new SchedulingOptions();
+            _prodRepo = prodRepo;
         }
         private async Task<int> GetMinStartWaitMinutesAsync(CancellationToken ct = default)
         {
@@ -121,25 +124,60 @@ namespace AMMS.Application.Services
 
                     await _db.SaveChangesAsync();
 
+                    var subProductContext = await ResolveSubProductCompletedContextAsync(
+    prod,
+    plan.Stages,
+    ctx,
+    now,
+    CancellationToken.None);
+
                     var tasks = plan.Stages
                         .OrderBy(x => x.SeqNum)
-                        .Select(x => new task
+                        .Select(x =>
                         {
-                            prod_id = prod.prod_id,
-                            process_id = x.ProcessId,
-                            seq_num = x.SeqNum,
-                            name = x.ProcessName,
-                            status = "Unassigned",
-                            machine = x.MachineCode,
-                            start_time = null,
-                            end_time = null,
-                            planned_start_time = x.PlannedStart,
-                            planned_end_time = x.PlannedEnd
+                            var isFinishedBySubProduct = subProductContext.finished_process_codes
+                                .Contains(NormProcessCode(x.ProcessCode));
+
+                            var finishedAt = isFinishedBySubProduct
+                                ? now
+                                : (DateTime?)null;
+
+                            return new task
+                            {
+                                prod_id = prod.prod_id,
+                                process_id = x.ProcessId,
+                                seq_num = x.SeqNum,
+                                name = x.ProcessName,
+
+                                status = isFinishedBySubProduct ? "Finished" : "Unassigned",
+
+                                machine = x.MachineCode,
+
+                                start_time = finishedAt,
+                                end_time = finishedAt,
+
+                                planned_start_time = x.PlannedStart,
+                                planned_end_time = x.PlannedEnd,
+
+                                reason = isFinishedBySubProduct
+                                    ? "Bán thành phẩm đã có sẵn trong kho"
+                                    : null,
+
+                                is_taken_sub_product = isFinishedBySubProduct
+                            };
                         })
                         .ToList();
 
                     await _taskRepo.AddRangeAsync(tasks);
                     await _taskRepo.SaveChangesAsync();
+
+                    await CreateSubProductFinishedLogsAsync(
+                        tasks,
+                        plan.Stages,
+                        subProductContext,
+                        ctx,
+                        now,
+                        CancellationToken.None);
 
                     _logger.LogInformation(
                         "ScheduleOrder success. OrderId={OrderId}, ProdId={ProdId}, TaskCount={TaskCount}, Csv={Csv}",
@@ -1014,6 +1052,179 @@ namespace AMMS.Application.Services
             var fifoAnchor = _cal.NormalizeStart(maxOlderTail.AddMinutes(gapMinutes));
 
             return fifoAnchor > proposedAnchor ? fifoAnchor : proposedAnchor;
+        }
+
+        private sealed class SubProductCompletedContext
+        {
+            public bool is_sub_product_mode { get; init; }
+            public int? sub_product_id { get; init; }
+            public string? raw_product_process { get; init; }
+            public HashSet<string> finished_process_codes { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static string NormProcessCode(string? code)
+        {
+            return (code ?? "")
+                .Trim()
+                .ToUpperInvariant()
+                .Replace(" ", "_")
+                .Replace("-", "_");
+        }
+
+        private static HashSet<string> ParseProcessCodes(string? csv)
+        {
+            if (string.IsNullOrWhiteSpace(csv))
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            return csv
+                .Split(
+                    new[] { ',', ';', '|', '/', '\\' },
+                    StringSplitOptions.RemoveEmptyEntries)
+                .Select(NormProcessCode)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private async Task<SubProductCompletedContext> ResolveSubProductCompletedContextAsync(
+            production prod,
+            IReadOnlyList<StagePlanDraft> stages,
+            PlanningContext ctx,
+            DateTime now,
+            CancellationToken ct)
+        {
+            var empty = new SubProductCompletedContext();
+
+            if (prod.is_full_process)
+                return empty;
+
+            if (!prod.sub_product_id.HasValue || prod.sub_product_id.Value <= 0)
+                return empty;
+
+            var sub = await _db.sub_products
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.id == prod.sub_product_id.Value, ct);
+
+            if (sub == null || string.IsNullOrWhiteSpace(sub.product_process))
+                return empty;
+
+            var selectedCodes = ParseProcessCodes(sub.product_process);
+
+            if (selectedCodes.Count == 0)
+                return empty;
+
+            var orderedStages = stages
+                .OrderBy(x => x.SeqNum)
+                .ToList();
+
+            var maxCompletedSeq = orderedStages
+                .Where(x => selectedCodes.Contains(NormProcessCode(x.ProcessCode)))
+                .Select(x => (int?)x.SeqNum)
+                .Max();
+
+            if (!maxCompletedSeq.HasValue)
+                return empty;
+
+            var finishedCodes = orderedStages
+                .Where(x => x.SeqNum <= maxCompletedSeq.Value)
+                .Select(x => NormProcessCode(x.ProcessCode))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            return new SubProductCompletedContext
+            {
+                is_sub_product_mode = true,
+                sub_product_id = sub.id,
+                raw_product_process = sub.product_process,
+                finished_process_codes = finishedCodes
+            };
+        }
+
+        private static int ResolveQtyGoodForAutoFinishedTask(
+            string? processCode,
+            int stageIndex,
+            IReadOnlyList<string?> routeProcessCodes,
+            PlanningContext ctx)
+        {
+            var pcode = NormProcessCode(processCode);
+
+            var sheetsTotal = Math.Max(ctx.SheetsTotal, ctx.SheetsRequired);
+            if (sheetsTotal <= 0)
+                sheetsTotal = Math.Max(1, ctx.OrderQty);
+
+            var nUp = ctx.NUp <= 0 ? 1 : ctx.NUp;
+            var numberOfPlates = ctx.NumberOfPlates <= 0 ? 1 : ctx.NumberOfPlates;
+
+            return StageQuantityHelper.GetProductionOutputCap(
+                currentCode: pcode,
+                currentStageIndex: stageIndex,
+                routeProcessCodes: routeProcessCodes,
+                sheetsTotal: sheetsTotal,
+                nUp: nUp,
+                numberOfPlates: numberOfPlates);
+        }
+
+        private async Task CreateSubProductFinishedLogsAsync(
+            List<task> tasks,
+            IReadOnlyList<StagePlanDraft> stages,
+            SubProductCompletedContext subProductContext,
+            PlanningContext ctx,
+            DateTime now,
+            CancellationToken ct)
+        {
+            if (!subProductContext.is_sub_product_mode)
+                return;
+
+            var orderedStages = stages
+                .OrderBy(x => x.SeqNum)
+                .ToList();
+
+            var routeCodes = orderedStages
+                .Select(x => (string?)x.ProcessCode)
+                .ToList();
+
+            var taskByProcessId = tasks
+                .Where(x => x.process_id.HasValue)
+                .ToDictionary(x => x.process_id!.Value, x => x);
+
+            for (var i = 0; i < orderedStages.Count; i++)
+            {
+                var stage = orderedStages[i];
+                var pcode = NormProcessCode(stage.ProcessCode);
+
+                if (!subProductContext.finished_process_codes.Contains(pcode))
+                    continue;
+
+                if (!taskByProcessId.TryGetValue(stage.ProcessId, out var t))
+                    continue;
+
+                var alreadyHasLog = await _db.task_logs
+                    .AsNoTracking()
+                    .AnyAsync(x =>
+                        x.task_id == t.task_id &&
+                        x.action_type == "Finished",
+                        ct);
+
+                if (alreadyHasLog)
+                    continue;
+
+                var qtyGood = ResolveQtyGoodForAutoFinishedTask(
+                    stage.ProcessCode,
+                    i,
+                    routeCodes,
+                    ctx);
+
+                await _db.task_logs.AddAsync(new task_log
+                {
+                    task_id = t.task_id,
+                    scanned_code = $"SUB_PRODUCT-{subProductContext.sub_product_id}",
+                    action_type = "Finished",
+                    qty_good = qtyGood,
+                    log_time = now,
+                    scanned_by_user_id = null,
+                    material_usage_json = null
+                }, ct);
+            }
+
+            await _db.SaveChangesAsync(ct);
         }
 
         private sealed class StagePlanDraft
