@@ -22,7 +22,7 @@ namespace AMMS.Shared.DTOs.Productions
         public int? request_print_width_mm { get; set; }
         public int? request_print_length_mm { get; set; }
         public int? order_quantity { get; set; }
-        public bool is_full_process { get; set; } = true;
+        public bool? is_full_process { get; set; } = true;
         public bool has_matched_sub_product { get; set; }
         public string? sub_product_message { get; set; }
         public int? selected_sub_product_id { get; set; }
