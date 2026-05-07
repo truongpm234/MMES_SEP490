@@ -1,6 +1,7 @@
 ﻿using AMMS.Application.Helpers;
 using AMMS.Application.Interfaces;
 using AMMS.Infrastructure.DBContext;
+using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Infrastructure.Repositories;
 using AMMS.Shared.DTOs.Common;
@@ -426,73 +427,149 @@ namespace AMMS.Application.Services
                 .OrderByDescending(x => x.prod_id)
                 .FirstOrDefaultAsync(ct);
 
-            if (prod == null)
+            var req = await _db.order_requests
+                .AsNoTracking()
+                .Where(x => x.order_id == orderId)
+                .OrderByDescending(x => x.order_request_id)
+                .FirstOrDefaultAsync(ct);
+
+            var firstItem = await _db.order_items
+                .AsNoTracking()
+                .Where(x => x.order_id == orderId)
+                .OrderBy(x => x.item_id)
+                .Select(x => new
+                {
+                    x.product_type_id,
+                    x.production_process
+                })
+                .FirstOrDefaultAsync(ct);
+
+            int? productTypeId = prod?.product_type_id ?? firstItem?.product_type_id;
+
+            if ((!productTypeId.HasValue || productTypeId.Value <= 0) && req != null)
+            {
+                var productTypeCode = req.product_type?.Trim();
+
+                if (!string.IsNullOrWhiteSpace(productTypeCode))
+                {
+                    productTypeId = await _db.product_types
+                        .AsNoTracking()
+                        .Where(x => x.code == productTypeCode)
+                        .Select(x => (int?)x.product_type_id)
+                        .FirstOrDefaultAsync(ct);
+                }
+            }
+
+            if (!productTypeId.HasValue || productTypeId.Value <= 0)
                 return new List<ProductionReadyMachineDto>();
 
-            var tasks = await _db.tasks
-                .Include(x => x.process)
+            string? estimateProductionProcesses = null;
+
+            if (req != null)
+            {
+                var estQuery = _db.cost_estimates
+                    .AsNoTracking()
+                    .Where(x => x.order_request_id == req.order_request_id);
+
+                if (req.accepted_estimate_id.HasValue && req.accepted_estimate_id.Value > 0)
+                {
+                    estimateProductionProcesses = await estQuery
+                        .Where(x => x.estimate_id == req.accepted_estimate_id.Value)
+                        .Select(x => x.production_processes)
+                        .FirstOrDefaultAsync(ct);
+                }
+
+                if (string.IsNullOrWhiteSpace(estimateProductionProcesses))
+                {
+                    estimateProductionProcesses = await estQuery
+                        .OrderByDescending(x => x.is_active)
+                        .ThenByDescending(x => x.estimate_id)
+                        .Select(x => x.production_processes)
+                        .FirstOrDefaultAsync(ct);
+                }
+            }
+
+            var selectedProcessesCsv = !string.IsNullOrWhiteSpace(firstItem?.production_process)
+                ? firstItem!.production_process
+                : estimateProductionProcesses;
+
+            var targets = new List<MachineReadinessTarget>();
+
+            // Ưu tiên lấy theo task nếu production đã có task.
+            if (prod != null)
+            {
+                var tasks = await _db.tasks
+                    .Include(x => x.process)
+                    .AsNoTracking()
+                    .Where(x => x.prod_id == prod.prod_id)
+                    .OrderBy(x => x.seq_num)
+                    .ThenBy(x => x.task_id)
+                    .ToListAsync(ct);
+
+                if (tasks.Count > 0)
+                {
+                    targets = tasks
+                        .Select(t => new MachineReadinessTarget
+                        {
+                            process_id = t.process_id,
+                            seq_num = t.seq_num,
+                            process_code = t.process != null ? t.process.process_code : null,
+                            process_name = t.process != null ? t.process.process_name : t.name,
+                            machine_code = t.machine
+                        })
+                        .OrderBy(x => x.seq_num ?? int.MaxValue)
+                        .ThenBy(x => x.process_id ?? int.MaxValue)
+                        .ToList();
+                }
+            }
+
+            // Nếu chưa có task thì fallback sang product_type_process.
+            if (targets.Count == 0)
+            {
+                var routeSteps = await _db.product_type_processes
+                    .AsNoTracking()
+                    .Where(x =>
+                        x.product_type_id == productTypeId.Value &&
+                        (x.is_active ?? true))
+                    .OrderBy(x => x.seq_num)
+                    .Select(x => new MachineReadinessTarget
+                    {
+                        process_id = x.process_id,
+                        seq_num = x.seq_num,
+                        process_code = x.process_code,
+                        process_name = x.process_name,
+                        machine_code = x.machine
+                    })
+                    .ToListAsync(ct);
+
+                targets = ResolveFixedMachineTargets(routeSteps, selectedProcessesCsv);
+            }
+
+            if (targets.Count == 0)
+                return new List<ProductionReadyMachineDto>();
+
+            var allMachines = await _db.machines
                 .AsNoTracking()
-                .Where(x => x.prod_id == prod.prod_id)
-                .OrderBy(x => x.seq_num)
-                .ThenBy(x => x.task_id)
+                .Where(x => x.is_active)
+                .OrderBy(x => x.process_code)
+                .ThenBy(x => x.machine_code)
                 .ToListAsync(ct);
-
-            if (tasks.Count == 0)
-                return new List<ProductionReadyMachineDto>();
-
-            var targetTasks = tasks
-                .OrderBy(x => x.seq_num)
-                .ThenBy(x => x.task_id)
-                .ToList();
-
-            var machineCodes = targetTasks
-                .Where(x => !string.IsNullOrWhiteSpace(x.machine))
-                .Select(x => x.machine!.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            var machineMap = await _db.machines
-                .AsNoTracking()
-                .Where(x => machineCodes.Contains(x.machine_code))
-                .ToDictionaryAsync(x => x.machine_code, StringComparer.OrdinalIgnoreCase, ct);
 
             var result = new List<ProductionReadyMachineDto>();
 
-            foreach (var t in targetTasks)
+            foreach (var target in targets)
             {
-                var machineCode = t.machine?.Trim();
-                var processCode = t.process?.process_code;
-                var processName = t.process?.process_name ?? t.name;
+                var machine = ResolveMachineForTarget(target, allMachines);
 
-                if (string.IsNullOrWhiteSpace(machineCode))
+                if (machine == null)
                 {
                     result.Add(new ProductionReadyMachineDto
                     {
-                        process_id = t.process_id,
-                        seq_num = t.seq_num,
-                        process_code = processCode,
-                        process_name = processName,
-                        machine_code = null,
-                        machine_found = false,
-                        is_available = false,
-                        total_quantity = 0,
-                        busy_quantity = 0,
-                        free_quantity = 0,
-                        status = "Unmapped"
-                    });
-
-                    continue;
-                }
-
-                if (!machineMap.TryGetValue(machineCode, out var machine) || !machine.is_active)
-                {
-                    result.Add(new ProductionReadyMachineDto
-                    {
-                        process_id = t.process_id,
-                        seq_num = t.seq_num,
-                        process_code = processCode,
-                        process_name = processName,
-                        machine_code = machineCode,
+                        process_id = target.process_id,
+                        seq_num = target.seq_num,
+                        process_code = target.process_code,
+                        process_name = target.process_name,
+                        machine_code = target.machine_code,
                         machine_found = false,
                         is_available = false,
                         total_quantity = 0,
@@ -515,12 +592,16 @@ namespace AMMS.Application.Services
 
                 result.Add(new ProductionReadyMachineDto
                 {
-                    process_id = t.process_id,
-                    seq_num = t.seq_num,
-                    process_code = processCode,
-                    process_name = processName,
+                    process_id = target.process_id,
+                    seq_num = target.seq_num,
+                    process_code = !string.IsNullOrWhiteSpace(target.process_code)
+                        ? target.process_code
+                        : machine.process_code,
+                    process_name = !string.IsNullOrWhiteSpace(target.process_name)
+                        ? target.process_name
+                        : machine.process_name,
 
-                    machine_code = machineCode,
+                    machine_code = machine.machine_code,
                     machine_found = true,
 
                     is_available = isAvailable,
@@ -657,6 +738,133 @@ namespace AMMS.Application.Services
         {
             return _repo.SetProductionMethodAsync(req, ct);
         }
+
+        private sealed class MachineReadinessTarget
+        {
+            public int? process_id { get; init; }
+            public int? seq_num { get; init; }
+            public string? process_code { get; init; }
+            public string? process_name { get; init; }
+            public string? machine_code { get; init; }
+        }
+
+        private static string NormalizeMachineProcessCode(string? value)
+            => (value ?? "").Trim().ToUpperInvariant();
+
+        private static string NormalizeMachineText(string? value)
+            => (value ?? "").Trim().ToUpperInvariant();
+
+        private static HashSet<string> ParseSelectedMachineProcessCodes(string? csv)
+        {
+            if (string.IsNullOrWhiteSpace(csv))
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            return csv
+                .Split(',', ';', '|', '/', '\\')
+                .Select(NormalizeMachineProcessCode)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static List<MachineReadinessTarget> ResolveFixedMachineTargets(
+            List<MachineReadinessTarget> allSteps,
+            string? selectedProcessesCsv)
+        {
+            if (allSteps == null || allSteps.Count == 0)
+                return new List<MachineReadinessTarget>();
+
+            var selected = ParseSelectedMachineProcessCodes(selectedProcessesCsv);
+
+            if (selected.Count == 0)
+            {
+                return allSteps
+                    .OrderBy(x => x.seq_num ?? int.MaxValue)
+                    .ThenBy(x => x.process_id ?? int.MaxValue)
+                    .ToList();
+            }
+
+            var filtered = allSteps
+                .Where(x => selected.Contains(NormalizeMachineProcessCode(x.process_code)))
+                .OrderBy(x => x.seq_num ?? int.MaxValue)
+                .ThenBy(x => x.process_id ?? int.MaxValue)
+                .ToList();
+
+            return filtered.Count > 0
+                ? filtered
+                : allSteps
+                    .OrderBy(x => x.seq_num ?? int.MaxValue)
+                    .ThenBy(x => x.process_id ?? int.MaxValue)
+                    .ToList();
+        }
+
+        private static machine? ResolveMachineForTarget(
+            MachineReadinessTarget target,
+            List<machine> allMachines)
+        {
+            if (allMachines == null || allMachines.Count == 0)
+                return null;
+
+            var machineCode = target.machine_code?.Trim();
+
+            // Ưu tiên 1: machine code được cấu hình trong task/product_type_process.
+            if (!string.IsNullOrWhiteSpace(machineCode))
+            {
+                var byMachineCode = allMachines
+                    .FirstOrDefault(x =>
+                        string.Equals(
+                            x.machine_code?.Trim(),
+                            machineCode,
+                            StringComparison.OrdinalIgnoreCase));
+
+                if (byMachineCode != null)
+                    return byMachineCode;
+            }
+
+            var processCode = NormalizeMachineProcessCode(target.process_code);
+
+            // Ưu tiên 2: tìm theo process_code.
+            if (!string.IsNullOrWhiteSpace(processCode))
+            {
+                var byProcessCode = allMachines
+                    .Where(x =>
+                        string.Equals(
+                            NormalizeMachineProcessCode(x.process_code),
+                            processCode,
+                            StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(x => x.free_quantity ?? (x.quantity - (x.busy_quantity ?? 0)))
+                    .ThenBy(x => x.busy_quantity ?? 0)
+                    .ThenByDescending(x => x.capacity_per_hour)
+                    .ThenBy(x => x.machine_id)
+                    .FirstOrDefault();
+
+                if (byProcessCode != null)
+                    return byProcessCode;
+            }
+
+            var processName = NormalizeMachineText(target.process_name);
+
+            // Ưu tiên 3: tìm theo process_name.
+            if (!string.IsNullOrWhiteSpace(processName))
+            {
+                var byProcessName = allMachines
+                    .Where(x =>
+                        string.Equals(
+                            NormalizeMachineText(x.process_name),
+                            processName,
+                            StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(x => x.free_quantity ?? (x.quantity - (x.busy_quantity ?? 0)))
+                    .ThenBy(x => x.busy_quantity ?? 0)
+                    .ThenByDescending(x => x.capacity_per_hour)
+                    .ThenBy(x => x.machine_id)
+                    .FirstOrDefault();
+
+                if (byProcessName != null)
+                    return byProcessName;
+            }
+
+            return null;
+        }
+
         private readonly IWebHostEnvironment _env;
     }
 }

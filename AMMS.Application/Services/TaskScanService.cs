@@ -929,37 +929,6 @@ namespace AMMS.Application.Services
             };
         }
 
-        private async Task<string?> GetPreviousProcessCodeAsync(task currentTask, CancellationToken ct = default)
-        {
-            if (!currentTask.prod_id.HasValue)
-                return null;
-
-            var flow = await _db.tasks
-                .AsNoTracking()
-                .Include(x => x.process)
-                .Where(x => x.prod_id == currentTask.prod_id.Value)
-                .OrderBy(x => x.seq_num)
-                .ThenBy(x => x.task_id)
-                .Select(x => new TaskFlowRefItem
-                {
-                    task_id = x.task_id,
-                    seq_num = x.seq_num,
-                    process_code = x.process != null ? x.process.process_code : null,
-                    process_name = x.process != null ? x.process.process_name : null
-                })
-                .ToListAsync(ct);
-
-            if (flow.Count == 0)
-                return null;
-
-            var currentIndex = flow.FindIndex(x => x.task_id == currentTask.task_id);
-            if (currentIndex <= 0)
-                return null;
-
-            var prev = flow[currentIndex - 1];
-            return ProductionFlowHelper.Norm(prev.process_code);
-        }
-
         private sealed class TaskFlowRefItem
         {
             public int task_id { get; init; }
