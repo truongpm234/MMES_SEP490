@@ -45,6 +45,8 @@ namespace AMMS.Shared.DTOs.ProductTemplates
 
         public int? print_length_mm { get; set; }
 
+        public string? lamination { get; set; }
+
         public string? production_processes { get; set; }
 
         public int? default_quantity { get; set; }

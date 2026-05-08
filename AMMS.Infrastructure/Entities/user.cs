@@ -17,6 +17,8 @@ public partial class user
 
     public string? full_name { get; set; }
 
+    public string? address { get; set; }
+
     public int? role_id { get; set; }
 
     public bool? is_active { get; set; }

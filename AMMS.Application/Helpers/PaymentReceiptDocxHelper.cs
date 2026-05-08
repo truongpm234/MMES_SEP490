@@ -6,6 +6,7 @@ using DocumentFormat.OpenXml.Wordprocessing;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Diagnostics;
 
 namespace AMMS.Application.Helpers
 {
@@ -135,6 +136,167 @@ namespace AMMS.Application.Helpers
             }
 
             return memoryStream.ToArray();
+        }
+
+        public static async Task<byte[]> GeneratePdfAsync(
+    byte[] templateBytes,
+    IDictionary<string, string> placeholders,
+    string? libreOfficeBinaryPath = null,
+    CancellationToken ct = default)
+        {
+            // Giữ nguyên flow cũ: template DOCX -> replace placeholders -> DOCX bytes
+            var generatedDocxBytes = GenerateDocx(templateBytes, placeholders);
+
+            // Bổ sung bước mới: DOCX bytes -> PDF bytes
+            return await ConvertDocxBytesToPdfAsync(
+                generatedDocxBytes,
+                libreOfficeBinaryPath,
+                ct);
+        }
+
+        private static async Task<byte[]> ConvertDocxBytesToPdfAsync(
+            byte[] docxBytes,
+            string? libreOfficeBinaryPath = null,
+            CancellationToken ct = default)
+        {
+            if (docxBytes == null || docxBytes.Length == 0)
+                throw new ArgumentException("Receipt DOCX content is empty.");
+
+            var tempRoot = Path.Combine(
+                Path.GetTempPath(),
+                "amms_receipt_pdf",
+                Guid.NewGuid().ToString("N"));
+
+            Directory.CreateDirectory(tempRoot);
+
+            var inputDocxPath = Path.Combine(tempRoot, "receipt.docx");
+            var outputPdfPath = Path.Combine(tempRoot, "receipt.pdf");
+
+            // Mỗi lần convert dùng 1 LibreOffice profile riêng để tránh lỗi khi nhiều request chạy song song
+            var libreOfficeUserProfile = Path.Combine(tempRoot, "lo_profile");
+            Directory.CreateDirectory(libreOfficeUserProfile);
+
+            try
+            {
+                await File.WriteAllBytesAsync(inputDocxPath, docxBytes, ct);
+
+                var sofficePath = ResolveLibreOfficeBinaryPath(libreOfficeBinaryPath);
+
+                using var process = new Process();
+
+                process.StartInfo = new ProcessStartInfo
+                {
+                    FileName = sofficePath,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+
+                process.StartInfo.ArgumentList.Add("--headless");
+                process.StartInfo.ArgumentList.Add("--nologo");
+                process.StartInfo.ArgumentList.Add("--nofirststartwizard");
+                process.StartInfo.ArgumentList.Add("--norestore");
+
+                process.StartInfo.ArgumentList.Add(
+                    $"-env:UserInstallation={new Uri(libreOfficeUserProfile).AbsoluteUri}");
+
+                process.StartInfo.ArgumentList.Add("--convert-to");
+                process.StartInfo.ArgumentList.Add("pdf");
+
+                process.StartInfo.ArgumentList.Add("--outdir");
+                process.StartInfo.ArgumentList.Add(tempRoot);
+
+                process.StartInfo.ArgumentList.Add(inputDocxPath);
+
+                process.Start();
+
+                var stdoutTask = process.StandardOutput.ReadToEndAsync();
+                var stderrTask = process.StandardError.ReadToEndAsync();
+
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(90));
+
+                try
+                {
+                    await process.WaitForExitAsync(timeoutCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    TryKillProcess(process);
+
+                    if (ct.IsCancellationRequested)
+                        throw;
+
+                    throw new TimeoutException("Convert receipt DOCX to PDF timed out after 90 seconds.");
+                }
+
+                var stdout = await stdoutTask;
+                var stderr = await stderrTask;
+
+                if (process.ExitCode != 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Convert receipt DOCX to PDF failed. ExitCode={process.ExitCode}. StdOut={stdout}. StdErr={stderr}");
+                }
+
+                if (!File.Exists(outputPdfPath))
+                {
+                    throw new FileNotFoundException(
+                        $"Receipt PDF file was not created. Expected path: {outputPdfPath}. StdOut={stdout}. StdErr={stderr}");
+                }
+
+                var pdfBytes = await File.ReadAllBytesAsync(outputPdfPath, ct);
+
+                if (pdfBytes.Length == 0)
+                    throw new InvalidOperationException("Generated receipt PDF is empty.");
+
+                return pdfBytes;
+            }
+            finally
+            {
+                TryDeleteDirectory(tempRoot);
+            }
+        }
+
+        private static string ResolveLibreOfficeBinaryPath(string? configuredPath)
+        {
+            if (!string.IsNullOrWhiteSpace(configuredPath))
+                return configuredPath.Trim();
+
+            if (OperatingSystem.IsWindows())
+            {
+                var defaultWindowsPath = @"C:\Program Files\LibreOffice\program\soffice.exe";
+
+                if (File.Exists(defaultWindowsPath))
+                    return defaultWindowsPath;
+            }
+
+            return "soffice";
+        }
+
+        private static void TryKillProcess(Process process)
+        {
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+            }
+        }
+
+        private static void TryDeleteDirectory(string directoryPath)
+        {
+            try
+            {
+                if (Directory.Exists(directoryPath))
+                    Directory.Delete(directoryPath, recursive: true);
+            }
+            catch
+            {
+            }
         }
 
         private static void ProcessRoot(OpenXmlElement? root, IReadOnlyDictionary<string, string> placeholders)

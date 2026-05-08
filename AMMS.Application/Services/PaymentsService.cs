@@ -970,13 +970,17 @@ namespace AMMS.Application.Services
 
             var templateBytes = await File.ReadAllBytesAsync(templatePath, ct);
 
-            // tạo docx
-            var generatedDocxBytes = PaymentReceiptDocxHelper.GenerateDocx(templateBytes, placeholders);
+            // Tạo PDF từ template DOCX
+            var generatedPdfBytes = await PaymentReceiptDocxHelper.GeneratePdfAsync(
+                templateBytes,
+                placeholders,
+                _config["LibreOffice:BinaryPath"],
+                ct);
 
-            var fileName = $"phieu-thu-{payment.order_code}.docx";
-            var contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            var fileName = $"phieu-thu-{payment.order_code}.pdf";
+            var contentType = "application/pdf";
 
-            return (generatedDocxBytes, fileName, contentType);
+            return (generatedPdfBytes, fileName, contentType);
         }
 
         private string ResolveReceiptTemplatePath()
@@ -1110,8 +1114,12 @@ namespace AMMS.Application.Services
                     return;
 
                 var extension = Path.GetExtension(generated.Value.FileName);
+
                 if (string.IsNullOrWhiteSpace(extension))
-                    extension = ".docx";
+                    extension = ".pdf";
+
+                if (!string.Equals(extension, ".pdf", StringComparison.OrdinalIgnoreCase))
+                    extension = ".pdf";
 
                 var normalizedPaymentType = string.Equals(
                     paymentType,

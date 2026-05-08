@@ -50,6 +50,8 @@ namespace AMMS.Application.Services
                 print_width_mm = x.print_width_mm,
                 print_length_mm = x.print_length_mm,
 
+                lamination = x.lamination,
+
                 production_processes = x.production_processes,
                 default_quantity = x.default_quantity,
 
