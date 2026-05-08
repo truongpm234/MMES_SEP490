@@ -38,6 +38,7 @@ RUN apt-get update && apt-get install -y \
 
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
+ENV LibreOffice__BinaryPath=soffice
 
 COPY --from=publish /app/publish .
 
