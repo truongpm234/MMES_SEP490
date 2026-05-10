@@ -2,6 +2,8 @@
 using AMMS.Infrastructure.Entities.AMMS.Infrastructure.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using System.Text.Json;
 
 namespace AMMS.Infrastructure.DBContext;
 
@@ -431,12 +433,36 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.created_at)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP")
                 .HasColumnType("timestamp without time zone");
-            entity.Property(e => e.full_name).HasMaxLength(100);
-            entity.Property(e => e.is_active).HasDefaultValue(true);
-            entity.Property(e => e.password_hash).HasMaxLength(255);
-            entity.Property(e => e.username).HasMaxLength(50);
 
-            entity.HasOne(d => d.role).WithMany(p => p.users)
+            entity.Property(e => e.full_name)
+                .HasMaxLength(100);
+
+            entity.Property(e => e.is_active)
+                .HasDefaultValue(true);
+
+            entity.Property(e => e.password_hash)
+                .HasMaxLength(255);
+
+            entity.Property(e => e.username)
+                .HasMaxLength(50);
+
+            entity.Property(e => e.address)
+                .HasColumnType("jsonb")
+                .HasConversion(
+                    v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                    v => JsonSerializer.Deserialize<List<string>>(v, (JsonSerializerOptions?)null)
+                         ?? new List<string>()
+                )
+                .Metadata.SetValueComparer(
+                    new ValueComparer<List<string>>(
+                        (c1, c2) => c1!.SequenceEqual(c2!),
+                        c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                        c => c.ToList()
+                    )
+                );
+
+            entity.HasOne(d => d.role)
+                .WithMany(p => p.users)
                 .HasForeignKey(d => d.role_id)
                 .HasConstraintName("users_role_id_fkey");
         });

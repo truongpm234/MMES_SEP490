@@ -3,6 +3,7 @@ using AMMS.Infrastructure.Entities;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.User;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace AMMS.Infrastructure.Repositories
 {
@@ -178,7 +179,10 @@ namespace AMMS.Infrastructure.Repositories
                 .FirstOrDefaultAsync(ct);
         }
 
-        public async Task<user?> UpdateProfileAsync(int userId, UpdateProfileDto dto, CancellationToken ct = default)
+        public async Task<user?> UpdateProfileAsync(
+    int userId,
+    UpdateProfileDto dto,
+    CancellationToken ct = default)
         {
             var user = await _db.users
                 .FirstOrDefaultAsync(x => x.user_id == userId, ct);
@@ -186,15 +190,11 @@ namespace AMMS.Infrastructure.Repositories
             if (user == null)
                 return null;
 
-            // field nào null hoặc rỗng -> giữ nguyên
             if (!string.IsNullOrWhiteSpace(dto.full_name))
                 user.full_name = dto.full_name.Trim();
 
             if (!string.IsNullOrWhiteSpace(dto.phone_number))
                 user.phone_number = dto.phone_number.Trim();
-
-            if (!string.IsNullOrWhiteSpace(dto.address))
-                user.address = dto.address.Trim();
 
             if (!string.IsNullOrWhiteSpace(dto.email))
                 user.email = dto.email.Trim();
@@ -202,6 +202,28 @@ namespace AMMS.Infrastructure.Repositories
             await _db.SaveChangesAsync(ct);
 
             return user;
+        }
+
+        public async Task<bool> AddAddressAsync(int userId, string address)
+        {
+            var user = await _db.users
+                .FirstOrDefaultAsync(x => x.user_id == userId);
+
+            if (user == null)
+                return false;
+
+            user.address ??= new List<string>();
+
+            address = address.Trim();
+
+            if (!user.address.Contains(address))
+            {
+                user.address.Add(address);
+            }
+
+            await _db.SaveChangesAsync();
+
+            return true;
         }
     }
 }
