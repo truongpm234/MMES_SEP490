@@ -337,13 +337,13 @@ namespace AMMS.Infrastructure.Repositories
 
                 join ce in _db.cost_estimates.AsNoTracking()
                     on r.order_request_id equals ce.order_request_id into ceJoin
-
                 from ce in ceJoin
                     .OrderByDescending(x => x.estimate_id)
                     .Take(1)
                     .DefaultIfEmpty()
-                join pr in _db.productions.AsNoTracking()
-on r.order_id equals pr.order_id into prj
+
+                join pr in _db.productions.AsNoTracking() 
+                on r.order_id equals pr.order_id into prj
                 from pr in prj
                     .OrderByDescending(x => x.prod_id)
                     .Take(1)

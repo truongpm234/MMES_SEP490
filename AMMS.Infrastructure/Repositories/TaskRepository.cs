@@ -386,6 +386,48 @@ namespace AMMS.Infrastructure.Repositories
                 suggestedQty = maxAllowed;
             }
 
+            // BOTH method: scale qty theo nvl_ratio
+            var prodMethod = prod.prod_method?.Trim().ToUpperInvariant();
+            if (prodMethod == "BOTH" && prod.sub_product_id.HasValue && prod.nvl_qty > 0)
+            {
+                var subProduct = await _db.sub_products
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.id == prod.sub_product_id.Value, ct);
+
+                if (subProduct != null && !string.IsNullOrWhiteSpace(subProduct.product_process))
+                {
+                    var subCodes = subProduct.product_process
+                        .Split(new[] { ',', ';', '|', '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(x => x.Trim().ToUpperInvariant().Replace(" ", "_").Replace("-", "_"))
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    var routeCodeList = routeCodes;
+                    var subLastIndex = -1;
+                    for (var i = 0; i < routeCodeList.Count; i++)
+                    {
+                        var c = (routeCodeList[i] ?? "").Trim().ToUpperInvariant();
+                        if (subCodes.Contains(c)) subLastIndex = i;
+                    }
+
+                    var isRalo = pcode == "RALO";
+
+                    if (subLastIndex >= 0 && currentIndex <= subLastIndex && !isRalo)
+                    {
+                        var orderQtyVal = SafePositive(req.quantity ?? 0, 1);
+                        var nvlQty = prod.nvl_qty > 0 ? prod.nvl_qty : orderQtyVal;
+                        var nvlRatio = Math.Clamp((decimal)nvlQty / orderQtyVal, 0m, 1m);
+
+                        var scaledMax = Math.Max(1, (int)Math.Ceiling(maxAllowed * nvlRatio));
+                        var scaledSuggested = Math.Max(1, (int)Math.Ceiling(suggestedQty * nvlRatio));
+
+                        maxAllowed = scaledMax;
+                        suggestedQty = scaledSuggested;
+                        happyCaseQty = scaledSuggested;
+                        minAllowed = 1;
+                    }
+                }
+            }
+
             return new TaskQtyPolicyDto
             {
                 task_id = taskId,
