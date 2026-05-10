@@ -19,11 +19,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Npgsql;
+using QuestPDF.Infrastructure;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Twilio.Types;
-using QuestPDF.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
@@ -69,10 +70,18 @@ var autoCompleteDeliveredCron = builder.Configuration["AutoCompleteDelivered:Cro
 var autoCancelPendingRequestEnabled = builder.Configuration.GetValue("AutoCancelPendingRequest:Enabled", true);
 var autoCancelPendingRequestCron = builder.Configuration["AutoCancelPendingRequest:Cron"] ?? "0 0 * * *";
 
+
+
+var dataSourceBuilder = new NpgsqlDataSourceBuilder(postgresConnStr);
+
+dataSourceBuilder.EnableDynamicJson();
+
+var dataSource = dataSourceBuilder.Build();
+
 builder.Services.AddDbContext<AppDbContext>((sp, options) =>
 {
     options.UseNpgsql(
-        postgresConnStr,
+        dataSource,
         npgsqlOptions =>
         {
             npgsqlOptions.CommandTimeout(60);

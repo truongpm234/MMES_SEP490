@@ -8,6 +8,7 @@ using ExcelDataReader;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace AMMS.API.Controllers
 {
@@ -322,6 +323,28 @@ namespace AMMS.API.Controllers
                     updatedUser.email,
                     updatedUser.username
                 }
+            });
+        }
+
+        [Authorize]
+        [HttpPost("add-address")]
+        public async Task<IActionResult> AddAddress([FromBody] AddAddressDto dto)
+        {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            if (string.IsNullOrWhiteSpace(userIdClaim))
+                return Unauthorized();
+
+            int userId = int.Parse(userIdClaim);
+
+            var result = await _userService.AddAddressAsync(userId, dto.address);
+
+            if (!result)
+                return NotFound(new { message = "User không tồn tại" });
+
+            return Ok(new
+            {
+                message = "Thêm địa chỉ thành công"
             });
         }
     }

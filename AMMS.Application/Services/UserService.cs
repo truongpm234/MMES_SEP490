@@ -126,5 +126,13 @@ namespace AMMS.Application.Services
         {
             return await _userRepository.UpdateProfileAsync(userId, dto, ct);
         }
+
+        public async Task<bool> AddAddressAsync(int userId, string address)
+        {
+            if (string.IsNullOrWhiteSpace(address))
+                throw new Exception("Address không được để trống");
+
+            return await _userRepository.AddAddressAsync(userId, address);
+        }
     }
 }

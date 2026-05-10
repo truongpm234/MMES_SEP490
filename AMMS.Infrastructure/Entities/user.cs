@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
 
 namespace AMMS.Infrastructure.Entities;
 
@@ -17,7 +18,8 @@ public partial class user
 
     public string? full_name { get; set; }
 
-    public string? address { get; set; }
+    [Column(TypeName = "jsonb")]
+    public List<string>? address { get; set; } = new();
 
     public int? role_id { get; set; }
 
