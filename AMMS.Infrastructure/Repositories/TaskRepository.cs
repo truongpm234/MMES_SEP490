@@ -354,29 +354,56 @@ namespace AMMS.Infrastructure.Repositories
                 sheetsTotal = 1;
 
             var routeCodes = route
-                .Select(x => (string?)x.process?.process_code)
-                .ToList();
+    .Select(x => (string?)x.process?.process_code)
+    .ToList();
+
+            var bothQtyContext = await ResolveBothProductionQtyContextAsync(
+                prod,
+                orderQty,
+                routeCodes,
+                ct);
 
             var qtyProfile = StageQuantityHelper.BuildPolicy(
-    currentCode: pcode,
-    currentStageIndex: currentIndex,
-    routeProcessCodes: routeCodes,
-    sheetsTotal: sheetsTotal,
-    nUp: nUp,
-    numberOfPlates: numberOfPlates,
-    tokenQtyMax: TokenQtyMax);
+                currentCode: pcode,
+                currentStageIndex: currentIndex,
+                routeProcessCodes: routeCodes,
+                sheetsTotal: sheetsTotal,
+                nUp: nUp,
+                numberOfPlates: numberOfPlates,
+                tokenQtyMax: TokenQtyMax);
 
             var minAllowed = qtyProfile.MinAllowed;
             var maxAllowed = qtyProfile.MaxAllowed;
             var suggestedQty = qtyProfile.SuggestedQty;
             var happyCaseQty = qtyProfile.SuggestedQty;
 
+            // BOTH:
+            if (bothQtyContext.IsCoveredBySub(currentIndex) &&
+                !string.Equals(pcode, "RALO", StringComparison.OrdinalIgnoreCase))
+            {
+                minAllowed = ScaleQtyByRatio(minAllowed, bothQtyContext.NvlRatio);
+                maxAllowed = ScaleQtyByRatio(maxAllowed, bothQtyContext.NvlRatio);
+                suggestedQty = ScaleQtyByRatio(suggestedQty, bothQtyContext.NvlRatio);
+                happyCaseQty = suggestedQty;
+
+                if (maxAllowed < minAllowed)
+                    maxAllowed = minAllowed;
+
+                suggestedQty = Math.Clamp(suggestedQty, minAllowed, maxAllowed);
+            }
+
+            // Ví dụ sub có CAT,IN; tới PHU phải full estimate,
+            var shouldApplyPreviousActualCap =
+                !bothQtyContext.IsFirstStageAfterSub(currentIndex);
+
             var previousActualCap = await GetPreviousFinishedQtyGoodCapAsync(
                 route,
                 currentIndex,
                 ct);
 
-            if (previousActualCap.HasValue && previousActualCap.Value > 0)
+            if (shouldApplyPreviousActualCap &&
+                previousActualCap.HasValue &&
+                previousActualCap.Value > 0)
             {
                 maxAllowed = Math.Min(maxAllowed, previousActualCap.Value);
                 if (maxAllowed <= 0)
@@ -384,48 +411,6 @@ namespace AMMS.Infrastructure.Repositories
 
                 minAllowed = 1;
                 suggestedQty = maxAllowed;
-            }
-
-            // BOTH method: scale qty theo nvl_ratio
-            var prodMethod = prod.prod_method?.Trim().ToUpperInvariant();
-            if (prodMethod == "BOTH" && prod.sub_product_id.HasValue && prod.nvl_qty > 0)
-            {
-                var subProduct = await _db.sub_products
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(x => x.id == prod.sub_product_id.Value, ct);
-
-                if (subProduct != null && !string.IsNullOrWhiteSpace(subProduct.product_process))
-                {
-                    var subCodes = subProduct.product_process
-                        .Split(new[] { ',', ';', '|', '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(x => x.Trim().ToUpperInvariant().Replace(" ", "_").Replace("-", "_"))
-                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                    var routeCodeList = routeCodes;
-                    var subLastIndex = -1;
-                    for (var i = 0; i < routeCodeList.Count; i++)
-                    {
-                        var c = (routeCodeList[i] ?? "").Trim().ToUpperInvariant();
-                        if (subCodes.Contains(c)) subLastIndex = i;
-                    }
-
-                    var isRalo = pcode == "RALO";
-
-                    if (subLastIndex >= 0 && currentIndex <= subLastIndex && !isRalo)
-                    {
-                        var orderQtyVal = SafePositive(req.quantity ?? 0, 1);
-                        var nvlQty = prod.nvl_qty > 0 ? prod.nvl_qty : orderQtyVal;
-                        var nvlRatio = Math.Clamp((decimal)nvlQty / orderQtyVal, 0m, 1m);
-
-                        var scaledMax = Math.Max(1, (int)Math.Ceiling(maxAllowed * nvlRatio));
-                        var scaledSuggested = Math.Max(1, (int)Math.Ceiling(suggestedQty * nvlRatio));
-
-                        maxAllowed = scaledMax;
-                        suggestedQty = scaledSuggested;
-                        happyCaseQty = scaledSuggested;
-                        minAllowed = 1;
-                    }
-                }
             }
 
             return new TaskQtyPolicyDto
@@ -585,5 +570,106 @@ namespace AMMS.Infrastructure.Repositories
 
         private static int SafePositive(int value, int fallback = 1)
             => value > 0 ? value : fallback;
+
+        private sealed class BothProductionQtyContext
+        {
+            public bool IsBoth { get; init; }
+            public int SubLastIndex { get; init; } = -1;
+            public decimal NvlRatio { get; init; } = 1m;
+
+            public bool IsCoveredBySub(int stageIndex)
+                => IsBoth && SubLastIndex >= 0 && stageIndex <= SubLastIndex;
+
+            public bool IsFirstStageAfterSub(int stageIndex)
+                => IsBoth && SubLastIndex >= 0 && stageIndex == SubLastIndex + 1;
+        }
+
+        private static string NormBothProcessCode(string? code)
+        {
+            return (code ?? "")
+                .Trim()
+                .ToUpperInvariant()
+                .Replace(" ", "_")
+                .Replace("-", "_");
+        }
+
+        private static HashSet<string> ParseBothProcessCodes(string? csv)
+        {
+            if (string.IsNullOrWhiteSpace(csv))
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            return csv
+                .Split(new[] { ',', ';', '|', '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(NormBothProcessCode)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static int ScaleQtyByRatio(int qty, decimal ratio)
+        {
+            if (qty <= 0)
+                return qty;
+
+            if (ratio <= 0m)
+                return 1;
+
+            if (ratio >= 1m)
+                return qty;
+
+            return Math.Max(1, (int)Math.Ceiling(qty * ratio));
+        }
+
+        private async Task<BothProductionQtyContext> ResolveBothProductionQtyContextAsync(
+            production prod,
+            int orderQty,
+            IReadOnlyList<string?> routeProcessCodes,
+            CancellationToken ct)
+        {
+            if (!string.Equals(prod.prod_method, "BOTH", StringComparison.OrdinalIgnoreCase))
+                return new BothProductionQtyContext();
+
+            if (!prod.sub_product_id.HasValue || prod.sub_product_id.Value <= 0)
+                return new BothProductionQtyContext();
+
+            orderQty = SafePositive(orderQty, 1);
+
+            var nvlQty = prod.nvl_qty > 0
+                ? prod.nvl_qty
+                : Math.Max(orderQty - prod.sub_product_used_qty, 0);
+
+            if (nvlQty <= 0)
+                return new BothProductionQtyContext();
+
+            var subProcess = await _db.sub_products
+                .AsNoTracking()
+                .Where(x => x.id == prod.sub_product_id.Value)
+                .Select(x => x.product_process)
+                .FirstOrDefaultAsync(ct);
+
+            var subCodes = ParseBothProcessCodes(subProcess);
+            if (subCodes.Count == 0)
+                return new BothProductionQtyContext();
+
+            var subLastIndex = -1;
+
+            for (var i = 0; i < routeProcessCodes.Count; i++)
+            {
+                var routeCode = NormBothProcessCode(routeProcessCodes[i]);
+                if (subCodes.Contains(routeCode))
+                    subLastIndex = i;
+            }
+
+            if (subLastIndex < 0)
+                return new BothProductionQtyContext();
+
+            var ratio = Math.Clamp((decimal)nvlQty / orderQty, 0m, 1m);
+
+            return new BothProductionQtyContext
+            {
+                IsBoth = true,
+                SubLastIndex = subLastIndex,
+                NvlRatio = ratio
+            };
+        }
     }
 }

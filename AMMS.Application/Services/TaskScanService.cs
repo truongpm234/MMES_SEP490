@@ -413,6 +413,7 @@ namespace AMMS.Application.Services
 
             var processCode = (t.process?.process_code ?? "").Trim().ToUpperInvariant();
             var result = new List<TaskConsumableMaterialDto>();
+            var bothScale = await ResolveBothConsumableScaleAsync(ctx, ct);
 
             async Task AddMaterialAsync(
     decimal estimatedQty,
@@ -421,6 +422,9 @@ namespace AMMS.Application.Services
     string unit,
     material? resolvedMaterial)
             {
+                if (bothScale.ShouldScale)
+                    estimatedQty = estimatedQty * bothScale.Ratio;
+
                 if (estimatedQty <= 0)
                     return;
 
@@ -1601,5 +1605,101 @@ namespace AMMS.Application.Services
             return (prod, ord);
         }
 
+        private sealed class BothConsumableScaleContext
+        {
+            public bool ShouldScale { get; init; }
+            public decimal Ratio { get; init; } = 1m;
+        }
+
+        private static string NormBothProcessCodeForScan(string? code)
+        {
+            return (code ?? "")
+                .Trim()
+                .ToUpperInvariant()
+                .Replace(" ", "_")
+                .Replace("-", "_");
+        }
+
+        private static HashSet<string> ParseBothProcessCodesForScan(string? csv)
+        {
+            if (string.IsNullOrWhiteSpace(csv))
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            return csv
+                .Split(new[] { ',', ';', '|', '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(NormBothProcessCodeForScan)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private async Task<BothConsumableScaleContext> ResolveBothConsumableScaleAsync(
+            TaskEstimateContext ctx,
+            CancellationToken ct)
+        {
+            var prod = ctx.Production;
+
+            if (!string.Equals(prod.prod_method, "BOTH", StringComparison.OrdinalIgnoreCase))
+                return new BothConsumableScaleContext();
+
+            if (!prod.sub_product_id.HasValue || prod.sub_product_id.Value <= 0)
+                return new BothConsumableScaleContext();
+
+            var currentCode = NormBothProcessCodeForScan(ctx.Task.process?.process_code);
+
+            // Không scale bản kẽm.
+            if (currentCode == "RALO")
+                return new BothConsumableScaleContext();
+
+            var orderQty = ctx.Request.quantity ?? 0;
+            if (orderQty <= 0)
+                orderQty = 1;
+
+            var nvlQty = prod.nvl_qty > 0
+                ? prod.nvl_qty
+                : Math.Max(orderQty - prod.sub_product_used_qty, 0);
+
+            if (nvlQty <= 0)
+                return new BothConsumableScaleContext();
+
+            var route = await _db.tasks
+                .AsNoTracking()
+                .Include(x => x.process)
+                .Where(x => x.prod_id == prod.prod_id)
+                .OrderBy(x => x.seq_num)
+                .ThenBy(x => x.task_id)
+                .ToListAsync(ct);
+
+            var currentIndex = route.FindIndex(x => x.task_id == ctx.Task.task_id);
+            if (currentIndex < 0)
+                return new BothConsumableScaleContext();
+
+            var subProcess = await _db.sub_products
+                .AsNoTracking()
+                .Where(x => x.id == prod.sub_product_id.Value)
+                .Select(x => x.product_process)
+                .FirstOrDefaultAsync(ct);
+
+            var subCodes = ParseBothProcessCodesForScan(subProcess);
+            if (subCodes.Count == 0)
+                return new BothConsumableScaleContext();
+
+            var subLastIndex = -1;
+
+            for (var i = 0; i < route.Count; i++)
+            {
+                var routeCode = NormBothProcessCodeForScan(route[i].process?.process_code);
+                if (subCodes.Contains(routeCode))
+                    subLastIndex = i;
+            }
+
+            if (subLastIndex < 0 || currentIndex > subLastIndex)
+                return new BothConsumableScaleContext();
+
+            return new BothConsumableScaleContext
+            {
+                ShouldScale = true,
+                Ratio = Math.Clamp((decimal)nvlQty / orderQty, 0m, 1m)
+            };
+        }
     }
 }
