@@ -349,7 +349,6 @@ namespace AMMS.Application.Services
                     user_id = scannedByUserId,
                     move_date = now,
                     note = $"Manual consume material on task finish. task_id={t.task_id}, prod_id={t.prod_id}",
-                    purchase_id = null
                 }, ct);
             }
         }
@@ -383,7 +382,6 @@ namespace AMMS.Application.Services
                     user_id = scannedByUserId,
                     move_date = now,
                     note = $"Return leftover from task_id={t.task_id}, prod_id={t.prod_id}",
-                    purchase_id = null
                 }, ct);
             }
         }
@@ -1847,8 +1845,7 @@ namespace AMMS.Application.Services
                     ref_doc = $"TASK-LEFTOVER-CANCEL-{taskId}",
                     user_id = cancelledByUserId,
                     move_date = now,
-                    note = $"Cancel task finish. Reverse leftover stock from task_id={taskId}. Reason: {reason}",
-                    purchase_id = null
+                    note = $"Cancel task finish. Reverse leftover stock from task_id={taskId}. Reason: {reason}"
                 }, ct);
 
                 reversedCount++;
