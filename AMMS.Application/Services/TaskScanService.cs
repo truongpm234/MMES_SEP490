@@ -64,13 +64,14 @@ namespace AMMS.Application.Services
             var qtyGood = payload.qty_good;
 
             var isGroupTask = await IsGroupTaskAsync(taskId, ct);
-            var manualMode = await ShouldUseManualReportInputAsync(taskId, req, ct);
+
+            var manualMode = payload.use_manual_input || await ShouldUseManualReportInputAsync(taskId, req, ct);
 
             List<TaskMaterialUsageLogItemDto> materialUsageSnapshot;
 
             if (manualMode)
             {
-                var manualMaterials = NormalizeMaterialUsageInputs(req.materials);
+                var manualMaterials = NormalizeMaterialUsageInputs(payload.materials);
                 ValidateManualMaterialUsageInput(manualMaterials);
 
                 materialUsageSnapshot = await BuildManualMaterialUsageSnapshotAsync(
@@ -94,7 +95,7 @@ namespace AMMS.Application.Services
                 ? null
                 : JsonSerializer.Serialize(materialUsageSnapshot, _jsonOptions);
 
-            var normalizedReferenceInputs = NormalizeReferenceInputs(req.reference_inputs);
+            var normalizedReferenceInputs = NormalizeReferenceInputs(payload.reference_inputs);
 
             var referenceInputJson = manualMode && normalizedReferenceInputs.Count > 0
                 ? JsonSerializer.Serialize(normalizedReferenceInputs, _jsonOptions)
@@ -182,7 +183,7 @@ namespace AMMS.Application.Services
                 var processNameForOutput = currentFlow.process?.process_name;
 
                 var normalizedOutputs = NormalizeOutputs(
-                    req.outputs,
+                    payload.outputs,
                     processCodeForOutput,
                     processNameForOutput,
                     "sp",
@@ -201,8 +202,8 @@ namespace AMMS.Application.Services
                     log_time = now,
                     scanned_by_user_id = scannedByUserId,
                     material_usage_json = materialUsageJson,
-                    reason = NormalizeNullableText(req.reason, 1000),
-                    report_image_url = NormalizeNullableText(req.report_image_url, 8000),
+                    reason = NormalizeNullableText(payload.reason, 1000),
+                    report_image_url = NormalizeNullableText(payload.report_image_url, 8000),
                     reference_input_json = referenceInputJson,
                     output_json = outputJson
                 };
@@ -294,7 +295,7 @@ namespace AMMS.Application.Services
                 {
                     task_id = t.task_id,
                     prod_id = t.prod_id,
-                    message = $"Finished & logged qty_good={qtyGood}. Đã lưu log NVL sử dụng/hoàn kho."
+                    message = $"Finished & logged qty_good={qtyGood}. Dữ liệu báo cáo được đọc từ QR token."
                 };
             }, ct);
 

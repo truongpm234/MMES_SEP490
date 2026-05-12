@@ -187,11 +187,13 @@ public class TasksController : ControllerBase
     }
 
     [HttpPost("qr")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(30 * 1024 * 1024)]
     public async Task<ActionResult<TaskQrResponse>> CreateQr(
-    [FromBody] CreateTaskQrRequest req,
+    [FromForm] CreateTaskQrFormRequest form,
     CancellationToken ct)
     {
-        if (req == null)
+        if (form == null)
         {
             return BadRequest(new
             {
@@ -199,14 +201,52 @@ public class TasksController : ControllerBase
             });
         }
 
-        if (req.task_id <= 0)
+        if (form.task_id <= 0)
         {
             return BadRequest(new
             {
                 message = "task_id không hợp lệ.",
-                task_id = req.task_id
+                task_id = form.task_id
             });
         }
+
+        List<TaskMaterialUsageInputDto> formMaterials;
+        List<TaskReferenceUsageInputDto> formRefs;
+        List<TaskOutputReportDto> formOutputs;
+        List<string> imageUrls;
+
+        try
+        {
+            formMaterials = ParseJsonList<TaskMaterialUsageInputDto>(form.materials_json);
+            formRefs = ParseJsonList<TaskReferenceUsageInputDto>(form.reference_inputs_json);
+            formOutputs = ParseJsonList<TaskOutputReportDto>(form.outputs_json);
+            imageUrls = await UploadTaskReportImagesAsync(form.images, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new
+            {
+                message = ex.Message,
+                task_id = form.task_id
+            });
+        }
+
+        var reportImageUrl = imageUrls.Count == 0
+            ? null
+            : string.Join(",", imageUrls);
+
+        var req = new CreateTaskQrRequest
+        {
+            task_id = form.task_id,
+            ttl_minutes = form.ttl_minutes,
+            qty_good = form.qty_good,
+            use_manual_input = form.use_manual_input,
+            materials = formMaterials
+        };
+
+        var reason = string.IsNullOrWhiteSpace(form.reason)
+            ? null
+            : form.reason.Trim();
 
         var t = await _taskRepo.GetByIdAsync(req.task_id);
         if (t == null)
@@ -243,7 +283,10 @@ public class TasksController : ControllerBase
         var ttlMinutes = req.ttl_minutes <= 0 ? 10 : req.ttl_minutes;
         var ttl = TimeSpan.FromMinutes(ttlMinutes);
 
-        // CASE 1: GROUP PRODUCTION TASK
+        /*
+         * CASE 1: GROUP TASK
+         * Group luôn manual. Materials/reference/output/reason/image được nhét vào token.
+         */
         if (isGroupTask)
         {
             var maxAllowed = taskMeta.prod?.group_total_qty ?? 0;
@@ -289,16 +332,19 @@ public class TasksController : ControllerBase
             var token = _tokenSvc.CreateToken(
                 req.task_id,
                 qtyGood,
-                new List<TaskMaterialUsageInputDto>(),
-                ttl);
-
-            var expiresAt = DateTimeOffset.UtcNow.Add(ttl).ToUnixTimeSeconds();
+                req.materials,
+                ttl,
+                useManualInput: true,
+                reason: reason,
+                reportImageUrl: reportImageUrl,
+                referenceInputs: formRefs,
+                outputs: formOutputs);
 
             return Ok(new TaskQrResponse
             {
                 task_id = req.task_id,
                 token = token,
-                expires_at_unix = expiresAt,
+                expires_at_unix = DateTimeOffset.UtcNow.Add(ttl).ToUnixTimeSeconds(),
 
                 qty_good_used = qtyGood,
                 is_auto_filled = isAuto,
@@ -311,14 +357,17 @@ public class TasksController : ControllerBase
                 process_code = taskMeta.process?.process_code,
                 process_name = taskMeta.process?.process_name,
 
-                embedded_material_count = 0,
+                embedded_material_count = req.materials.Count,
 
                 consumable_materials = new List<TaskConsumableMaterialDto>(),
                 reference_inputs = new List<TaskReferenceInputDto>()
             });
         }
 
-        // CASE 2: SINGLE PRODUCTION TASK - FE chọn manual hoặc task được cấu hình MANUAL.
+        /*
+         * CASE 2: SINGLE MANUAL
+         * FE chọn use_manual_input=true hoặc task input_mode=MANUAL.
+         */
         if (req.use_manual_input || isManualTask)
         {
             var manualPolicy = await _taskRepo.GetQtyPolicyAsync(req.task_id, ct);
@@ -357,28 +406,10 @@ public class TasksController : ControllerBase
 
                         task_id = req.task_id,
                         input_qty_good = qtyGood,
-
-                        process_code = manualPolicy.process_code,
-                        process_name = manualPolicy.process_name,
-                        qty_unit = manualPolicy.qty_unit,
-
                         min_allowed = manualPolicy.min_allowed,
                         max_allowed = manualPolicy.max_allowed,
                         suggested_qty = manualPolicy.suggested_qty,
-                        happy_case_qty = manualPolicy.happy_case_qty,
-
-                        order_qty = manualPolicy.order_qty,
-                        sheets_required = manualPolicy.sheets_required,
-                        sheets_waste = manualPolicy.sheets_waste,
-                        sheets_total = manualPolicy.sheets_total,
-                        n_up = manualPolicy.n_up,
-                        number_of_plates = manualPolicy.number_of_plates,
-
-                        stage_index = manualPolicy.stage_index,
-                        stage_count = manualPolicy.stage_count,
-
-                        production_output_qty = manualPolicy.suggested_qty,
-                        production_output_unit = manualPolicy.qty_unit
+                        qty_unit = manualPolicy.qty_unit
                     });
                 }
             }
@@ -386,16 +417,19 @@ public class TasksController : ControllerBase
             var token = _tokenSvc.CreateToken(
                 req.task_id,
                 qtyGood,
-                new List<TaskMaterialUsageInputDto>(),
-                ttl);
-
-            var expiresAt = DateTimeOffset.UtcNow.Add(ttl).ToUnixTimeSeconds();
+                req.materials,
+                ttl,
+                useManualInput: true,
+                reason: reason,
+                reportImageUrl: reportImageUrl,
+                referenceInputs: formRefs,
+                outputs: formOutputs);
 
             return Ok(new TaskQrResponse
             {
                 task_id = req.task_id,
                 token = token,
-                expires_at_unix = expiresAt,
+                expires_at_unix = DateTimeOffset.UtcNow.Add(ttl).ToUnixTimeSeconds(),
 
                 qty_good_used = qtyGood,
                 is_auto_filled = isAuto,
@@ -408,14 +442,17 @@ public class TasksController : ControllerBase
                 process_code = manualPolicy.process_code,
                 process_name = manualPolicy.process_name,
 
-                embedded_material_count = 0,
+                embedded_material_count = req.materials.Count,
 
                 consumable_materials = new List<TaskConsumableMaterialDto>(),
                 reference_inputs = new List<TaskReferenceInputDto>()
             });
         }
 
-        //CASE 3: FLOW CŨ - SINGLE PRODUCTION ESTIMATE MODE
+        /*
+         * CASE 3: SINGLE ESTIMATE FLOW CŨ
+         * Materials vẫn validate/build theo estimate, nhưng reason/image cũng nhét vào token.
+         */
         var policy = await _taskRepo.GetQtyPolicyAsync(req.task_id, ct);
         if (policy == null)
         {
@@ -453,27 +490,10 @@ public class TasksController : ControllerBase
                     task_id = req.task_id,
                     input_qty_good = oldFlowQtyGood,
 
-                    process_code = policy.process_code,
-                    process_name = policy.process_name,
-                    qty_unit = policy.qty_unit,
-
                     min_allowed = policy.min_allowed,
                     max_allowed = policy.max_allowed,
                     suggested_qty = policy.suggested_qty,
-                    happy_case_qty = policy.happy_case_qty,
-
-                    order_qty = policy.order_qty,
-                    sheets_required = policy.sheets_required,
-                    sheets_waste = policy.sheets_waste,
-                    sheets_total = policy.sheets_total,
-                    n_up = policy.n_up,
-                    number_of_plates = policy.number_of_plates,
-
-                    stage_index = policy.stage_index,
-                    stage_count = policy.stage_count,
-
-                    production_output_qty = policy.suggested_qty,
-                    production_output_unit = policy.qty_unit
+                    qty_unit = policy.qty_unit
                 });
             }
         }
@@ -506,9 +526,12 @@ public class TasksController : ControllerBase
             req.task_id,
             oldFlowQtyGood,
             inputMaterials,
-            ttl);
-
-        var oldFlowExpiresAt = DateTimeOffset.UtcNow.Add(ttl).ToUnixTimeSeconds();
+            ttl,
+            useManualInput: false,
+            reason: reason,
+            reportImageUrl: reportImageUrl,
+            referenceInputs: formRefs,
+            outputs: formOutputs);
 
         var qrMaterialBundle = await _scanSvc.GetTaskQrMaterialBundleAsync(req.task_id, ct);
 
@@ -516,7 +539,7 @@ public class TasksController : ControllerBase
         {
             task_id = req.task_id,
             token = oldFlowToken,
-            expires_at_unix = oldFlowExpiresAt,
+            expires_at_unix = DateTimeOffset.UtcNow.Add(ttl).ToUnixTimeSeconds(),
 
             qty_good_used = oldFlowQtyGood,
             is_auto_filled = oldFlowIsAuto,
@@ -537,42 +560,43 @@ public class TasksController : ControllerBase
     }
 
     [HttpPost("finish")]
-    [Consumes("multipart/form-data")]
-    [RequestSizeLimit(30 * 1024 * 1024)]
-    public async Task<ActionResult<ScanTaskResult>> Finish(
-    [FromForm] FinishTaskFormRequest req,
-    CancellationToken ct)
+    public async Task<ActionResult<ScanTaskResult>> Finish(CancellationToken ct)
     {
-        if (req == null || string.IsNullOrWhiteSpace(req.token))
-        {
-            return BadRequest(new
-            {
-                message = "Missing token."
-            });
-        }
-
         try
         {
-            var imageUrls = await UploadTaskReportImagesAsync(req.images, ct);
-            var manualMaterials = ParseJsonList<TaskMaterialUsageInputDto>(req.materials_json);
-            var manualRefs = ParseJsonList<TaskReferenceUsageInputDto>(req.reference_inputs_json);
-            var manualOutputs = ParseJsonList<TaskOutputReportDto>(req.outputs_json);
+            string? token = null;
+
+            if (Request.HasFormContentType)
+            {
+                token = Request.Form["token"].ToString();
+            }
+            else
+            {
+                var req = await JsonSerializer.DeserializeAsync<FinishTaskTokenRequest>(
+                    Request.Body,
+                    new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    },
+                    ct);
+
+                token = req?.token;
+            }
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return BadRequest(new
+                {
+                    message = "Missing token."
+                });
+            }
 
             var scanReq = new ScanTaskRequest
             {
-                token = req.token.Trim(),
-                reason = string.IsNullOrWhiteSpace(req.reason)
-                    ? null
-                    : req.reason.Trim(),
+                token = token.Trim()
 
-                report_image_url = imageUrls.Count == 0
-                    ? null
-                    : string.Join(",", imageUrls),
-
-                use_manual_input = req.use_manual_input,
-                materials = manualMaterials,
-                reference_inputs = manualRefs,
-                outputs = manualOutputs
+                // Không set reason/images/materials ở đây nữa.
+                // Tất cả nằm trong token.
             };
 
             var scannedByUserId = GetCurrentUserId();
@@ -595,6 +619,13 @@ public class TasksController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+        catch (JsonException)
+        {
+            return BadRequest(new
+            {
+                message = "Invalid JSON body."
+            });
         }
         catch (Exception ex)
         {

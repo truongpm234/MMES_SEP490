@@ -9,8 +9,7 @@ namespace AMMS.Application.Services
 {
     public class TaskQrTokenService : ITaskQrTokenService
     {
-        private const byte TokenVersion = 1;
-
+        private const byte TokenVersion = 2;
         private const int SignatureLength = 10;
 
         // chỉ gồm số + chữ, không ký tự đặc biệt
@@ -31,9 +30,43 @@ namespace AMMS.Application.Services
         }
 
         public string CreateToken(int taskId, int qtyGood, TimeSpan ttl)
-            => CreateToken(taskId, qtyGood, null, ttl);
+    => CreateToken(
+        taskId,
+        qtyGood,
+        null,
+        ttl,
+        useManualInput: false,
+        reason: null,
+        reportImageUrl: null,
+        referenceInputs: null,
+        outputs: null);
 
-        public string CreateToken(int taskId, int qtyGood, IReadOnlyList<TaskMaterialUsageInputDto>? materials, TimeSpan ttl)
+        public string CreateToken(
+            int taskId,
+            int qtyGood,
+            IReadOnlyList<TaskMaterialUsageInputDto>? materials,
+            TimeSpan ttl)
+            => CreateToken(
+                taskId,
+                qtyGood,
+                materials,
+                ttl,
+                useManualInput: false,
+                reason: null,
+                reportImageUrl: null,
+                referenceInputs: null,
+                outputs: null);
+
+        public string CreateToken(
+            int taskId,
+            int qtyGood,
+            IReadOnlyList<TaskMaterialUsageInputDto>? materials,
+            TimeSpan ttl,
+            bool useManualInput,
+            string? reason,
+            string? reportImageUrl,
+            IReadOnlyList<TaskReferenceUsageInputDto>? referenceInputs,
+            IReadOnlyList<TaskOutputReportDto>? outputs)
         {
             if (taskId <= 0)
                 throw new ArgumentException("taskId must be > 0");
@@ -42,9 +75,22 @@ namespace AMMS.Application.Services
                 throw new ArgumentException("qtyGood must be > 0");
 
             var expUnix = DateTimeOffset.UtcNow.Add(ttl).ToUnixTimeSeconds();
-            var normalizedMaterials = NormalizeMaterials(materials);
 
-            var body = BuildBody(taskId, qtyGood, expUnix, normalizedMaterials);
+            var normalizedMaterials = NormalizeMaterials(materials);
+            var normalizedRefs = NormalizeReferenceInputs(referenceInputs);
+            var normalizedOutputs = NormalizeOutputs(outputs);
+
+            var body = BuildBody(
+                taskId,
+                qtyGood,
+                expUnix,
+                normalizedMaterials,
+                useManualInput,
+                NormalizeTokenText(reason, 1000),
+                NormalizeTokenText(reportImageUrl, 8000),
+                normalizedRefs,
+                normalizedOutputs);
+
             var sig = ComputeSignature(body);
 
             var raw = new byte[body.Length + sig.Length];
@@ -153,10 +199,15 @@ namespace AMMS.Application.Services
         }
 
         private byte[] BuildBody(
-            int taskId,
-            int qtyGood,
-            long expUnix,
-            List<TaskMaterialUsageInputDto> materials)
+    int taskId,
+    int qtyGood,
+    long expUnix,
+    List<TaskMaterialUsageInputDto> materials,
+    bool useManualInput,
+    string? reason,
+    string? reportImageUrl,
+    List<TaskReferenceUsageInputDto> referenceInputs,
+    List<TaskOutputReportDto> outputs)
         {
             using var ms = new MemoryStream();
 
@@ -165,23 +216,47 @@ namespace AMMS.Application.Services
             WriteVarUInt(ms, (ulong)taskId);
             WriteVarUInt(ms, (ulong)qtyGood);
             WriteVarUInt(ms, (ulong)expUnix);
-            WriteVarUInt(ms, (ulong)materials.Count);
 
+            byte flags = 0;
+            if (useManualInput) flags |= 0b0000_0001;
+            ms.WriteByte(flags);
+
+            WriteNullableString(ms, reason);
+            WriteNullableString(ms, reportImageUrl);
+
+            WriteVarUInt(ms, (ulong)materials.Count);
             foreach (var m in materials)
             {
                 if (m.material_id <= 0)
                     throw new ArgumentException("material_id must be > 0");
 
-                var usedScaled = ToScaledUInt64(m.quantity_used);
-                var leftScaled = ToScaledUInt64(m.quantity_left);
-
                 WriteVarUInt(ms, (ulong)m.material_id);
-                WriteVarUInt(ms, usedScaled);
-                WriteVarUInt(ms, leftScaled);
+                WriteVarUInt(ms, ToScaledUInt64(m.quantity_used));
+                WriteVarUInt(ms, ToScaledUInt64(m.quantity_left));
 
-                byte flags = 0;
-                if (m.is_stock) flags |= 0b0000_0001;
-                ms.WriteByte(flags);
+                byte materialFlags = 0;
+                if (m.is_stock) materialFlags |= 0b0000_0001;
+                ms.WriteByte(materialFlags);
+            }
+
+            WriteVarUInt(ms, (ulong)referenceInputs.Count);
+            foreach (var input in referenceInputs)
+            {
+                WriteNullableString(ms, input.input_code);
+                WriteNullableString(ms, input.input_name);
+                WriteNullableString(ms, input.unit);
+                WriteVarUInt(ms, ToScaledUInt64(input.quantity_used));
+                WriteVarUInt(ms, ToScaledUInt64(input.quantity_left));
+            }
+
+            WriteVarUInt(ms, (ulong)outputs.Count);
+            foreach (var output in outputs)
+            {
+                WriteNullableString(ms, output.output_code);
+                WriteNullableString(ms, output.output_name);
+                WriteNullableString(ms, output.unit);
+                WriteVarUInt(ms, ToScaledUInt64(output.quantity_good));
+                WriteVarUInt(ms, ToScaledUInt64(output.quantity_bad));
             }
 
             return ms.ToArray();
@@ -192,9 +267,18 @@ namespace AMMS.Application.Services
             using var ms = new MemoryStream(body);
 
             var version = ms.ReadByte();
-            if (version != TokenVersion)
-                throw new InvalidOperationException($"Unsupported token version: {version}");
 
+            if (version == 1)
+                return ParseBodyV1(ms);
+
+            if (version == TokenVersion)
+                return ParseBodyV2(ms);
+
+            throw new InvalidOperationException($"Unsupported token version: {version}");
+        }
+
+        private TaskQrTokenPayloadDto ParseBodyV1(MemoryStream ms)
+        {
             var taskId = (int)ReadVarUInt(ms);
             var qtyGood = (int)ReadVarUInt(ms);
             var expUnix = (long)ReadVarUInt(ms);
@@ -229,9 +313,99 @@ namespace AMMS.Application.Services
                 task_id = taskId,
                 qty_good = qtyGood,
                 exp_unix = expUnix,
-                materials = materials
+                use_manual_input = false,
+                reason = null,
+                report_image_url = null,
+                materials = materials,
+                reference_inputs = new List<TaskReferenceUsageInputDto>(),
+                outputs = new List<TaskOutputReportDto>()
             };
         }
+
+        private TaskQrTokenPayloadDto ParseBodyV2(MemoryStream ms)
+        {
+            var taskId = (int)ReadVarUInt(ms);
+            var qtyGood = (int)ReadVarUInt(ms);
+            var expUnix = (long)ReadVarUInt(ms);
+
+            var flags = ms.ReadByte();
+            if (flags < 0)
+                throw new EndOfStreamException("Unexpected end of token");
+
+            var useManualInput = (flags & 0b0000_0001) != 0;
+
+            var reason = ReadNullableString(ms);
+            var reportImageUrl = ReadNullableString(ms);
+
+            var materialCount = (int)ReadVarUInt(ms);
+            var materials = new List<TaskMaterialUsageInputDto>(materialCount);
+
+            for (var i = 0; i < materialCount; i++)
+            {
+                var materialId = (int)ReadVarUInt(ms);
+                var quantityUsed = FromScaledUInt64(ReadVarUInt(ms));
+                var quantityLeft = FromScaledUInt64(ReadVarUInt(ms));
+
+                var materialFlags = ms.ReadByte();
+                if (materialFlags < 0)
+                    throw new EndOfStreamException("Unexpected end of token");
+
+                materials.Add(new TaskMaterialUsageInputDto
+                {
+                    material_id = materialId,
+                    quantity_used = quantityUsed,
+                    quantity_left = quantityLeft,
+                    is_stock = (materialFlags & 0b0000_0001) != 0
+                });
+            }
+
+            var referenceInputCount = (int)ReadVarUInt(ms);
+            var referenceInputs = new List<TaskReferenceUsageInputDto>(referenceInputCount);
+
+            for (var i = 0; i < referenceInputCount; i++)
+            {
+                referenceInputs.Add(new TaskReferenceUsageInputDto
+                {
+                    input_code = ReadNullableString(ms) ?? "",
+                    input_name = ReadNullableString(ms),
+                    unit = ReadNullableString(ms),
+                    quantity_used = FromScaledUInt64(ReadVarUInt(ms)),
+                    quantity_left = FromScaledUInt64(ReadVarUInt(ms))
+                });
+            }
+
+            var outputCount = (int)ReadVarUInt(ms);
+            var outputs = new List<TaskOutputReportDto>(outputCount);
+
+            for (var i = 0; i < outputCount; i++)
+            {
+                outputs.Add(new TaskOutputReportDto
+                {
+                    output_code = ReadNullableString(ms) ?? "",
+                    output_name = ReadNullableString(ms),
+                    unit = ReadNullableString(ms),
+                    quantity_good = FromScaledUInt64(ReadVarUInt(ms)),
+                    quantity_bad = FromScaledUInt64(ReadVarUInt(ms))
+                });
+            }
+
+            if (ms.Position != ms.Length)
+                throw new InvalidOperationException("Token has unexpected trailing bytes");
+
+            return new TaskQrTokenPayloadDto
+            {
+                task_id = taskId,
+                qty_good = qtyGood,
+                exp_unix = expUnix,
+                use_manual_input = useManualInput,
+                reason = reason,
+                report_image_url = reportImageUrl,
+                materials = materials,
+                reference_inputs = referenceInputs,
+                outputs = outputs
+            };
+        }
+
 
         private byte[] ComputeSignature(byte[] body)
         {
@@ -307,6 +481,86 @@ namespace AMMS.Application.Services
                 if (shift > 63)
                     throw new FormatException("VarUInt too large");
             }
+        }
+        private static void WriteNullableString(Stream stream, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                WriteVarUInt(stream, 0);
+                return;
+            }
+
+            var bytes = Encoding.UTF8.GetBytes(value.Trim());
+
+            // length + 1 để phân biệt null và chuỗi rỗng.
+            WriteVarUInt(stream, (ulong)bytes.Length + 1);
+            stream.Write(bytes, 0, bytes.Length);
+        }
+
+        private static string? ReadNullableString(Stream stream)
+        {
+            var encodedLength = ReadVarUInt(stream);
+
+            if (encodedLength == 0)
+                return null;
+
+            var length = checked((int)(encodedLength - 1));
+
+            if (length == 0)
+                return "";
+
+            var buffer = new byte[length];
+            var read = stream.Read(buffer, 0, length);
+
+            if (read != length)
+                throw new EndOfStreamException("Unexpected end of token string");
+
+            return Encoding.UTF8.GetString(buffer);
+        }
+
+        private static string? NormalizeTokenText(string? value, int maxLength)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+
+            var text = value.Trim();
+
+            if (maxLength > 0 && text.Length > maxLength)
+                text = text[..maxLength];
+
+            return text;
+        }
+
+        private static List<TaskReferenceUsageInputDto> NormalizeReferenceInputs(
+            IReadOnlyList<TaskReferenceUsageInputDto>? inputs)
+        {
+            return (inputs ?? Array.Empty<TaskReferenceUsageInputDto>())
+                .Where(x => !string.IsNullOrWhiteSpace(x.input_code))
+                .Select(x => new TaskReferenceUsageInputDto
+                {
+                    input_code = x.input_code.Trim(),
+                    input_name = NormalizeTokenText(x.input_name, 300),
+                    unit = NormalizeTokenText(x.unit, 50),
+                    quantity_used = Math.Round(x.quantity_used, 4),
+                    quantity_left = Math.Round(x.quantity_left, 4)
+                })
+                .ToList();
+        }
+
+        private static List<TaskOutputReportDto> NormalizeOutputs(
+            IReadOnlyList<TaskOutputReportDto>? outputs)
+        {
+            return (outputs ?? Array.Empty<TaskOutputReportDto>())
+                .Where(x => !string.IsNullOrWhiteSpace(x.output_code))
+                .Select(x => new TaskOutputReportDto
+                {
+                    output_code = x.output_code.Trim(),
+                    output_name = NormalizeTokenText(x.output_name, 300),
+                    unit = NormalizeTokenText(x.unit, 50),
+                    quantity_good = Math.Round(x.quantity_good, 4),
+                    quantity_bad = Math.Round(x.quantity_bad, 4)
+                })
+                .ToList();
         }
 
         private static string Base62Encode(byte[] data)
