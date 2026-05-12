@@ -75,6 +75,13 @@ public partial class AppDbContext : DbContext
     public virtual DbSet<product> products { get; set; } = null!;
 
     public virtual DbSet<sub_product> sub_products { get; set; } = null!;
+
+    public DbSet<prod_order> prod_orders { get; set; } = null!;
+
+    public DbSet<task_link> task_links { get; set; } = null!;
+
+    public DbSet<task_qty> task_qtys { get; set; } = null!;
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<bom>(entity =>
@@ -777,6 +784,42 @@ public partial class AppDbContext : DbContext
 
             entity.HasIndex(e => e.is_manual_override)
                 .HasDatabaseName("ix_production_calendar_manual");
+        });
+
+        modelBuilder.Entity<prod_order>(entity =>
+        {
+            entity.ToTable("prod_orders", "AMMS_DB");
+            entity.HasKey(x => x.id);
+
+            entity.HasIndex(x => new { x.prod_id, x.order_id })
+                .IsUnique();
+
+            entity.HasOne(x => x.production)
+                .WithMany(x => x.prod_orders)
+                .HasForeignKey(x => x.prod_id);
+
+            entity.HasOne(x => x.order)
+                .WithMany()
+                .HasForeignKey(x => x.order_id);
+
+            entity.HasOne(x => x.single_production)
+                .WithMany()
+                .HasForeignKey(x => x.single_prod_id);
+        });
+
+        modelBuilder.Entity<task_link>(entity =>
+        {
+            entity.ToTable("task_links", "AMMS_DB");
+            entity.HasKey(x => x.id);
+
+            entity.HasIndex(x => new { x.group_task_id, x.single_task_id })
+                .IsUnique();
+        });
+
+        modelBuilder.Entity<task_qty>(entity =>
+        {
+            entity.ToTable("task_qtys", "AMMS_DB");
+            entity.HasKey(x => x.id);
         });
 
         modelBuilder.Entity<sub_product>(entity =>

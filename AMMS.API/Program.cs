@@ -332,7 +332,7 @@ builder.Services.AddScoped<IProductionCalendarRepository, ProductionCalendarRepo
 builder.Services.AddScoped<IProductionCalendarService, ProductionCalendarService>();
 builder.Services.AddScoped<ISubProductRepository, SubProductRepository>();
 builder.Services.AddScoped<ISubProductService, SubProductService>();
-
+builder.Services.AddScoped<IGroupProductionService, GroupProductionService>();
 // Logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();

@@ -26,6 +26,12 @@ public partial class task_log
     public string? reason { get; set; }
 
     [Column(TypeName = "jsonb")]
+    public string? reference_input_json { get; set; }
+
+    [Column(TypeName = "jsonb")]
+    public string? output_json { get; set; }
+
+    [Column(TypeName = "jsonb")]
     public string? material_usage_json { get; set; }
 
     [ForeignKey(nameof(task_id))]

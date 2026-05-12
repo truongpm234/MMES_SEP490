@@ -19,10 +19,13 @@ namespace AMMS.Shared.DTOs.Productions
         public string? reason { get; set; }
         public string? comment { get; set; }
         public string? report_image_url { get; set; }
+        public string? reference_input_json { get; set; }
+        public string? output_json { get; set; }
         public List<string> report_image_urls { get; set; } = new();
         [JsonIgnore]
         public string? material_usage_json { get; set; }
-
+        public List<TaskReferenceUsageInputDto> reference_inputs { get; set; } = new();
+        public List<TaskOutputReportDto> outputs { get; set; } = new();
         public List<TaskMaterialUsageLogItemDto>? material_usages { get; set; }
     }
 }

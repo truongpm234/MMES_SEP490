@@ -338,7 +338,7 @@ namespace AMMS.Infrastructure.Repositories
                 .AsNoTracking()
                 .Where(l => l.task_id != null
                     && taskIds.Contains(l.task_id.Value)
-                    && l.action_type == "Finished")
+                    && (l.action_type == "Finished" || l.action_type == "FinishedByGroup"))
                 .Select(l => l.task_id!.Value)
                 .Distinct()
                 .ToListAsync();
@@ -565,23 +565,28 @@ namespace AMMS.Infrastructure.Repositories
             var taskIds = tasks.Select(x => x.task_id).ToList();
 
             var logs = await _db.task_logs.AsNoTracking()
-                 .Where(l => l.task_id != null && taskIds.Contains(l.task_id.Value))
-                 .OrderBy(l => l.log_time)
-                 .Select(l => new TaskLogDto
-                 {
-                     log_id = l.log_id,
-                     task_id = l.task_id!.Value,
-                     action_type = l.action_type,
-                     qty_good = l.qty_good ?? 0,
-                     log_time = l.log_time,
-                     scanned_code = l.scanned_code,
-                     scanned_by_user_id = l.scanned_by_user_id,
-                     reason = l.reason,
-                     report_image_url = l.report_image_url,
+                  .Where(l => l.task_id != null && taskIds.Contains(l.task_id.Value))
+                  .OrderBy(l => l.log_time)
+                  .Select(l => new TaskLogDto
+                  {
+                      log_id = l.log_id,
+                      task_id = l.task_id!.Value,
+                      action_type = l.action_type,
+                      qty_good = l.qty_good ?? 0,
+                      log_time = l.log_time,
+                      scanned_code = l.scanned_code,
+                      scanned_by_user_id = l.scanned_by_user_id,
 
-                     material_usage_json = l.material_usage_json
-                 })
-                 .ToListAsync(ct);
+                      reason = l.reason,
+                      comment = l.reason,
+
+                      report_image_url = l.report_image_url,
+
+                      material_usage_json = l.material_usage_json,
+                      reference_input_json = l.reference_input_json,
+                      output_json = l.output_json
+                  })
+                  .ToListAsync(ct);
 
             foreach (var log in logs)
             {
@@ -592,7 +597,11 @@ namespace AMMS.Infrastructure.Repositories
                     try
                     {
                         log.material_usages = JsonSerializer.Deserialize<List<TaskMaterialUsageLogItemDto>>(
-                            log.material_usage_json) ?? new List<TaskMaterialUsageLogItemDto>();
+                            log.material_usage_json,
+                            new JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true
+                            }) ?? new List<TaskMaterialUsageLogItemDto>();
                     }
                     catch
                     {
@@ -602,6 +611,48 @@ namespace AMMS.Infrastructure.Repositories
                 else
                 {
                     log.material_usages = new List<TaskMaterialUsageLogItemDto>();
+                }
+
+                if (!string.IsNullOrWhiteSpace(log.reference_input_json))
+                {
+                    try
+                    {
+                        log.reference_inputs = JsonSerializer.Deserialize<List<TaskReferenceUsageInputDto>>(
+                            log.reference_input_json,
+                            new JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true
+                            }) ?? new List<TaskReferenceUsageInputDto>();
+                    }
+                    catch
+                    {
+                        log.reference_inputs = new List<TaskReferenceUsageInputDto>();
+                    }
+                }
+                else
+                {
+                    log.reference_inputs = new List<TaskReferenceUsageInputDto>();
+                }
+
+                if (!string.IsNullOrWhiteSpace(log.output_json))
+                {
+                    try
+                    {
+                        log.outputs = JsonSerializer.Deserialize<List<TaskOutputReportDto>>(
+                            log.output_json,
+                            new JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true
+                            }) ?? new List<TaskOutputReportDto>();
+                    }
+                    catch
+                    {
+                        log.outputs = new List<TaskOutputReportDto>();
+                    }
+                }
+                else
+                {
+                    log.outputs = new List<TaskOutputReportDto>();
                 }
             }
 
@@ -886,6 +937,18 @@ namespace AMMS.Infrastructure.Repositories
                 .Select(t => t.end_time!.Value)
                 .DefaultIfEmpty(now)
                 .Max();
+
+            if (string.Equals(prod.prod_kind, "GROUP", StringComparison.OrdinalIgnoreCase))
+            {
+                prod.end_date = finishedAt;
+                prod.status = "Importing";
+
+                if (prod.actual_start_date == null)
+                    prod.actual_start_date = finishedAt;
+
+                await _db.SaveChangesAsync(ct);
+                return true;
+            }
 
             prod.end_date = finishedAt;
             prod.status = "Importing";

@@ -12,5 +12,13 @@ namespace AMMS.Shared.DTOs.Productions
         public string token { get; set; } = "";
         public string? reason { get; set; }
         public List<IFormFile>? images { get; set; } = new();
+
+        public bool use_manual_input { get; set; } = false;
+
+        public string? materials_json { get; set; }
+
+        public string? reference_inputs_json { get; set; }
+
+        public string? outputs_json { get; set; }
     }
 }

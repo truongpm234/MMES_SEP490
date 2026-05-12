@@ -11,5 +11,9 @@ namespace AMMS.Shared.DTOs.Productions
         public string token { get; set; } = null!;
         public string? reason { get; set; }
         public string? report_image_url { get; set; }
+        public bool use_manual_input { get; set; } = false;
+        public List<TaskMaterialUsageInputDto>? materials { get; set; }
+        public List<TaskReferenceUsageInputDto>? reference_inputs { get; set; }
+        public List<TaskOutputReportDto>? outputs { get; set; }
     }
 }

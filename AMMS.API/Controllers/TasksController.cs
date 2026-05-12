@@ -3,8 +3,11 @@ using AMMS.Application.Interfaces;
 using AMMS.Infrastructure.DBContext;
 using AMMS.Infrastructure.Interfaces;
 using AMMS.Shared.DTOs.Productions;
+using DocumentFormat.OpenXml.Office2010.CustomUI;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
+using System.Reflection.Metadata;
 using System.Security.Claims;
 using System.Text.Json;
 
@@ -69,6 +72,58 @@ public class TasksController : ControllerBase
                 task_id = taskId
             });
         }
+        var taskForGroup = await _db.tasks
+    .AsNoTracking()
+    .Include(x => x.prod)
+    .Include(x => x.process)
+    .FirstOrDefaultAsync(x => x.task_id == taskId, ct);
+
+        if (taskForGroup?.prod != null &&
+    string.Equals(taskForGroup.prod.prod_kind, "GROUP", StringComparison.OrdinalIgnoreCase))
+        {
+            var groupBundle = await _scanSvc.GetTaskQrMaterialBundleAsync(taskId, ct);
+
+            return Ok(new
+            {
+                task_id = taskId,
+
+                process_code = taskForGroup.process?.process_code,
+                process_name = taskForGroup.process?.process_name,
+
+                qty_unit = "sp",
+                min_allowed = 1,
+                max_allowed = taskForGroup.prod.group_total_qty,
+                suggested_qty = taskForGroup.prod.group_total_qty,
+                happy_case_qty = taskForGroup.prod.group_total_qty,
+
+                order_qty = taskForGroup.prod.group_total_qty,
+                sheets_required = 0,
+                sheets_waste = 0,
+                sheets_total = 0,
+                n_up = 1,
+                number_of_plates = 0,
+
+                stage_index = taskForGroup.seq_num ?? 1,
+                stage_count = await _db.tasks.CountAsync(x => x.prod_id == taskForGroup.prod_id, ct),
+
+                production_output_qty = taskForGroup.prod.group_total_qty,
+                production_output_unit = "sp",
+
+                input_mode = "MANUAL",
+                allow_manual_input = true,
+                can_use_manual_input = true,
+                manual_input_optional = false,
+
+                is_group_production = true,
+                group_prod_id = taskForGroup.prod.prod_id,
+                group_total_qty = taskForGroup.prod.group_total_qty,
+
+                manual_input_hint = "Task group cho phép nhập tay NVL, BTP input và output khi finish. Các danh sách dưới đây là estimate tổng để FE tham khảo.",
+
+                consumable_materials = groupBundle.consumable_materials,
+                reference_inputs = groupBundle.reference_inputs
+            });
+        }
 
         var policy = await _taskRepo.GetQtyPolicyAsync(taskId, ct);
         if (policy == null)
@@ -81,6 +136,12 @@ public class TasksController : ControllerBase
         }
 
         var bundle = await _scanSvc.GetTaskQrMaterialBundleAsync(taskId, ct);
+
+        var singleInputMode = taskForGroup?.input_mode ?? "ESTIMATE";
+        var singleForceManual = string.Equals(
+            singleInputMode,
+            "MANUAL",
+            StringComparison.OrdinalIgnoreCase);
 
         return Ok(new
         {
@@ -95,7 +156,6 @@ public class TasksController : ControllerBase
             suggested_qty = policy.suggested_qty,
             happy_case_qty = policy.happy_case_qty,
 
-            // Các field này giúp FE đối chiếu với Production Detail
             order_qty = policy.order_qty,
             sheets_required = policy.sheets_required,
             sheets_waste = policy.sheets_waste,
@@ -109,6 +169,18 @@ public class TasksController : ControllerBase
             production_output_qty = policy.suggested_qty,
             production_output_unit = policy.qty_unit,
 
+            input_mode = singleInputMode,
+            allow_manual_input = singleForceManual,
+            can_use_manual_input = true,
+            manual_input_optional = !singleForceManual,
+            is_group_production = false,
+            group_prod_id = (int?)null,
+            group_total_qty = (int?)null,
+
+            manual_input_hint = singleForceManual
+                ? "Task này đang được cấu hình MANUAL, FE cần gửi manual input khi finish."
+                : "Task SINGLE có thể chọn nhập tay input. Nếu không chọn thì dùng estimate như logic cũ.",
+
             consumable_materials = bundle.consumable_materials,
             reference_inputs = bundle.reference_inputs
         });
@@ -116,8 +188,8 @@ public class TasksController : ControllerBase
 
     [HttpPost("qr")]
     public async Task<ActionResult<TaskQrResponse>> CreateQr(
-        [FromBody] CreateTaskQrRequest req,
-        CancellationToken ct)
+    [FromBody] CreateTaskQrRequest req,
+    CancellationToken ct)
     {
         if (req == null)
         {
@@ -146,6 +218,204 @@ public class TasksController : ControllerBase
             });
         }
 
+        var taskMeta = await _db.tasks
+            .AsNoTracking()
+            .Include(x => x.prod)
+            .Include(x => x.process)
+            .FirstOrDefaultAsync(x => x.task_id == req.task_id, ct);
+
+        if (taskMeta == null)
+        {
+            return NotFound(new
+            {
+                message = "Task not found",
+                task_id = req.task_id
+            });
+        }
+
+        var isGroupTask =
+            taskMeta.prod != null &&
+            string.Equals(taskMeta.prod.prod_kind, "GROUP", StringComparison.OrdinalIgnoreCase);
+
+        var isManualTask =
+            string.Equals(taskMeta.input_mode, "MANUAL", StringComparison.OrdinalIgnoreCase);
+
+        var ttlMinutes = req.ttl_minutes <= 0 ? 10 : req.ttl_minutes;
+        var ttl = TimeSpan.FromMinutes(ttlMinutes);
+
+        // CASE 1: GROUP PRODUCTION TASK
+        if (isGroupTask)
+        {
+            var maxAllowed = taskMeta.prod?.group_total_qty ?? 0;
+
+            if (maxAllowed <= 0)
+            {
+                return BadRequest(new
+                {
+                    message = "Production ghép chưa có group_total_qty hợp lệ.",
+                    task_id = req.task_id,
+                    prod_id = taskMeta.prod_id
+                });
+            }
+
+            var isAuto = !req.qty_good.HasValue || req.qty_good.Value <= 0;
+
+            var qtyGood = isAuto
+                ? maxAllowed
+                : req.qty_good!.Value;
+
+            if (qtyGood <= 0)
+            {
+                return BadRequest(new
+                {
+                    message = "Số lượng báo cáo phải lớn hơn 0.",
+                    task_id = req.task_id,
+                    input_qty_good = qtyGood
+                });
+            }
+
+            if (qtyGood > maxAllowed)
+            {
+                return BadRequest(new
+                {
+                    message = "Số lượng báo cáo group vượt tổng số lượng production ghép.",
+                    task_id = req.task_id,
+                    input_qty_good = qtyGood,
+                    max_allowed = maxAllowed,
+                    suggested_qty = maxAllowed
+                });
+            }
+
+            var token = _tokenSvc.CreateToken(
+                req.task_id,
+                qtyGood,
+                new List<TaskMaterialUsageInputDto>(),
+                ttl);
+
+            var expiresAt = DateTimeOffset.UtcNow.Add(ttl).ToUnixTimeSeconds();
+
+            return Ok(new TaskQrResponse
+            {
+                task_id = req.task_id,
+                token = token,
+                expires_at_unix = expiresAt,
+
+                qty_good_used = qtyGood,
+                is_auto_filled = isAuto,
+
+                min_allowed = 1,
+                max_allowed = maxAllowed,
+                suggested_qty = maxAllowed,
+                qty_unit = "sp",
+
+                process_code = taskMeta.process?.process_code,
+                process_name = taskMeta.process?.process_name,
+
+                embedded_material_count = 0,
+
+                consumable_materials = new List<TaskConsumableMaterialDto>(),
+                reference_inputs = new List<TaskReferenceInputDto>()
+            });
+        }
+
+        // CASE 2: SINGLE PRODUCTION TASK - FE chọn manual hoặc task được cấu hình MANUAL.
+        if (req.use_manual_input || isManualTask)
+        {
+            var manualPolicy = await _taskRepo.GetQtyPolicyAsync(req.task_id, ct);
+            if (manualPolicy == null)
+            {
+                return BadRequest(new
+                {
+                    message = "Không xác định được ngưỡng số lượng hợp lệ cho công đoạn này.",
+                    task_id = req.task_id
+                });
+            }
+
+            var isAuto = !req.qty_good.HasValue || req.qty_good.Value <= 0;
+
+            int qtyGood;
+
+            if (isAuto)
+            {
+                qtyGood = manualPolicy.suggested_qty;
+
+                if (qtyGood <= 0)
+                    qtyGood = 1;
+            }
+            else
+            {
+                qtyGood = req.qty_good!.Value;
+
+                if (qtyGood < manualPolicy.min_allowed || qtyGood > manualPolicy.max_allowed)
+                {
+                    return BadRequest(new
+                    {
+                        message =
+                            $"Số lượng báo cáo không hợp lệ. " +
+                            $"Công đoạn [{manualPolicy.process_code} - {manualPolicy.process_name}] " +
+                            $"chỉ cho phép trong khoảng {manualPolicy.min_allowed} -> {manualPolicy.max_allowed} {manualPolicy.qty_unit}.",
+
+                        task_id = req.task_id,
+                        input_qty_good = qtyGood,
+
+                        process_code = manualPolicy.process_code,
+                        process_name = manualPolicy.process_name,
+                        qty_unit = manualPolicy.qty_unit,
+
+                        min_allowed = manualPolicy.min_allowed,
+                        max_allowed = manualPolicy.max_allowed,
+                        suggested_qty = manualPolicy.suggested_qty,
+                        happy_case_qty = manualPolicy.happy_case_qty,
+
+                        order_qty = manualPolicy.order_qty,
+                        sheets_required = manualPolicy.sheets_required,
+                        sheets_waste = manualPolicy.sheets_waste,
+                        sheets_total = manualPolicy.sheets_total,
+                        n_up = manualPolicy.n_up,
+                        number_of_plates = manualPolicy.number_of_plates,
+
+                        stage_index = manualPolicy.stage_index,
+                        stage_count = manualPolicy.stage_count,
+
+                        production_output_qty = manualPolicy.suggested_qty,
+                        production_output_unit = manualPolicy.qty_unit
+                    });
+                }
+            }
+
+            var token = _tokenSvc.CreateToken(
+                req.task_id,
+                qtyGood,
+                new List<TaskMaterialUsageInputDto>(),
+                ttl);
+
+            var expiresAt = DateTimeOffset.UtcNow.Add(ttl).ToUnixTimeSeconds();
+
+            return Ok(new TaskQrResponse
+            {
+                task_id = req.task_id,
+                token = token,
+                expires_at_unix = expiresAt,
+
+                qty_good_used = qtyGood,
+                is_auto_filled = isAuto,
+
+                min_allowed = manualPolicy.min_allowed,
+                max_allowed = manualPolicy.max_allowed,
+                suggested_qty = manualPolicy.suggested_qty,
+                qty_unit = manualPolicy.qty_unit,
+
+                process_code = manualPolicy.process_code,
+                process_name = manualPolicy.process_name,
+
+                embedded_material_count = 0,
+
+                consumable_materials = new List<TaskConsumableMaterialDto>(),
+                reference_inputs = new List<TaskReferenceInputDto>()
+            });
+        }
+
+        //CASE 3: FLOW CŨ - SINGLE PRODUCTION ESTIMATE MODE
         var policy = await _taskRepo.GetQtyPolicyAsync(req.task_id, ct);
         if (policy == null)
         {
@@ -156,29 +426,22 @@ public class TasksController : ControllerBase
             });
         }
 
-        var ttlMinutes = req.ttl_minutes <= 0 ? 10 : req.ttl_minutes;
-        var ttl = TimeSpan.FromMinutes(ttlMinutes);
+        var oldFlowIsAuto = !req.qty_good.HasValue || req.qty_good.Value <= 0;
 
-        var isAuto = !req.qty_good.HasValue || req.qty_good.Value <= 0;
+        int oldFlowQtyGood;
 
-        int qtyGood;
-
-        if (isAuto)
+        if (oldFlowIsAuto)
         {
-            // suggested_qty từ TaskRepository.GetQtyPolicyAsync().
-            // suggested_qty đã được đồng bộ theo logic Production:
-            // - RALO: number_of_plates
-            // - Từ CAT: sheets_total * n_up
-            qtyGood = policy.suggested_qty;
+            oldFlowQtyGood = policy.suggested_qty;
 
-            if (qtyGood <= 0)
-                qtyGood = 1;
+            if (oldFlowQtyGood <= 0)
+                oldFlowQtyGood = 1;
         }
         else
         {
-            qtyGood = req.qty_good!.Value;
+            oldFlowQtyGood = req.qty_good!.Value;
 
-            if (qtyGood < policy.min_allowed || qtyGood > policy.max_allowed)
+            if (oldFlowQtyGood < policy.min_allowed || oldFlowQtyGood > policy.max_allowed)
             {
                 return BadRequest(new
                 {
@@ -188,7 +451,7 @@ public class TasksController : ControllerBase
                         $"chỉ cho phép trong khoảng {policy.min_allowed} -> {policy.max_allowed} {policy.qty_unit}.",
 
                     task_id = req.task_id,
-                    input_qty_good = qtyGood,
+                    input_qty_good = oldFlowQtyGood,
 
                     process_code = policy.process_code,
                     process_name = policy.process_name,
@@ -239,24 +502,24 @@ public class TasksController : ControllerBase
             });
         }
 
-        var token = _tokenSvc.CreateToken(
+        var oldFlowToken = _tokenSvc.CreateToken(
             req.task_id,
-            qtyGood,
+            oldFlowQtyGood,
             inputMaterials,
             ttl);
 
-        var expiresAt = DateTimeOffset.UtcNow.Add(ttl).ToUnixTimeSeconds();
+        var oldFlowExpiresAt = DateTimeOffset.UtcNow.Add(ttl).ToUnixTimeSeconds();
 
         var qrMaterialBundle = await _scanSvc.GetTaskQrMaterialBundleAsync(req.task_id, ct);
 
         return Ok(new TaskQrResponse
         {
             task_id = req.task_id,
-            token = token,
-            expires_at_unix = expiresAt,
+            token = oldFlowToken,
+            expires_at_unix = oldFlowExpiresAt,
 
-            qty_good_used = qtyGood,
-            is_auto_filled = isAuto,
+            qty_good_used = oldFlowQtyGood,
+            is_auto_filled = oldFlowIsAuto,
 
             min_allowed = policy.min_allowed,
             max_allowed = policy.max_allowed,
@@ -291,6 +554,9 @@ public class TasksController : ControllerBase
         try
         {
             var imageUrls = await UploadTaskReportImagesAsync(req.images, ct);
+            var manualMaterials = ParseJsonList<TaskMaterialUsageInputDto>(req.materials_json);
+            var manualRefs = ParseJsonList<TaskReferenceUsageInputDto>(req.reference_inputs_json);
+            var manualOutputs = ParseJsonList<TaskOutputReportDto>(req.outputs_json);
 
             var scanReq = new ScanTaskRequest
             {
@@ -299,11 +565,14 @@ public class TasksController : ControllerBase
                     ? null
                     : req.reason.Trim(),
 
-                // Lưu nhiều link cách nhau bằng dấu phẩy.
-                // Không ảnh thì null.
                 report_image_url = imageUrls.Count == 0
                     ? null
-                    : string.Join(",", imageUrls)
+                    : string.Join(",", imageUrls),
+
+                use_manual_input = req.use_manual_input,
+                materials = manualMaterials,
+                reference_inputs = manualRefs,
+                outputs = manualOutputs
             };
 
             var scannedByUserId = GetCurrentUserId();
@@ -549,6 +818,26 @@ public class TasksController : ControllerBase
                 message = ex.Message,
                 task_ids = taskIds
             });
+        }
+    }
+
+    private static List<T> ParseJsonList<T>(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return new List<T>();
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<T>>(
+                json,
+                new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                }) ?? new List<T>();
+        }
+        catch
+        {
+            throw new InvalidOperationException("JSON input không hợp lệ.");
         }
     }
 }

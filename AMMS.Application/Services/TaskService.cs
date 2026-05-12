@@ -28,7 +28,6 @@ namespace AMMS.Application.Services
             if (!current.prod_id.HasValue || !current.seq_num.HasValue)
                 throw new InvalidOperationException("Task thiếu prod_id hoặc seq_num.");
 
-            // validate production/order readiness
             var prod = await _db.productions
                 .AsNoTracking()
                 .FirstOrDefaultAsync(x => x.prod_id == current.prod_id.Value, ct);
@@ -36,30 +35,60 @@ namespace AMMS.Application.Services
             if (prod == null)
                 throw new InvalidOperationException("Không tìm thấy production của task.");
 
-            if (!prod.order_id.HasValue)
-                throw new InvalidOperationException("Production chưa gắn với order.");
+            var isGroupProduction = string.Equals(
+                prod.prod_kind,
+                "GROUP",
+                StringComparison.OrdinalIgnoreCase);
 
-            if (!prod.status.Equals("InProcessing", StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(prod.status, "InProcessing", StringComparison.OrdinalIgnoreCase))
+            {
+                if (isGroupProduction)
+                    throw new InvalidOperationException("Production ghép chưa được bắt đầu.");
+
                 throw new InvalidOperationException("Quá trình sản xuất chưa được quản lí phê duyệt bắt đầu.");
+            }
 
-            var order = await _db.orders
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.order_id == prod.order_id.Value, ct);
+            if (isGroupProduction)
+            {
+                var activeOrderCount = await _db.prod_orders
+                    .AsNoTracking()
+                    .CountAsync(x => x.prod_id == prod.prod_id && x.status == "Active", ct);
 
-            if (order == null)
-                throw new InvalidOperationException("Không tìm thấy order của production.");
+                if (activeOrderCount < 2)
+                    throw new InvalidOperationException("Production ghép cần ít nhất 2 order active.");
 
-            if (!order.layout_confirmed)
-                throw new InvalidOperationException("Order chưa xác nhận layout, không thể bắt đầu công đoạn.");
+                await EnsureGroupPrerequisiteFinishedAsync(current.task_id, ct);
+            }
+            else
+            {
+                if (!prod.order_id.HasValue)
+                    throw new InvalidOperationException("Production chưa gắn với order.");
 
-            if (!order.is_production_ready)
-                throw new InvalidOperationException("Order chưa được xác nhận sẵn sàng sản xuất, không thể bắt đầu công đoạn.");
+                var order = await _db.orders
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.order_id == prod.order_id.Value, ct);
+
+                if (order == null)
+                    throw new InvalidOperationException("Không tìm thấy order của production.");
+
+                if (!order.layout_confirmed)
+                    throw new InvalidOperationException("Order chưa xác nhận layout, không thể bắt đầu công đoạn.");
+
+                if (!order.is_production_ready)
+                    throw new InvalidOperationException("Order chưa được xác nhận sẵn sàng sản xuất, không thể bắt đầu công đoạn.");
+            }
 
             if (string.Equals(current.status, "Finished", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Task đã Finished, không thể chuyển lại Ready.");
 
             if (string.Equals(current.status, "Ready", StringComparison.OrdinalIgnoreCase))
                 return true;
+
+            if (string.Equals(current.status, "GroupedWaiting", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Task này đã được ghép vào production chung, không thể chạy riêng.");
+            }
 
             var flowTasks = await _taskRepo.GetTasksByProductionWithProcessAsync(current.prod_id.Value, ct);
             if (flowTasks.Count == 0)
@@ -72,7 +101,6 @@ namespace AMMS.Application.Services
             var currentCode = ProductionFlowHelper.Norm(currentFlow.process?.process_code);
             var isInitialParallel = ProductionFlowHelper.IsInitialParallel(currentCode);
 
-            // Chỉ cho start từ trạng thái ban đầu
             if (!string.IsNullOrWhiteSpace(current.status) &&
                 !string.Equals(current.status, "Unassigned", StringComparison.OrdinalIgnoreCase))
             {
@@ -96,20 +124,61 @@ namespace AMMS.Application.Services
                 {
                     var prevName = previousUnfinished.name ?? previousUnfinished.process?.process_name ?? "previous task";
                     var prevCode = previousUnfinished.process?.process_code ?? "";
+
                     throw new InvalidOperationException(
                         $"Công đoạn trước [{prevCode} - {prevName}] chưa Finished nên chưa thể bắt đầu công đoạn này.");
                 }
             }
 
             var now = AppTime.NowVnUnspecified();
+
             await _taskRepo.MarkTaskReadyAsync(taskId, now, ct);
             return true;
         }
 
-        public async Task<FinishTasksFromStockResponse> FinishTasksFromStockAsync(
-    List<int> taskIds,
-    int? scannedByUserId = null,
-    CancellationToken ct = default)
+        private async Task EnsureGroupPrerequisiteFinishedAsync(
+    int groupTaskId,
+    CancellationToken ct)
+        {
+            var links = await _db.task_links
+                .AsNoTracking()
+                .Where(x => x.group_task_id == groupTaskId)
+                .ToListAsync(ct);
+
+            if (links.Count == 0)
+                return;
+
+            foreach (var link in links)
+            {
+                var singleTasks = await _db.tasks
+                    .AsNoTracking()
+                    .Include(x => x.process)
+                    .Where(x => x.prod_id == link.single_prod_id)
+                    .OrderBy(x => x.seq_num)
+                    .ToListAsync(ct);
+
+                var targetTask = singleTasks.FirstOrDefault(x => x.task_id == link.single_task_id);
+
+                if (targetTask == null)
+                    throw new InvalidOperationException($"Không tìm thấy single task {link.single_task_id}.");
+
+                var targetSeq = targetTask.seq_num ?? int.MaxValue;
+
+                var notFinishedBefore = singleTasks
+                    .Where(x => (x.seq_num ?? int.MaxValue) < targetSeq)
+                    .Where(x => !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (notFinishedBefore.Count > 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Order {link.order_id} chưa hoàn thành công đoạn riêng trước công đoạn ghép. " +
+                        $"Còn thiếu: {string.Join(",", notFinishedBefore.Select(x => x.process?.process_code ?? x.name))}");
+                }
+            }
+        }
+
+        public async Task<FinishTasksFromStockResponse> FinishTasksFromStockAsync(List<int> taskIds, int? scannedByUserId = null, CancellationToken ct = default)
         {
             const string fixedReason = "Bán thành phẩm đã có sẵn trong kho";
 

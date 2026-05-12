@@ -63,31 +63,78 @@ namespace AMMS.Application.Services
             var taskId = payload.task_id;
             var qtyGood = payload.qty_good;
 
-            var rawQrMaterials = NormalizeMaterialUsageInputs(payload.materials);
+            var isGroupTask = await IsGroupTaskAsync(taskId, ct);
+            var manualMode = await ShouldUseManualReportInputAsync(taskId, req, ct);
 
-            var expectedMaterials = await GetConsumableMaterialsForTaskAsync(taskId, ct);
+            List<TaskMaterialUsageLogItemDto> materialUsageSnapshot;
 
-            var qrMaterials = BuildReportMaterialUsageInputs(expectedMaterials, rawQrMaterials);
+            if (manualMode)
+            {
+                var manualMaterials = NormalizeMaterialUsageInputs(req.materials);
+                ValidateManualMaterialUsageInput(manualMaterials);
 
-            ValidateMaterialUsageInput(expectedMaterials, qrMaterials);
+                materialUsageSnapshot = await BuildManualMaterialUsageSnapshotAsync(
+                    manualMaterials,
+                    ct);
+            }
+            else
+            {
+                var rawQrMaterials = NormalizeMaterialUsageInputs(payload.materials);
 
-            var materialUsageSnapshot = BuildMaterialUsageSnapshot(expectedMaterials, qrMaterials);
+                var expectedMaterials = await GetConsumableMaterialsForTaskAsync(taskId, ct);
+
+                var qrMaterials = BuildReportMaterialUsageInputs(expectedMaterials, rawQrMaterials);
+
+                ValidateMaterialUsageInput(expectedMaterials, qrMaterials);
+
+                materialUsageSnapshot = BuildMaterialUsageSnapshot(expectedMaterials, qrMaterials);
+            }
 
             var materialUsageJson = materialUsageSnapshot.Count == 0
                 ? null
                 : JsonSerializer.Serialize(materialUsageSnapshot, _jsonOptions);
 
-            var policy = await _taskRepo.GetQtyPolicyAsync(taskId, ct);
-            if (policy == null)
-                throw new InvalidOperationException("Không xác định được policy số lượng cho task.");
+            var normalizedReferenceInputs = NormalizeReferenceInputs(req.reference_inputs);
 
-            if (qtyGood < policy.min_allowed || qtyGood > policy.max_allowed)
+            var referenceInputJson = manualMode && normalizedReferenceInputs.Count > 0
+                ? JsonSerializer.Serialize(normalizedReferenceInputs, _jsonOptions)
+                : null;
+
+            if (isGroupTask)
             {
-                throw new ArgumentOutOfRangeException(
-                    nameof(req.token),
-                    $"qty_good={qtyGood} không hợp lệ. " +
-                    $"Công đoạn [{policy.process_code} - {policy.process_name}] " +
-                    $"chỉ cho phép báo cáo trong khoảng {policy.min_allowed}..{policy.max_allowed} {policy.qty_unit}.");
+                var groupInfo = await _db.tasks
+                    .AsNoTracking()
+                    .Include(x => x.prod)
+                    .Include(x => x.process)
+                    .FirstOrDefaultAsync(x => x.task_id == taskId, ct)
+                    ?? throw new InvalidOperationException("Task not found.");
+
+                var maxAllowed = groupInfo.prod?.group_total_qty ?? 0;
+
+                if (qtyGood <= 0)
+                    throw new ArgumentOutOfRangeException(nameof(req.token), "qty_good phải lớn hơn 0.");
+
+                if (maxAllowed > 0 && qtyGood > maxAllowed)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(req.token),
+                        $"qty_good={qtyGood} vượt tổng số lượng production ghép ({maxAllowed}).");
+                }
+            }
+            else
+            {
+                var policy = await _taskRepo.GetQtyPolicyAsync(taskId, ct);
+                if (policy == null)
+                    throw new InvalidOperationException("Không xác định được policy số lượng cho task.");
+
+                if (qtyGood < policy.min_allowed || qtyGood > policy.max_allowed)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(req.token),
+                        $"qty_good={qtyGood} không hợp lệ. " +
+                        $"Công đoạn [{policy.process_code} - {policy.process_name}] " +
+                        $"chỉ cho phép báo cáo trong khoảng {policy.min_allowed}..{policy.max_allowed} {policy.qty_unit}.");
+                }
             }
 
             var result = await _taskRepo.ExecuteInTransactionAsync(async innerCt =>
@@ -131,6 +178,19 @@ namespace AMMS.Application.Services
                 t.status = "Finished";
                 t.start_time ??= now;
                 t.end_time = now;
+                var processCodeForOutput = currentFlow.process?.process_code;
+                var processNameForOutput = currentFlow.process?.process_name;
+
+                var normalizedOutputs = NormalizeOutputs(
+                    req.outputs,
+                    processCodeForOutput,
+                    processNameForOutput,
+                    "sp",
+                    qtyGood);
+
+                var outputJson = manualMode
+                    ? JsonSerializer.Serialize(normalizedOutputs, _jsonOptions)
+                    : null;
 
                 var finishLog = new task_log
                 {
@@ -142,37 +202,34 @@ namespace AMMS.Application.Services
                     scanned_by_user_id = scannedByUserId,
                     material_usage_json = materialUsageJson,
                     reason = NormalizeNullableText(req.reason, 1000),
-                    report_image_url = NormalizeNullableText(req.report_image_url, 8000)
+                    report_image_url = NormalizeNullableText(req.report_image_url, 8000),
+                    reference_input_json = referenceInputJson,
+                    output_json = outputJson
                 };
                 await _logRepo.AddAsync(finishLog);
 
-                foreach (var item in materialUsageSnapshot)
+                if (manualMode && isGroupTask)
                 {
-                    if (item.quantity_left > 0 && item.is_stock)
-                    {
-                        var mat = await _db.materials
-                            .FirstOrDefaultAsync(x => x.material_id == item.material_id, innerCt);
-
-                        if (mat == null)
-                            throw new InvalidOperationException($"Material not found. material_id={item.material_id}");
-
-                        mat.stock_qty = (mat.stock_qty ?? 0m) + item.quantity_left;
-
-                        await _db.stock_moves.AddAsync(new stock_move
-                        {
-                            material_id = item.material_id,
-                            type = "IN",
-                            qty = item.quantity_left,
-                            ref_doc = $"TASK-LEFTOVER-{t.task_id}",
-                            user_id = scannedByUserId,
-                            move_date = now,
-                            note = $"Return leftover from task_id={t.task_id}, prod_id={t.prod_id}",
-                            purchase_id = null
-                        }, innerCt);
-                    }
+                    await ConsumeManualMaterialsOnFinishAsync(
+                        materialUsageSnapshot,
+                        t,
+                        scannedByUserId,
+                        now,
+                        innerCt);
+                }
+                else
+                {
+                    await ReturnLeftoverMaterialsFromEstimatedFlowAsync(
+                        materialUsageSnapshot,
+                        t,
+                        scannedByUserId,
+                        now,
+                        innerCt);
                 }
 
                 await _taskRepo.SaveChangesAsync(innerCt);
+
+                await MirrorGroupFinishToSingleTasksAsync(t, finishLog, qtyGood, normalizedOutputs, scannedByUserId, now, innerCt);
 
                 if (t.prod_id.HasValue)
                     await _prodRepo.TryCloseProductionIfCompletedAsync(t.prod_id.Value, now, innerCt);
@@ -252,6 +309,257 @@ namespace AMMS.Application.Services
             }
 
             return result;
+        }
+
+        private async Task ConsumeManualMaterialsOnFinishAsync(
+    List<TaskMaterialUsageLogItemDto> materialUsageSnapshot,
+    task t,
+    int? scannedByUserId,
+    DateTime now,
+    CancellationToken ct)
+        {
+            foreach (var item in materialUsageSnapshot)
+            {
+                if (item.quantity_used <= 0)
+                    continue;
+
+                var mat = await _db.materials
+                    .FirstOrDefaultAsync(x => x.material_id == item.material_id, ct);
+
+                if (mat == null)
+                    throw new InvalidOperationException($"Material not found. material_id={item.material_id}");
+
+                var currentStock = mat.stock_qty ?? 0m;
+
+                if (currentStock < item.quantity_used)
+                {
+                    throw new InvalidOperationException(
+                        $"Không đủ tồn kho NVL {mat.code} - {mat.name}. " +
+                        $"Tồn={currentStock}, cần xuất={item.quantity_used}");
+                }
+
+                mat.stock_qty = currentStock - item.quantity_used;
+
+                await _db.stock_moves.AddAsync(new stock_move
+                {
+                    material_id = item.material_id,
+                    type = "OUT",
+                    qty = item.quantity_used,
+                    ref_doc = $"TASK-MANUAL-USE-{t.task_id}",
+                    user_id = scannedByUserId,
+                    move_date = now,
+                    note = $"Manual consume material on task finish. task_id={t.task_id}, prod_id={t.prod_id}",
+                    purchase_id = null
+                }, ct);
+            }
+        }
+
+        private async Task ReturnLeftoverMaterialsFromEstimatedFlowAsync(
+    List<TaskMaterialUsageLogItemDto> materialUsageSnapshot,
+    task t,
+    int? scannedByUserId,
+    DateTime now,
+    CancellationToken ct)
+        {
+            foreach (var item in materialUsageSnapshot)
+            {
+                if (item.quantity_left <= 0 || !item.is_stock)
+                    continue;
+
+                var mat = await _db.materials
+                    .FirstOrDefaultAsync(x => x.material_id == item.material_id, ct);
+
+                if (mat == null)
+                    throw new InvalidOperationException($"Material not found. material_id={item.material_id}");
+
+                mat.stock_qty = (mat.stock_qty ?? 0m) + item.quantity_left;
+
+                await _db.stock_moves.AddAsync(new stock_move
+                {
+                    material_id = item.material_id,
+                    type = "IN",
+                    qty = item.quantity_left,
+                    ref_doc = $"TASK-LEFTOVER-{t.task_id}",
+                    user_id = scannedByUserId,
+                    move_date = now,
+                    note = $"Return leftover from task_id={t.task_id}, prod_id={t.prod_id}",
+                    purchase_id = null
+                }, ct);
+            }
+        }
+
+        private async Task MirrorGroupFinishToSingleTasksAsync(
+    task groupTask,
+    task_log groupLog,
+    int groupQtyGood,
+    List<TaskOutputReportDto> groupOutputs,
+    int? scannedByUserId,
+    DateTime now,
+    CancellationToken ct)
+        {
+            if (!groupTask.prod_id.HasValue)
+                return;
+
+            var groupProd = await _db.productions
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.prod_id == groupTask.prod_id.Value, ct);
+
+            if (groupProd == null ||
+                !string.Equals(groupProd.prod_kind, "GROUP", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var links = await _db.task_links
+                .Where(x => x.group_task_id == groupTask.task_id && x.status != "Done")
+                .OrderBy(x => x.id)
+                .ToListAsync(ct);
+
+            if (links.Count == 0)
+                return;
+
+            var allocations = AllocateGroupQty(groupQtyGood, links);
+
+            foreach (var link in links)
+            {
+                var qtyForOrder = allocations.TryGetValue(link.order_id, out var q) ? q : 0;
+
+                var privateTask = await _db.tasks
+                    .FirstOrDefaultAsync(x => x.task_id == link.single_task_id, ct);
+
+                if (privateTask == null)
+                    continue;
+
+                var allocatedOutputs = AllocateOutputsForOrder(groupOutputs, qtyForOrder);
+
+                var allocatedOutputJson = allocatedOutputs.Count == 0
+                    ? null
+                    : JsonSerializer.Serialize(allocatedOutputs, _jsonOptions);
+
+                await _db.task_qtys.AddAsync(new task_qty
+                {
+                    task_log_id = groupLog.log_id == 0 ? null : groupLog.log_id,
+                    group_task_id = groupTask.task_id,
+                    single_task_id = privateTask.task_id,
+                    order_id = link.order_id,
+                    process_code = link.process_code,
+                    qty_good = qtyForOrder,
+                    output_json = allocatedOutputJson,
+                    created_at = now
+                }, ct);
+
+                privateTask.status = "Finished";
+                privateTask.start_time ??= now;
+                privateTask.end_time = now;
+                privateTask.reason = $"Hoàn thành từ production ghép prod_id={groupProd.prod_id}.";
+
+                await _db.task_logs.AddAsync(new task_log
+                {
+                    task_id = privateTask.task_id,
+                    scanned_code = $"GROUP-{groupProd.prod_id}-TASK-{groupTask.task_id}",
+                    action_type = "FinishedByGroup",
+                    qty_good = qtyForOrder,
+                    log_time = now,
+                    scanned_by_user_id = scannedByUserId,
+                    reason = $"Mirror từ production ghép {groupProd.code}",
+                    material_usage_json = null,
+                    reference_input_json = null,
+                    output_json = allocatedOutputJson,
+                    report_image_url = groupLog.report_image_url
+                }, ct);
+
+                link.status = "Done";
+
+                await _prodRepo.TryCloseProductionIfCompletedAsync(
+                    link.single_prod_id,
+                    now,
+                    ct);
+            }
+            await _db.SaveChangesAsync(ct);
+        }
+
+        private static Dictionary<int, int> AllocateGroupQty(
+    int groupQtyGood,
+    List<task_link> links)
+        {
+            var result = new Dictionary<int, int>();
+
+            var totalPlan = links.Sum(x => x.qty_plan);
+
+            if (totalPlan <= 0)
+            {
+                foreach (var link in links)
+                    result[link.order_id] = 0;
+
+                return result;
+            }
+
+            var remaining = groupQtyGood;
+
+            for (var i = 0; i < links.Count; i++)
+            {
+                var link = links[i];
+
+                int qty;
+
+                if (i == links.Count - 1)
+                {
+                    qty = remaining;
+                }
+                else
+                {
+                    qty = (int)Math.Round(
+                        groupQtyGood * (link.qty_plan / (decimal)totalPlan),
+                        MidpointRounding.AwayFromZero);
+
+                    if (qty < 0)
+                        qty = 0;
+
+                    if (qty > remaining)
+                        qty = remaining;
+                }
+
+                result[link.order_id] = qty;
+                remaining -= qty;
+            }
+
+            return result;
+        }
+
+        private static List<TaskOutputReportDto> AllocateOutputsForOrder(
+            List<TaskOutputReportDto> groupOutputs,
+            int qtyForOrder)
+        {
+            if (groupOutputs == null || groupOutputs.Count == 0)
+                return new List<TaskOutputReportDto>();
+
+            var totalGood = groupOutputs.Sum(x => x.quantity_good);
+
+            if (totalGood <= 0)
+            {
+                return groupOutputs.Select(x => new TaskOutputReportDto
+                {
+                    output_code = x.output_code,
+                    output_name = x.output_name,
+                    unit = x.unit,
+                    quantity_good = 0,
+                    quantity_bad = 0
+                }).ToList();
+            }
+
+            return groupOutputs.Select(x =>
+            {
+                var ratio = x.quantity_good / totalGood;
+
+                return new TaskOutputReportDto
+                {
+                    output_code = x.output_code,
+                    output_name = x.output_name,
+                    unit = x.unit,
+                    quantity_good = Math.Round(qtyForOrder * ratio, 4),
+                    quantity_bad = 0
+                };
+            }).ToList();
         }
 
         private static string? NormalizeNullableText(string? value, int maxLength)
@@ -337,8 +645,14 @@ namespace AMMS.Application.Services
             return policy?.suggested_qty ?? 1;
         }
 
-        public async Task<TaskQrMaterialBundleDto> GetTaskQrMaterialBundleAsync(int taskId, CancellationToken ct = default)
+        public async Task<TaskQrMaterialBundleDto> GetTaskQrMaterialBundleAsync(
+    int taskId,
+    CancellationToken ct = default)
         {
+            var groupBundle = await TryBuildGroupTaskQrMaterialBundleAsync(taskId, ct);
+            if (groupBundle != null)
+                return groupBundle;
+
             var ctx = await GetTaskEstimateContextAsync(taskId, ct);
             if (ctx == null)
                 return new TaskQrMaterialBundleDto();
@@ -348,6 +662,120 @@ namespace AMMS.Application.Services
                 consumable_materials = await BuildConsumableMaterialsAsync(ctx, ct),
                 reference_inputs = await BuildReferenceInputsAsync(ctx, ct)
             };
+        }
+
+        private async Task<TaskQrMaterialBundleDto?> TryBuildGroupTaskQrMaterialBundleAsync(
+    int groupTaskId,
+    CancellationToken ct)
+        {
+            var groupTask = await _db.tasks
+                .AsNoTracking()
+                .Include(x => x.prod)
+                .Include(x => x.process)
+                .FirstOrDefaultAsync(x => x.task_id == groupTaskId, ct);
+
+            if (groupTask?.prod == null ||
+                !string.Equals(groupTask.prod.prod_kind, "GROUP", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var links = await _db.task_links
+                .AsNoTracking()
+                .Where(x => x.group_task_id == groupTaskId)
+                .OrderBy(x => x.id)
+                .ToListAsync(ct);
+
+            if (links.Count == 0)
+            {
+                return new TaskQrMaterialBundleDto
+                {
+                    consumable_materials = new List<TaskConsumableMaterialDto>(),
+                    reference_inputs = new List<TaskReferenceInputDto>()
+                };
+            }
+
+            var allMaterials = new List<TaskConsumableMaterialDto>();
+            var allRefs = new List<TaskReferenceInputDto>();
+
+            foreach (var link in links)
+            {
+                var singleCtx = await GetTaskEstimateContextAsync(link.single_task_id, ct);
+
+                if (singleCtx == null)
+                    continue;
+
+                var mats = await BuildConsumableMaterialsAsync(singleCtx, ct);
+                var refs = await BuildReferenceInputsAsync(singleCtx, ct);
+
+                allMaterials.AddRange(mats);
+                allRefs.AddRange(refs);
+            }
+
+            return new TaskQrMaterialBundleDto
+            {
+                consumable_materials = AggregateConsumableMaterials(allMaterials),
+                reference_inputs = AggregateReferenceInputs(allRefs)
+            };
+        }
+
+        private static List<TaskConsumableMaterialDto> AggregateConsumableMaterials(
+    List<TaskConsumableMaterialDto> items)
+        {
+            if (items == null || items.Count == 0)
+                return new List<TaskConsumableMaterialDto>();
+
+            return items
+                .GroupBy(x => new
+                {
+                    material_id = x.material_id ?? 0,
+                    material_code = NormalizeMaterialCode(x.material_code),
+                    unit = (x.unit ?? "").Trim().ToLowerInvariant()
+                })
+                .Select(g =>
+                {
+                    var first = g.First();
+
+                    return new TaskConsumableMaterialDto
+                    {
+                        material_id = first.material_id,
+                        material_code = first.material_code,
+                        material_name = first.material_name,
+                        unit = first.unit,
+                        estimated_input_qty = Math.Round(g.Sum(x => x.estimated_input_qty), 4),
+                        is_mapped = g.All(x => x.is_mapped)
+                    };
+                })
+                .OrderBy(x => x.material_code)
+                .ToList();
+        }
+
+        private static List<TaskReferenceInputDto> AggregateReferenceInputs(
+    List<TaskReferenceInputDto> items)
+        {
+            if (items == null || items.Count == 0)
+                return new List<TaskReferenceInputDto>();
+
+            return items
+                .GroupBy(x => new
+                {
+                    input_code = ProductionFlowHelper.Norm(x.input_code),
+                    unit = (x.unit ?? "").Trim().ToLowerInvariant()
+                })
+                .Select(g =>
+                {
+                    var first = g.First();
+
+                    return new TaskReferenceInputDto
+                    {
+                        input_code = first.input_code,
+                        input_name = first.input_name,
+                        unit = first.unit,
+                        estimated_qty = Math.Round(g.Sum(x => x.estimated_qty), 4)
+                    };
+                })
+                .OrderBy(x => x.input_code)
+                .ToList();
         }
 
         private static string RemoveDiacritics(string? text)
@@ -1720,6 +2148,171 @@ namespace AMMS.Application.Services
                 ShouldScale = true,
                 Ratio = Math.Clamp((decimal)nvlQty / orderQty, 0m, 1m)
             };
+        }
+
+        private async Task<bool> IsGroupTaskAsync(int taskId, CancellationToken ct)
+        {
+            return await _db.tasks
+                .AsNoTracking()
+                .Include(x => x.prod)
+                .AnyAsync(x =>
+                    x.task_id == taskId &&
+                    x.prod != null &&
+                    x.prod.prod_kind == "GROUP", ct);
+        }
+
+        private async Task<bool> ShouldUseManualReportInputAsync(
+            int taskId,
+            ScanTaskRequest req,
+            CancellationToken ct)
+        {
+            if (req.use_manual_input)
+                return true;
+
+            var t = await _db.tasks
+                .AsNoTracking()
+                .Include(x => x.prod)
+                .FirstOrDefaultAsync(x => x.task_id == taskId, ct);
+
+            if (t == null)
+                return false;
+
+            if (string.Equals(t.input_mode, "MANUAL", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (t.prod != null &&
+                string.Equals(t.prod.prod_kind, "GROUP", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return false;
+        }
+
+        private static void ValidateManualMaterialUsageInput(List<TaskMaterialUsageInputDto> materials)
+        {
+            if (materials == null || materials.Count == 0)
+                return;
+
+            var duplicated = materials
+                .GroupBy(x => x.material_id)
+                .Any(x => x.Count() > 1);
+
+            if (duplicated)
+                throw new InvalidOperationException("Danh sách NVL nhập tay bị trùng material_id.");
+
+            foreach (var item in materials)
+            {
+                if (item.material_id <= 0)
+                    throw new InvalidOperationException("material_id không hợp lệ.");
+
+                if (item.quantity_used < 0)
+                    throw new InvalidOperationException("quantity_used không được nhỏ hơn 0.");
+
+                if (item.quantity_left < 0)
+                    throw new InvalidOperationException("quantity_left không được nhỏ hơn 0.");
+
+                if (item.quantity_left > 0 && !item.is_stock)
+                    throw new InvalidOperationException("NVL có quantity_left > 0 thì is_stock phải = true.");
+            }
+        }
+
+        private async Task<List<TaskMaterialUsageLogItemDto>> BuildManualMaterialUsageSnapshotAsync(
+            List<TaskMaterialUsageInputDto> inputMaterials,
+            CancellationToken ct)
+        {
+            var result = new List<TaskMaterialUsageLogItemDto>();
+
+            if (inputMaterials == null || inputMaterials.Count == 0)
+                return result;
+
+            var materialIds = inputMaterials
+                .Select(x => x.material_id)
+                .Distinct()
+                .ToList();
+
+            var materials = await _db.materials
+                .AsNoTracking()
+                .Where(x => materialIds.Contains(x.material_id))
+                .ToDictionaryAsync(x => x.material_id, ct);
+
+            foreach (var input in inputMaterials)
+            {
+                if (!materials.TryGetValue(input.material_id, out var mat))
+                    throw new InvalidOperationException($"Không tìm thấy NVL material_id={input.material_id}.");
+
+                result.Add(new TaskMaterialUsageLogItemDto
+                {
+                    material_id = mat.material_id,
+                    material_code = mat.code,
+                    material_name = mat.name,
+                    unit = mat.unit,
+                    estimated_input_qty = Math.Round(input.quantity_used + input.quantity_left, 4),
+                    quantity_used = Math.Round(input.quantity_used, 4),
+                    quantity_left = Math.Round(input.quantity_left, 4),
+                    quantity_waste = 0m,
+                    is_stock = input.is_stock
+                });
+            }
+
+            return result;
+        }
+
+        private static List<TaskReferenceUsageInputDto> NormalizeReferenceInputs(
+            List<TaskReferenceUsageInputDto>? inputs)
+        {
+            return (inputs ?? new List<TaskReferenceUsageInputDto>())
+                .Where(x => !string.IsNullOrWhiteSpace(x.input_code))
+                .Select(x => new TaskReferenceUsageInputDto
+                {
+                    input_code = x.input_code.Trim(),
+                    input_name = string.IsNullOrWhiteSpace(x.input_name) ? null : x.input_name.Trim(),
+                    unit = string.IsNullOrWhiteSpace(x.unit) ? null : x.unit.Trim(),
+                    quantity_used = Math.Round(x.quantity_used, 4),
+                    quantity_left = Math.Round(x.quantity_left, 4)
+                })
+                .ToList();
+        }
+
+        private static List<TaskOutputReportDto> NormalizeOutputs(
+            List<TaskOutputReportDto>? outputs,
+            string? fallbackCode,
+            string? fallbackName,
+            string? fallbackUnit,
+            int qtyGood)
+        {
+            var list = (outputs ?? new List<TaskOutputReportDto>())
+                .Where(x => !string.IsNullOrWhiteSpace(x.output_code))
+                .Select(x => new TaskOutputReportDto
+                {
+                    output_code = x.output_code.Trim(),
+                    output_name = string.IsNullOrWhiteSpace(x.output_name) ? null : x.output_name.Trim(),
+                    unit = string.IsNullOrWhiteSpace(x.unit) ? null : x.unit.Trim(),
+                    quantity_good = Math.Round(x.quantity_good, 4),
+                    quantity_bad = Math.Round(x.quantity_bad, 4)
+                })
+                .ToList();
+
+            if (list.Count == 0)
+            {
+                list.Add(new TaskOutputReportDto
+                {
+                    output_code = fallbackCode ?? "OUTPUT",
+                    output_name = fallbackName ?? "Output",
+                    unit = fallbackUnit ?? "sp",
+                    quantity_good = qtyGood,
+                    quantity_bad = 0
+                });
+            }
+
+            foreach (var item in list)
+            {
+                if (item.quantity_good < 0)
+                    throw new InvalidOperationException("quantity_good output không được nhỏ hơn 0.");
+
+                if (item.quantity_bad < 0)
+                    throw new InvalidOperationException("quantity_bad output không được nhỏ hơn 0.");
+            }
+
+            return list;
         }
     }
 }

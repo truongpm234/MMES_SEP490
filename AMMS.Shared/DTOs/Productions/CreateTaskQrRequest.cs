@@ -12,6 +12,7 @@ namespace AMMS.Shared.DTOs.Productions
         public int task_id { get; set; }
         public int ttl_minutes { get; set; } = 60;
         public int? qty_good { get; set; }
+        public bool use_manual_input { get; set; } = false;
         public List<TaskMaterialUsageInputDto> materials { get; set; } = new();
     }
 
