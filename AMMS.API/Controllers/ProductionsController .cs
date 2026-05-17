@@ -111,6 +111,25 @@ namespace AMMS.API.Controllers
             return Ok(result);
         }
 
+        [HttpGet("detail/production/{prodId:int}")]
+        public async Task<IActionResult> GetProductionDetailByProdId(
+    int prodId,
+    CancellationToken ct)
+        {
+            var result = await _service.GetProductionDetailByProdIdAsync(prodId, ct);
+
+            if (result == null)
+            {
+                return NotFound(new
+                {
+                    message = "Production not found.",
+                    prod_id = prodId
+                });
+            }
+
+            return Ok(result);
+        }
+
         [HttpGet("progress/{prodId:int}")]
         public async Task<ActionResult<ProductionProgressResponse>> Progress(int prodId)
         {

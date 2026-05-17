@@ -7,6 +7,7 @@ using AMMS.Shared.DTOs.Productions;
 using AMMS.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
 using System;
+using System.Linq;
 using System.Text.Json;
 
 namespace AMMS.Infrastructure.Repositories
@@ -59,6 +60,12 @@ namespace AMMS.Infrastructure.Repositories
             NormalizePaging(ref page, ref pageSize);
             var skip = (page - 1) * pageSize;
 
+            /*
+             * Lấy từ productions làm bảng chính để có đủ:
+             * - SINGLE
+             * - GROUP
+             * - SPLIT
+             */
             var baseRows = await (
                 from pr in _db.productions.AsNoTracking()
 
@@ -76,6 +83,10 @@ namespace AMMS.Infrastructure.Repositories
 
                     order_id = o != null ? o.order_id : null,
 
+                    /*
+                     * SINGLE/SPLIT vẫn hiển thị mã order ở field code.
+                     * GROUP không có order nên dùng production code.
+                     */
                     code = o != null ? o.code : pr.code,
 
                     delivery_date = o != null ? o.delivery_date : null,
@@ -84,6 +95,7 @@ namespace AMMS.Infrastructure.Repositories
 
                     production_status = pr.status,
                     order_status = o != null ? o.status : null,
+
                     customer_name = o == null ? "Production ghép" : "",
 
                     production_method = pr.prod_method,
@@ -138,6 +150,7 @@ namespace AMMS.Infrastructure.Repositories
             .ToListAsync(ct);
 
             var hasNext = baseRows.Count > pageSize;
+
             if (hasNext)
                 baseRows.RemoveAt(baseRows.Count - 1);
 
@@ -169,29 +182,32 @@ namespace AMMS.Infrastructure.Repositories
                 .Distinct()
                 .ToList();
 
+            /*
+             * Load customer cho SINGLE/SPLIT.
+             */
             var customerRows = orderIds.Count == 0
-    ? new List<CustomerRow>()
-    : await (
-        from o in _db.orders.AsNoTracking()
+                ? new List<CustomerRow>()
+                : await (
+                    from o in _db.orders.AsNoTracking()
 
-        join q in _db.quotes.AsNoTracking()
-            on o.quote_id equals q.quote_id into qj
-        from q in qj.DefaultIfEmpty()
+                    join q in _db.quotes.AsNoTracking()
+                        on o.quote_id equals q.quote_id into qj
+                    from q in qj.DefaultIfEmpty()
 
-        join r in _db.order_requests.AsNoTracking()
-            on q.order_request_id equals r.order_request_id into rj
-        from r in rj.DefaultIfEmpty()
+                    join r in _db.order_requests.AsNoTracking()
+                        on q.order_request_id equals r.order_request_id into rj
+                    from r in rj.DefaultIfEmpty()
 
-        where orderIds.Contains(o.order_id)
+                    where orderIds.Contains(o.order_id)
 
-        select new CustomerRow
-        {
-            order_id = o.order_id,
-            customer_name = r != null && !string.IsNullOrWhiteSpace(r.customer_name)
-                ? r.customer_name
-                : ""
-        }
-    ).ToListAsync(ct);
+                    select new CustomerRow
+                    {
+                        order_id = o.order_id,
+                        customer_name = r != null && !string.IsNullOrWhiteSpace(r.customer_name)
+                            ? r.customer_name
+                            : ""
+                    }
+                ).ToListAsync(ct);
 
             var customerByOrderId = customerRows
                 .GroupBy(x => x.order_id)
@@ -200,10 +216,17 @@ namespace AMMS.Infrastructure.Repositories
                     g => g.First().customer_name
                 );
 
+            var ordersById = orderIds.Count == 0
+                ? new Dictionary<int, order>()
+                : await _db.orders
+                    .AsNoTracking()
+                    .Where(x => orderIds.Contains(x.order_id))
+                    .ToDictionaryAsync(x => x.order_id, ct);
+
             /*
-             * Load group info:
-             * - Với SINGLE row: lấy group thông qua orderIds.
-             * - Với GROUP row : lấy group thông qua baseGroupProdIds.
+             * Load GROUP info:
+             * - GROUP row: lấy members của chính nó.
+             * - SINGLE/SPLIT row: lấy group active liên quan qua order_id.
              */
             var groupLinkRows = await (
                 from po in _db.prod_orders.AsNoTracking()
@@ -296,7 +319,24 @@ namespace AMMS.Infrastructure.Repositories
                 );
 
             /*
-             * Load tasks cho cả SINGLE và GROUP production.
+             * Load task_links để biết task nào trong SINGLE chỉ là shadow của GROUP.
+             * Những task này không được hiển thị trong card SINGLE nữa.
+             */
+            var linkedSingleTaskIds = await _db.task_links
+                .AsNoTracking()
+                .Where(x => prodIds.Contains(x.single_prod_id))
+                .Select(x => x.single_task_id)
+                .Distinct()
+                .ToListAsync(ct);
+
+            var linkedSingleTaskIdSet = linkedSingleTaskIds
+                .ToHashSet();
+
+            /*
+             * Load tasks của tất cả production trong page:
+             * - SINGLE
+             * - GROUP
+             * - SPLIT
              */
             var taskRows = await _db.tasks
                 .AsNoTracking()
@@ -345,52 +385,116 @@ namespace AMMS.Infrastructure.Repositories
                 .ToListAsync(ct);
 
             var stepsByProductType = stepRows
-                .GroupBy(x => x.ProductTypeId)
-                .ToDictionary(
-                    g => g.Key,
-                    g => g.OrderBy(x => x.SeqNum).ToList()
-                );
+    .GroupBy(x => x.ProductTypeId)
+    .ToDictionary(
+        g => g.Key,
+        g => g
+            .OrderBy(x => x.SeqNum ?? int.MaxValue)
+            .ThenBy(x => x.ProcessId)
+            .ToList()
+    );
 
             var result = new List<ProducingOrderCardDto>();
 
             foreach (var r in baseRows)
             {
-                var isSplitRow = string.Equals(
-                    r.prod_kind,
-                    "SPLIT",
-                    StringComparison.OrdinalIgnoreCase);
+                var prodKind = (r.prod_kind ?? "").Trim();
 
                 var isGroupRow = string.Equals(
-                    r.prod_kind,
+                    prodKind,
                     "GROUP",
                     StringComparison.OrdinalIgnoreCase);
 
-                tasksByProd.TryGetValue(r.prod_id, out var tasks);
-                tasks ??= new List<TaskRow>();
+                var isSplitRow = string.Equals(
+                    prodKind,
+                    "SPLIT",
+                    StringComparison.OrdinalIgnoreCase);
+
+                var isSingleRow =
+                    !isGroupRow &&
+                    !isSplitRow;
+
+                tasksByProd.TryGetValue(r.prod_id, out var allTasksOfProd);
+                allTasksOfProd ??= new List<TaskRow>();
+
+                var tasksForCard = ResolveTasksForProductionCard(
+                    allTasksOfProd,
+                    isSingleRow,
+                    linkedSingleTaskIdSet);
 
                 var ptId = r.product_type_id ?? 0;
 
-                stepsByProductType.TryGetValue(ptId, out var steps);
-                steps ??= new List<StepRow>();
+                stepsByProductType.TryGetValue(ptId, out var allStepsOfProductType);
+                allStepsOfProductType ??= new List<StepRow>();
 
-                var routeProcessCsv = isGroupRow || isSplitRow ? r.group_process_codes : r.first_item_production_process;
+                /*
+                 * GROUP/SPLIT dùng group_process_codes của chính production.
+                 * SINGLE ban đầu dùng route order, nhưng sau đó sẽ filter tiếp bằng actual tasks
+                 * để chỉ còn phần công đoạn thật sự của production SINGLE.
+                 */
+                var routeProcessCsv =
+                    isGroupRow || isSplitRow
+                        ? r.group_process_codes
+                        : r.first_item_production_process;
 
-                steps = ResolveFixedRoute(
-                    steps.OrderBy(s => s.SeqNum).ToList(),
-                    x => x.ProcessCode,
-                    routeProcessCsv
-                );
+                var routeSteps = ResolveFixedRoute(
+    allStepsOfProductType
+        .OrderBy(s => s.SeqNum ?? int.MaxValue)
+        .ThenBy(s => s.ProcessId)
+        .ToList(),
+    x => x.ProcessCode,
+    routeProcessCsv
+);
 
-                var visibleSteps = ProductionSHelper.FilterStepsByRole(steps, roleId);
+                /*
+                 * Điểm sửa quan trọng:
+                 *
+                 * SINGLE:
+                 * - Không hiển thị task đã linked vào GROUP.
+                 * - Không hiển thị task đã chuyển sang SPLIT.
+                 * - Chỉ hiển thị các step có task thật còn nằm trong production SINGLE.
+                 *
+                 * GROUP:
+                 * - Hiển thị đúng group_process_codes.
+                 *
+                 * SPLIT:
+                 * - Hiển thị đúng group_process_codes, ví dụ BE,DUT,DAN.
+                 */
+                var stepsForCard = ResolveStepsForProductionCard(
+                    routeSteps,
+                    tasksForCard,
+                    isSingleRow);
+
+                var visibleSteps = ProductionSHelper.FilterStepsByRole(
+                    stepsForCard,
+                    roleId);
 
                 if (visibleSteps.Count == 0)
-                    visibleSteps = steps;
+                    visibleSteps = stepsForCard;
+
+                var visibleTasks = tasksForCard
+                    .Where(t =>
+                        visibleSteps.Any(s =>
+                            (t.ProcessId.HasValue && t.ProcessId.Value == s.ProcessId) ||
+                            (
+                                t.SeqNum.HasValue &&
+                                s.SeqNum.HasValue &&
+                                t.SeqNum.Value == s.SeqNum.Value
+                            )))
+                    .OrderBy(t => t.SeqNum ?? int.MaxValue)
+                    .ThenBy(t => t.TaskId)
+                    .ToList();
 
                 var stageStatuses = visibleSteps
                     .Select(step =>
                     {
-                        var task = tasks.FirstOrDefault(t => t.ProcessId == step.ProcessId)
-                                   ?? tasks.FirstOrDefault(t => t.SeqNum == step.SeqNum);
+                        var task = visibleTasks.FirstOrDefault(t =>
+       t.ProcessId.HasValue &&
+       t.ProcessId.Value == step.ProcessId)
+   ?? visibleTasks.FirstOrDefault(t =>
+       t.SeqNum.HasValue &&
+       step.SeqNum.HasValue &&
+       t.SeqNum.Value == step.SeqNum.Value);
 
                         return new ProductionStageStatusDto
                         {
@@ -410,23 +514,21 @@ namespace AMMS.Infrastructure.Repositories
                     .OrderBy(x => x.seq_num ?? int.MaxValue)
                     .ToList();
 
-                var visibleTasks = tasks
-                    .Where(t =>
-                        visibleSteps.Any(s =>
-                            (t.ProcessId.HasValue && t.ProcessId == s.ProcessId) ||
-                            (t.SeqNum.HasValue && t.SeqNum == s.SeqNum)))
-                    .OrderBy(t => t.SeqNum ?? int.MaxValue)
-                    .ToList();
-
-                var currentSeq = GetCurrentSeq(visibleTasks);
+                var currentTask = ResolveCurrentTaskForCard(visibleTasks);
 
                 string? currentStage = null;
                 string? currentStageStatus = null;
 
-                if (currentSeq.HasValue)
+                if (currentTask != null)
                 {
-                    var currentStageItem = stageStatuses
-                        .FirstOrDefault(x => x.seq_num == currentSeq.Value);
+                    var currentStageItem = stageStatuses.FirstOrDefault(x =>
+                        x.task_id == currentTask.TaskId);
+
+                    if (currentStageItem == null && currentTask.ProcessId.HasValue)
+                    {
+                        currentStageItem = stageStatuses.FirstOrDefault(x =>
+                            x.process_id == currentTask.ProcessId.Value);
+                    }
 
                     if (currentStageItem != null)
                     {
@@ -435,20 +537,8 @@ namespace AMMS.Infrastructure.Repositories
                         currentStageItem.is_current = true;
                     }
                 }
-                else if (visibleTasks.Count > 0 && visibleTasks.All(x => x.EndTime != null))
-                {
-                    var lastStage = stageStatuses
-                        .OrderBy(x => x.seq_num ?? int.MaxValue)
-                        .LastOrDefault();
 
-                    if (lastStage != null)
-                    {
-                        currentStage = lastStage.process_name;
-                        currentStageStatus = lastStage.status;
-                        lastStage.is_current = true;
-                    }
-                }
-                else
+                if (currentStage == null)
                 {
                     var firstStage = stageStatuses
                         .OrderBy(x => x.seq_num ?? int.MaxValue)
@@ -463,9 +553,10 @@ namespace AMMS.Infrastructure.Repositories
                 }
 
                 var stages = visibleSteps
-                    .Select(s => s.ProcessName)
-                    .Where(s => !string.IsNullOrWhiteSpace(s))
-                    .ToList();
+    .OrderBy(s => s.SeqNum)
+    .Select(s => s.ProcessName)
+    .Where(s => !string.IsNullOrWhiteSpace(s))
+    .ToList();
 
                 List<ProductionGroupInfoDto> groupInfos;
 
@@ -494,6 +585,7 @@ namespace AMMS.Infrastructure.Repositories
                     group_planned_start_date = r.planned_start_date,
                     group_actual_start_date = r.actual_start_date,
                     group_end_date = r.end_date,
+
                     is_active_group = isActiveGroup,
                     current_prod_order = null,
                     prod_orders = members
@@ -516,7 +608,8 @@ namespace AMMS.Infrastructure.Repositories
                             groupMembersByGroupProdId.TryGetValue(first.group_prod_id, out var members);
                             members ??= new List<ProdOrderInfoDto>();
 
-                            var currentProdOrder = members.FirstOrDefault(x => x.order_id == currentOrderId);
+                            var currentProdOrder = members.FirstOrDefault(x =>
+                                x.order_id == currentOrderId);
 
                             var isActiveGroup =
                                 string.Equals(currentProdOrder?.status, "Active", StringComparison.OrdinalIgnoreCase) &&
@@ -532,10 +625,12 @@ namespace AMMS.Infrastructure.Repositories
                                 group_process_codes = first.group_process_codes,
                                 group_total_qty = first.group_total_qty,
                                 product_type_id = first.group_product_type_id,
+
                                 group_created_at = first.group_created_at,
                                 group_planned_start_date = first.group_planned_start_date,
                                 group_actual_start_date = first.group_actual_start_date,
                                 group_end_date = first.group_end_date,
+
                                 is_active_group = isActiveGroup,
                                 current_prod_order = currentProdOrder,
                                 prod_orders = members
@@ -548,15 +643,14 @@ namespace AMMS.Infrastructure.Repositories
 
                 var activeGroup = groupInfos.FirstOrDefault(x => x.is_active_group);
 
-                var progress = ComputeProgressByStages(visibleSteps, currentSeq, visibleTasks);
+                var progress = ComputeProgressByTaskStatus(
+                    visibleSteps.Count,
+                    visibleTasks);
 
                 order? ord = null;
 
                 if (r.order_id.HasValue)
-                {
-                    ord = await _db.orders
-                        .SingleOrDefaultAsync(o => o.order_id == r.order_id.Value, ct);
-                }
+                    ordersById.TryGetValue(r.order_id.Value, out ord);
 
                 var customerName = r.customer_name ?? "";
 
@@ -569,6 +663,18 @@ namespace AMMS.Infrastructure.Repositories
                     }
                 }
 
+                var quantity =
+                    isGroupRow || isSplitRow
+                        ? r.group_total_qty > 0
+                            ? r.group_total_qty
+                            : r.first_item_quantity ?? 0
+                        : r.first_item_quantity ?? 0;
+
+                var displayStatus =
+                    isGroupRow || isSplitRow
+                        ? r.production_status
+                        : r.order_status;
+
                 result.Add(new ProducingOrderCardDto
                 {
                     prod_id = r.prod_id,
@@ -577,25 +683,27 @@ namespace AMMS.Infrastructure.Repositories
                     code = r.code,
 
                     customer_name = customerName,
-                    product_name = r.first_item_product_name,
-                    prod_kind = r.prod_kind,
-                    production_code = r.production_code,
-                    is_group_production = isGroupRow,
-                    is_split_production = isSplitRow,
-                    quantity = isGroupRow
-                        ? r.group_total_qty
-                        : r.first_item_quantity ?? 0,
+
+                    product_name = isGroupRow
+                        ? "Lệnh sản xuất ghép"
+                        : r.first_item_product_name,
+
+                    quantity = quantity,
 
                     delivery_date = r.delivery_date,
+
                     progress_percent = progress,
                     current_stage = currentStage,
-                    can_start = null,
-                    can_start_message = null,
-                    status = isGroupRow
-                        ? r.production_status
-                        : r.order_status,
 
+                    status = displayStatus,
                     production_status = r.production_status,
+                    stage_status = currentStageStatus,
+
+                    prod_kind = r.prod_kind,
+                    production_code = r.production_code,
+
+                    is_group_production = isGroupRow,
+                    is_split_production = isSplitRow,
 
                     is_production_ready = isGroupRow
                         ? null
@@ -606,21 +714,29 @@ namespace AMMS.Infrastructure.Repositories
                     sub_product_id = r.sub_product_id,
                     sub_product_used_qty = r.sub_product_used_qty,
                     nvl_qty = r.nvl_qty,
+
                     gm_note = r.gm_note,
                     mgr_note = r.mgr_note,
-                    group_status = isGroupRow
+
+                    /*
+                     * GROUP/SPLIT: trả path của chính production.
+                     * SINGLE: trả group active liên quan để FE vẫn biết order có group.
+                     */
+                    group_status = isGroupRow || isSplitRow
                         ? r.production_status
                         : activeGroup?.group_status,
 
-                    group_process_codes = isGroupRow
+                    group_process_codes = isGroupRow || isSplitRow
                         ? r.group_process_codes
                         : activeGroup?.group_process_codes,
 
-                    group_total_qty = isGroupRow
+                    group_total_qty = isGroupRow || isSplitRow
                         ? r.group_total_qty
                         : activeGroup?.group_total_qty,
 
-                    stage_status = currentStageStatus,
+                    can_start = null,
+                    can_start_message = null,
+
                     stages = stages,
                     stage_statuses = stageStatuses
                 });
@@ -633,6 +749,170 @@ namespace AMMS.Infrastructure.Repositories
                 HasNext = hasNext,
                 Data = result
             };
+        }
+
+
+        private static List<TaskRow> ResolveTasksForProductionCard(
+    List<TaskRow> allTasksOfProd,
+    bool isSingleRow,
+    HashSet<int> linkedSingleTaskIds)
+        {
+            if (allTasksOfProd == null || allTasksOfProd.Count == 0)
+                return new List<TaskRow>();
+
+            /*
+             * GROUP/SPLIT:
+             * Hiển thị tất cả task thuộc chính production đó.
+             */
+            if (!isSingleRow)
+            {
+                return allTasksOfProd
+                    .OrderBy(x => x.SeqNum ?? int.MaxValue)
+                    .ThenBy(x => x.TaskId)
+                    .ToList();
+            }
+
+            /*
+             * SINGLE:
+             * Loại bỏ task shadow đã ghép vào GROUP.
+             * Những task này vẫn nằm trong SINGLE để mirror kết quả,
+             * nhưng không còn là công đoạn sản xuất riêng của SINGLE.
+             */
+            var ownTasks = allTasksOfProd
+                .Where(x => !linkedSingleTaskIds.Contains(x.TaskId))
+                .Where(x => !string.Equals(x.Status, "GroupedWaiting", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(x => x.SeqNum ?? int.MaxValue)
+                .ThenBy(x => x.TaskId)
+                .ToList();
+
+            /*
+             * Fallback cho production cũ chưa có task_link hoặc dữ liệu chưa chuẩn.
+             */
+            if (ownTasks.Count > 0)
+                return ownTasks;
+
+            return allTasksOfProd
+                .OrderBy(x => x.SeqNum ?? int.MaxValue)
+                .ThenBy(x => x.TaskId)
+                .ToList();
+        }
+
+        private static TaskRow? ResolveCurrentTaskForCard(List<TaskRow> tasks)
+        {
+            if (tasks == null || tasks.Count == 0)
+                return null;
+
+            var inProcessing = tasks
+                .OrderBy(x => x.SeqNum ?? int.MaxValue)
+                .ThenBy(x => x.TaskId)
+                .FirstOrDefault(x =>
+                    x.StartTime != null &&
+                    x.EndTime == null);
+
+            if (inProcessing != null)
+                return inProcessing;
+
+            var nextUnfinished = tasks
+                .OrderBy(x => x.SeqNum ?? int.MaxValue)
+                .ThenBy(x => x.TaskId)
+                .FirstOrDefault(x =>
+                    x.EndTime == null &&
+                    !string.Equals(x.Status, "Finished", StringComparison.OrdinalIgnoreCase));
+
+            if (nextUnfinished != null)
+                return nextUnfinished;
+
+            return tasks
+                .OrderByDescending(x => x.SeqNum ?? int.MinValue)
+                .ThenByDescending(x => x.TaskId)
+                .FirstOrDefault();
+        }
+
+        private static List<StepRow> ResolveStepsForProductionCard(
+    List<StepRow> routeSteps,
+    List<TaskRow> tasksForCard,
+    bool isSingleRow)
+        {
+            if (routeSteps == null || routeSteps.Count == 0)
+                return new List<StepRow>();
+
+            if (tasksForCard == null || tasksForCard.Count == 0)
+            {
+                return routeSteps
+                    .OrderBy(x => x.SeqNum ?? int.MaxValue)
+                    .ThenBy(x => x.ProcessId)
+                    .ToList();
+            }
+
+            /*
+             * GROUP/SPLIT:
+             * routeSteps đã được filter bằng group_process_codes rồi.
+             */
+            if (!isSingleRow)
+            {
+                return routeSteps
+                    .OrderBy(x => x.SeqNum ?? int.MaxValue)
+                    .ThenBy(x => x.ProcessId)
+                    .ToList();
+            }
+
+            /*
+             * SINGLE:
+             * Chỉ lấy các step còn có task thật trong SINGLE.
+             *
+             * Ví dụ sau khi chọn PHU,CAN:
+             * - SINGLE còn task thật: RALO,CAT,IN
+             * - PHU,CAN là shadow của GROUP => bỏ
+             * - BE,DUT,DAN đã move sang SPLIT => không còn task trong SINGLE => bỏ
+             */
+            var processIds = tasksForCard
+                .Where(x => x.ProcessId.HasValue)
+                .Select(x => x.ProcessId!.Value)
+                .Distinct()
+                .ToHashSet();
+
+            var seqNums = tasksForCard
+                .Where(x => x.SeqNum.HasValue)
+                .Select(x => x.SeqNum!.Value)
+                .Distinct()
+                .ToHashSet();
+
+            var filtered = routeSteps
+                .Where(x =>
+                    processIds.Contains(x.ProcessId) ||
+                    (
+                        x.SeqNum.HasValue &&
+                        seqNums.Contains(x.SeqNum.Value)
+                    ))
+                .OrderBy(x => x.SeqNum ?? int.MaxValue)
+                .ThenBy(x => x.ProcessId)
+                .ToList();
+
+            return filtered.Count > 0
+                ? filtered
+                : routeSteps
+                    .OrderBy(x => x.SeqNum ?? int.MaxValue)
+                    .ThenBy(x => x.ProcessId)
+                    .ToList();
+        }
+
+        private static decimal ComputeProgressByTaskStatus(
+      int totalVisibleSteps,
+      List<TaskRow> visibleTasks)
+        {
+            if (totalVisibleSteps <= 0)
+                return 0m;
+
+            if (visibleTasks == null || visibleTasks.Count == 0)
+                return 0m;
+
+            var finished = visibleTasks.Count(x =>
+                x.EndTime != null ||
+                string.Equals(x.Status, "Finished", StringComparison.OrdinalIgnoreCase));
+
+            var percent = finished * 100m / totalVisibleSteps;
+
+            return Math.Round(percent, 1);
         }
 
         private sealed class CustomerRow
@@ -684,6 +964,508 @@ namespace AMMS.Infrastructure.Repositories
                 progress_percent = percent
             };
         }
+
+        public async Task<ProductionDetailDto?> GetProductionDetailByProdIdAsync(
+    int prodId,
+    CancellationToken ct = default)
+        {
+            var header = await (
+                from pr in _db.productions.AsNoTracking()
+
+                join o in _db.orders.AsNoTracking()
+                    on pr.order_id equals o.order_id into oj
+                from o in oj.DefaultIfEmpty()
+
+                join r in _db.order_requests.AsNoTracking()
+                    on pr.order_id equals (int?)r.order_id into rj
+                from r in rj.DefaultIfEmpty()
+
+                join pt in _db.product_types.AsNoTracking()
+                    on pr.product_type_id equals pt.product_type_id into ptj
+                from pt in ptj.DefaultIfEmpty()
+
+                join sp in _db.sub_products.AsNoTracking()
+                    on pr.sub_product_id equals sp.id into spj
+                from sp in spj.DefaultIfEmpty()
+
+                where pr.prod_id == prodId
+
+                select new
+                {
+                    pr,
+                    sp,
+                    o,
+
+                    product_type_name = pt != null ? pt.name : null,
+                    packaging_standard = pt != null ? pt.packaging_standard : null,
+
+                    customer_name =
+                        pr.order_id == null
+                            ? "Production ghép"
+                            : r != null && r.customer_name != null && r.customer_name != ""
+                                ? r.customer_name
+                                : "Khách hàng",
+
+                    first_item = pr.order_id == null ? null : _db.order_items.AsNoTracking()
+                        .Where(i => i.order_id == pr.order_id.Value)
+                        .OrderBy(i => i.item_id)
+                        .Select(i => new ProductionDetailSourceItem
+                        {
+                            item_id = i.item_id,
+                            product_name = i.product_name,
+                            quantity = i.quantity,
+                            production_process = i.production_process,
+                            length_mm = EF.Property<int?>(i, "length_mm"),
+                            width_mm = EF.Property<int?>(i, "width_mm"),
+                            height_mm = EF.Property<int?>(i, "height_mm"),
+                            est_ink_weight_kg = i.est_ink_weight_kg
+                        })
+                        .FirstOrDefault()
+                }
+            ).FirstOrDefaultAsync(ct);
+
+            if (header == null)
+                return null;
+
+            var isGroupProduction = string.Equals(
+                header.pr.prod_kind,
+                "GROUP",
+                StringComparison.OrdinalIgnoreCase);
+
+            var isSplitProduction = string.Equals(
+                header.pr.prod_kind,
+                "SPLIT",
+                StringComparison.OrdinalIgnoreCase);
+
+            var routeProcessCsv =
+                (isGroupProduction || isSplitProduction) &&
+                !string.IsNullOrWhiteSpace(header.pr.group_process_codes)
+                    ? header.pr.group_process_codes
+                    : header.first_item?.production_process;
+
+            var dto = new ProductionDetailDto
+            {
+                prod_id = header.pr.prod_id,
+                import_recieve_path = header.pr.import_recieve_path,
+
+                production_code = header.pr.code,
+                production_status = header.pr.status,
+
+                created_at = header.pr.created_at,
+                planned_start_date = header.pr.planned_start_date,
+                actual_start_date = header.pr.actual_start_date,
+                start_date = header.pr.actual_start_date,
+                end_date = header.pr.end_date,
+
+                order_id = header.o?.order_id,
+                order_code = header.o?.code,
+                delivery_date = header.o?.delivery_date,
+
+                customer_name = header.customer_name ?? "Khách ẩn tên",
+
+                product_name = isGroupProduction
+                    ? "Lệnh sản xuất ghép"
+                    : header.first_item?.product_name,
+
+                quantity = isGroupProduction
+                    ? header.pr.group_total_qty
+                    : header.first_item?.quantity ?? header.pr.group_total_qty,
+
+                product_type_id = header.pr.product_type_id,
+                packaging_standard = header.packaging_standard,
+
+                length_mm = header.first_item?.length_mm,
+                width_mm = header.first_item?.width_mm,
+                height_mm = header.first_item?.height_mm,
+
+                production_method = header.pr.prod_method,
+                sub_product_id = header.pr.sub_product_id,
+                sub_product_used_qty = header.pr.sub_product_used_qty,
+                nvl_qty = header.pr.nvl_qty,
+                sub_product_process = header.sp != null ? header.sp.product_process : null,
+                is_full_process = header.pr.is_full_process
+            };
+
+            order_request? orderReq = null;
+            cost_estimate? estimate = null;
+
+            int sheetsRequired = 0;
+            int sheetsWaste = 0;
+            int sheetsTotal = 0;
+            int nUp = 1;
+
+            ProductionDetailSourceItem? sourceItem = header.first_item;
+
+            int? materialSourceOrderId = dto.order_id;
+
+            if (isGroupProduction)
+            {
+                materialSourceOrderId = await ResolveGroupRepresentativeOrderIdAsync(
+                    header.pr.prod_id,
+                    ct);
+
+                if (materialSourceOrderId.HasValue)
+                {
+                    sourceItem = await LoadProductionDetailSourceItemAsync(
+                        materialSourceOrderId.Value,
+                        ct);
+                }
+            }
+
+            if (materialSourceOrderId.HasValue)
+            {
+                orderReq = await _db.order_requests
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.order_id == materialSourceOrderId.Value, ct);
+
+                if (orderReq != null)
+                {
+                    if (orderReq.accepted_estimate_id.HasValue &&
+                        orderReq.accepted_estimate_id.Value > 0)
+                    {
+                        estimate = await _db.cost_estimates
+                            .AsNoTracking()
+                            .FirstOrDefaultAsync(
+                                x => x.estimate_id == orderReq.accepted_estimate_id.Value
+                                  && x.order_request_id == orderReq.order_request_id,
+                                ct);
+                    }
+
+                    estimate ??= await _db.cost_estimates
+                        .AsNoTracking()
+                        .Where(x => x.order_request_id == orderReq.order_request_id)
+                        .OrderByDescending(x => x.is_active)
+                        .ThenByDescending(x => x.estimate_id)
+                        .FirstOrDefaultAsync(ct);
+
+                    if (estimate != null)
+                    {
+                        sheetsRequired = estimate.sheets_required;
+                        sheetsWaste = estimate.sheets_waste;
+                        sheetsTotal = estimate.sheets_total;
+                        nUp = estimate.n_up > 0 ? estimate.n_up : 1;
+                    }
+                }
+            }
+
+            if (isGroupProduction && header.pr.group_total_qty > 0)
+            {
+                sheetsRequired = header.pr.group_total_qty;
+                sheetsWaste = 0;
+                sheetsTotal = header.pr.group_total_qty;
+                nUp = 1;
+            }
+
+            dto.n_up = nUp;
+            dto.ready_print_file = orderReq?.print_ready_file;
+            dto.ink_type_names = estimate?.ink_type_names;
+            dto.wave_type = estimate?.wave_type;
+            dto.paper_name = estimate?.paper_name;
+            dto.coating_type = estimate?.coating_type;
+            dto.paper_alternative = estimate?.paper_alternative;
+            dto.wave_alternative = estimate?.wave_alternative;
+            dto.lamination_material_id = estimate?.lamination_material_id;
+            dto.lamination_material_code = estimate?.lamination_material_code;
+            dto.lamination_material_name = estimate?.lamination_material_name;
+
+            decimal estInkWeightKg = 0m;
+
+            if (sourceItem?.est_ink_weight_kg.HasValue == true)
+                estInkWeightKg = sourceItem.est_ink_weight_kg.Value;
+
+            int? numberOfPlates = orderReq?.number_of_plates;
+            decimal estCoatingGlueWeightKg = estimate?.coating_glue_weight_kg ?? 0m;
+
+            material? coatingMaterial = null;
+
+            if (estimate != null &&
+                !IsNoCoatingType(estimate.coating_type))
+            {
+                coatingMaterial = await ResolveCoatingMaterialForDetailAsync(estimate, ct);
+            }
+
+            var coatingMaterialCode = coatingMaterial?.code
+                ?? ResolveCoatingMaterialCodeForDetail(estimate?.coating_type);
+
+            var coatingMaterialName = coatingMaterial?.name
+                ?? (!IsNoCoatingType(estimate?.coating_type)
+                    ? ProductionFlowHelper.ResolveCoatingDisplayName(estimate?.coating_type)
+                    : null);
+
+            var coatingMaterialUnit = coatingMaterial?.unit ?? "kg";
+
+            var currentProdId = header.pr.prod_id;
+
+            var tasks = await _db.tasks.AsNoTracking()
+                .Where(t => t.prod_id == currentProdId)
+                .Select(t => new
+                {
+                    t.task_id,
+                    t.prod_id,
+                    t.seq_num,
+                    t.name,
+                    t.status,
+                    t.machine,
+                    t.start_time,
+                    t.end_time,
+                    t.planned_start_time,
+                    t.planned_end_time,
+                    t.process_id,
+                    t.is_taken_sub_product
+                })
+                .ToListAsync(ct);
+
+            var lastTask = tasks
+                .OrderByDescending(t => t.seq_num ?? 0)
+                .ThenByDescending(t => t.task_id)
+                .FirstOrDefault();
+
+            if (lastTask != null
+                && string.Equals(lastTask.status, "Finished", StringComparison.OrdinalIgnoreCase)
+                && lastTask.end_time != null
+                && !string.Equals(header.pr.status, "Importing", StringComparison.OrdinalIgnoreCase))
+            {
+                var prodToUpdate = new production { prod_id = currentProdId };
+                _db.productions.Attach(prodToUpdate);
+
+                prodToUpdate.status = "Importing";
+                prodToUpdate.end_date = lastTask.end_time;
+
+                if (header.pr.actual_start_date == null)
+                    prodToUpdate.actual_start_date = lastTask.end_time;
+
+                await _db.SaveChangesAsync(ct);
+
+                dto.production_status = "Importing";
+                dto.end_date = lastTask.end_time;
+                dto.actual_start_date ??= lastTask.end_time;
+                dto.start_date ??= lastTask.end_time;
+            }
+
+            var taskIds = tasks
+                .Select(x => x.task_id)
+                .ToList();
+
+            var logs = await _db.task_logs.AsNoTracking()
+                .Where(l => l.task_id != null && taskIds.Contains(l.task_id.Value))
+                .OrderBy(l => l.log_time)
+                .Select(l => new TaskLogDto
+                {
+                    log_id = l.log_id,
+                    task_id = l.task_id!.Value,
+                    action_type = l.action_type,
+                    qty_good = l.qty_good ?? 0,
+                    log_time = l.log_time,
+                    scanned_code = l.scanned_code,
+                    scanned_by_user_id = l.scanned_by_user_id,
+
+                    reason = l.reason,
+                    comment = l.reason,
+
+                    report_image_url = l.report_image_url,
+
+                    material_usage_json = l.material_usage_json,
+                    reference_input_json = l.reference_input_json,
+                    output_json = l.output_json
+                })
+                .ToListAsync(ct);
+
+            foreach (var log in logs)
+            {
+                log.report_image_urls = SplitImageUrls(log.report_image_url);
+
+                if (!string.IsNullOrWhiteSpace(log.material_usage_json))
+                {
+                    try
+                    {
+                        log.material_usages = JsonSerializer.Deserialize<List<TaskMaterialUsageLogItemDto>>(
+                            log.material_usage_json,
+                            new JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true
+                            }) ?? new List<TaskMaterialUsageLogItemDto>();
+                    }
+                    catch
+                    {
+                        log.material_usages = new List<TaskMaterialUsageLogItemDto>();
+                    }
+                }
+                else
+                {
+                    log.material_usages = new List<TaskMaterialUsageLogItemDto>();
+                }
+
+                if (!string.IsNullOrWhiteSpace(log.reference_input_json))
+                {
+                    try
+                    {
+                        log.reference_inputs = JsonSerializer.Deserialize<List<TaskReferenceUsageInputDto>>(
+                            log.reference_input_json,
+                            new JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true
+                            }) ?? new List<TaskReferenceUsageInputDto>();
+                    }
+                    catch
+                    {
+                        log.reference_inputs = new List<TaskReferenceUsageInputDto>();
+                    }
+                }
+                else
+                {
+                    log.reference_inputs = new List<TaskReferenceUsageInputDto>();
+                }
+
+                if (!string.IsNullOrWhiteSpace(log.output_json))
+                {
+                    try
+                    {
+                        log.outputs = JsonSerializer.Deserialize<List<TaskOutputReportDto>>(
+                            log.output_json,
+                            new JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true
+                            }) ?? new List<TaskOutputReportDto>();
+                    }
+                    catch
+                    {
+                        log.outputs = new List<TaskOutputReportDto>();
+                    }
+                }
+                else
+                {
+                    log.outputs = new List<TaskOutputReportDto>();
+                }
+            }
+
+            var ptId = header.pr.product_type_id;
+            List<ProductTypeProcessStepDto> steps = new();
+
+            if (ptId.HasValue)
+            {
+                steps = await _db.product_type_processes.AsNoTracking()
+                    .Where(p => p.product_type_id == ptId.Value && (p.is_active ?? true))
+                    .OrderBy(p => p.seq_num)
+                    .Select(p => new ProductTypeProcessStepDto
+                    {
+                        process_id = p.process_id,
+                        seq_num = p.seq_num,
+                        process_name = p.process_name,
+                        process_code = EF.Property<string?>(p, "process_code"),
+                        machine = p.machine
+                    })
+                    .ToListAsync(ct);
+            }
+
+            steps = ResolveFixedRoute(
+                steps.OrderBy(x => x.seq_num).ToList(),
+                x => x.process_code,
+                routeProcessCsv
+            );
+
+            var stages = new List<ProductionStageDto>();
+            StageOutputRef? prevOutput = null;
+            var routeCodes = steps.Select(x => x.process_code).ToList();
+
+            for (var stageIndex = 0; stageIndex < steps.Count; stageIndex++)
+            {
+                var s = steps[stageIndex];
+                var pcode = (s.process_code ?? "").Trim().ToUpperInvariant();
+
+                var task = tasks.FirstOrDefault(t => t.process_id == s.process_id)
+                           ?? tasks.FirstOrDefault(t => (t.seq_num ?? -1) == s.seq_num);
+
+                var stageLogs = task == null
+                    ? new List<TaskLogDto>()
+                    : LogsByTaskId(logs, task.task_id);
+
+                var qtyGood = stageLogs.Sum(x => x.qty_good);
+                var qtyBad = 0;
+                var denom = qtyGood + qtyBad;
+                var wastePct = denom <= 0
+                    ? 0m
+                    : Math.Round((qtyBad * 100m) / denom, 2);
+
+                var stageCoatingGlueWeightKg = isGroupProduction
+                    ? 0m
+                    : estCoatingGlueWeightKg;
+
+                var stageLaminationWeightKg = isGroupProduction
+                    ? 0m
+                    : estimate?.lamination_weight_kg ?? 0m;
+
+                var io = BuildStageIO(
+                        processCode: pcode,
+                        processName: s.process_name ?? "",
+                        detail: dto,
+                        prevOutput: prevOutput,
+                        sheetsRequired: sheetsRequired,
+                        sheetsWaste: sheetsWaste,
+                        sheetsTotal: sheetsTotal,
+                        nUp: nUp,
+                        qtyGood: qtyGood,
+                        numberOfPlates: numberOfPlates,
+                        estInkWeightKg: estInkWeightKg,
+                        currentStageIndex: stageIndex,
+                        routeProcessCodes: routeCodes,
+                        paperCode: estimate?.paper_code,
+                        paperName: estimate?.paper_name,
+                        waveType: estimate?.wave_type,
+                        coatingType: estimate?.coating_type,
+                        coatingMaterialCode: coatingMaterialCode,
+                        coatingMaterialName: coatingMaterialName,
+                        coatingMaterialUnit: coatingMaterialUnit,
+                        estCoatingGlueWeightKg: stageCoatingGlueWeightKg,
+                        inkTypeNames: estimate?.ink_type_names,
+                        laminationMaterialCode: estimate?.lamination_material_code,
+                        laminationMaterialName: estimate?.lamination_material_name,
+                        estLaminationWeightKg: stageLaminationWeightKg
+                    );
+
+                var stage = new ProductionStageDto
+                {
+                    process_id = s.process_id,
+                    seq_num = s.seq_num,
+                    process_name = s.process_name ?? "",
+                    process_code = s.process_code,
+
+                    machine = task?.machine ?? s.machine,
+
+                    task_id = task?.task_id,
+                    task_name = task?.name,
+                    status = task?.status,
+                    start_time = task?.start_time,
+                    end_time = task?.end_time,
+
+                    qty_good = qtyGood,
+                    waste_percent = wastePct,
+                    last_scan_time = stageLogs.Count == 0
+                        ? null
+                        : stageLogs.Max(x => x.log_time),
+
+                    logs = stageLogs,
+
+                    input_materials = io.inputs,
+                    output_product = io.output,
+
+                    planned_start_time = task?.planned_start_time,
+                    planned_end_time = task?.planned_end_time,
+
+                    estimated_output_quantity = io.output.estimated_quantity,
+                    actual_output_quantity = io.output.actual_quantity,
+
+                    n_up = nUp,
+                    is_taken_sub_product = task?.is_taken_sub_product ?? false
+                };
+
+                stages.Add(stage);
+                prevOutput = io.nextOutput;
+            }
+
+            dto.stages = stages;
+            return dto;
+        }
+
 
         public async Task<ProductionDetailDto?> GetProductionDetailByOrderIdAsync(int orderId, CancellationToken ct = default)
         {
@@ -1779,11 +2561,20 @@ namespace AMMS.Infrastructure.Repositories
                     estimatedQty: productionOutputQty,
                     unit: "tờ");
 
-                var hasRealCoating =
-                    estCoatingGlueWeightKg > 0m &&
-                    !IsNoCoatingType(coatingType);
+                /*
+                 * Trước đây chỉ hiện NVL phủ khi estCoatingGlueWeightKg > 0.
+                 * Với GROUP, ta cần hiện loại phủ/keo phủ lấy từ order đại diện,
+                 * dù estimatedQty có thể để 0.
+                 */
+                var hasCoatingMaterial =
+                    !IsNoCoatingType(coatingType) &&
+                    (
+                        !string.IsNullOrWhiteSpace(coatingType) ||
+                        !string.IsNullOrWhiteSpace(coatingMaterialCode) ||
+                        !string.IsNullOrWhiteSpace(coatingMaterialName)
+                    );
 
-                if (hasRealCoating)
+                if (hasCoatingMaterial)
                 {
                     var resolvedCode = !string.IsNullOrWhiteSpace(coatingMaterialCode)
                         ? coatingMaterialCode.Trim()
@@ -1800,13 +2591,15 @@ namespace AMMS.Infrastructure.Repositories
                     inputs.Add(ProductionSHelper.BuildStageMaterial(
                         name: resolvedName,
                         code: resolvedCode,
-                        estimatedQty: estCoatingGlueWeightKg,
+                        estimatedQty: estCoatingGlueWeightKg > 0m ? estCoatingGlueWeightKg : 0m,
                         actualQty: null,
                         unit: resolvedUnit));
                 }
 
                 var output = ProductionSHelper.BuildStageMaterial(
-                    name: hasRealCoating ? "Bán thành phẩm phủ" : "Bán thành phẩm qua công đoạn phủ",
+                    name: hasCoatingMaterial
+                        ? "Bán thành phẩm phủ"
+                        : "Bán thành phẩm qua công đoạn phủ",
                     code: "PHU",
                     estimatedQty: productionOutputQty,
                     actualQty: ActualFromQtyGood(qtyGood, productionOutputQty),
@@ -3304,6 +4097,61 @@ namespace AMMS.Infrastructure.Repositories
                 is_stage_covered_by_sub = true,
                 nvl_ratio = nvlRatio
             };
+        }
+
+        private async Task<ProductionDetailSourceItem?> LoadProductionDetailSourceItemAsync(
+    int orderId,
+    CancellationToken ct)
+        {
+            return await _db.order_items
+                .AsNoTracking()
+                .Where(i => i.order_id == orderId)
+                .OrderBy(i => i.item_id)
+                .Select(i => new ProductionDetailSourceItem
+                {
+                    item_id = i.item_id,
+                    product_name = i.product_name,
+                    quantity = i.quantity,
+                    production_process = i.production_process,
+                    length_mm = EF.Property<int?>(i, "length_mm"),
+                    width_mm = EF.Property<int?>(i, "width_mm"),
+                    height_mm = EF.Property<int?>(i, "height_mm"),
+                    est_ink_weight_kg = i.est_ink_weight_kg
+                })
+                .FirstOrDefaultAsync(ct);
+        }
+
+        private async Task<int?> ResolveGroupRepresentativeOrderIdAsync(
+    int groupProdId,
+    CancellationToken ct)
+        {
+            return await _db.prod_orders
+                .AsNoTracking()
+                .Where(x =>
+                    x.prod_id == groupProdId &&
+                    x.status == "Active")
+                .OrderBy(x => x.id)
+                .Select(x => (int?)x.order_id)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        private sealed class ProductionDetailSourceItem
+        {
+            public int item_id { get; set; }
+
+            public string? product_name { get; set; }
+
+            public int quantity { get; set; }
+
+            public string? production_process { get; set; }
+
+            public int? length_mm { get; set; }
+
+            public int? width_mm { get; set; }
+
+            public int? height_mm { get; set; }
+
+            public decimal? est_ink_weight_kg { get; set; }
         }
     }
 }
