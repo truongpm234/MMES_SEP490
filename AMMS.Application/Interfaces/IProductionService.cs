@@ -31,5 +31,8 @@ namespace AMMS.Application.Interfaces
     string? gmNote = null,
     string? proposedProductionMethod = null,
     CancellationToken ct = default);
+        Task<ProductionDetailDto?> GetProductionDetailByProdIdAsync(
+                int prodId,
+                CancellationToken ct = default);
     }
 }

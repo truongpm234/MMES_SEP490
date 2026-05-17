@@ -13,6 +13,8 @@ namespace AMMS.Shared.DTOs.Productions.Groups
 
     public class SuggestedGroupProductionDto
     {
+        public string suggestion_type { get; set; } = "GROUP";
+
         public List<int> suggest_order { get; set; } = new();
 
         public List<string> suggest_process { get; set; } = new();
@@ -22,6 +24,27 @@ namespace AMMS.Shared.DTOs.Productions.Groups
         public string? department_name { get; set; }
 
         public string? material_key { get; set; }
+
+        public string? reason { get; set; }
+
+        public List<SuggestedSplitProductionDto> auto_split_productions { get; set; } = new();
+
+        public List<GroupProductionPlanWarningDto> warnings { get; set; } = new();
+    }
+
+    public class SuggestedSplitProductionDto
+    {
+        public int order_id { get; set; }
+
+        public string? order_code { get; set; }
+
+        public int single_prod_id { get; set; }
+
+        public string department_code { get; set; } = "DEPT_3";
+
+        public string department_name { get; set; } = "Bế - Dứt - Dán";
+
+        public List<string> process_codes { get; set; } = new();
 
         public string? reason { get; set; }
     }

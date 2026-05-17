@@ -72,6 +72,13 @@ namespace AMMS.Application.Services
             return Task.FromResult(result);
         }
 
+        public async Task<ProductionDetailDto?> GetProductionDetailByProdIdAsync(
+    int prodId,
+    CancellationToken ct = default)
+        {
+            return await _repo.GetProductionDetailByProdIdAsync(prodId, ct);
+        }
+
         public async Task<PagedResultLite<ProducingOrderCardDto>> GetProducingOrdersAsync(
     int page,
     int pageSize,

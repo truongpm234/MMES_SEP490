@@ -386,7 +386,7 @@ namespace AMMS.Application.Services
                     name = $"GROUP-{segment.DepartmentCode}-{step.process_name ?? step.process_code}",
                     seq_num = seq++,
                     status = "Unassigned",
-                    machine = step.machine,
+                    machine = ResolveTaskMachineFromProcess(step),
                     process_id = step.process_id,
                     input_mode = "MANUAL",
                     reason = $"Task thuộc production ghép phòng ban {segment.DepartmentName}, nhập tay input/output khi báo cáo."
@@ -510,7 +510,7 @@ namespace AMMS.Application.Services
                         name = $"SPLIT-{step.process_name ?? step.process_code}",
                         seq_num = processSeqMap.TryGetValue(code, out var seq) ? seq : 999,
                         status = "Unassigned",
-                        machine = step.machine,
+                        machine = ResolveTaskMachineFromProcess(step),
                         process_id = step.process_id,
                         input_mode = "MANUAL",
                         reason = $"Task SPLIT theo phòng ban {segment.DepartmentName}."
@@ -525,16 +525,34 @@ namespace AMMS.Application.Services
 
         public async Task<List<SuggestedGroupProductionDto>> SuggestAsync(
     int? productTypeId,
+    string? processCodes,
     CancellationToken ct = default)
         {
-            var candidates = await GetCandidatesAsync(productTypeId, null, ct);
+            /*
+             * Suggestions phải đi theo cùng logic Create:
+             *
+             * - Dept1: RALO/CAT/IN không suggest group.
+             * - Dept2: PHU/CAN/CAN_MANG/BOI có thể GROUP nhiều order.
+             * - Dept3: BE/DUT/DAN không GROUP nhiều order,
+             *          chỉ auto SPLIT riêng từng order nếu chọn Dept2 phía trước.
+             */
+
+            var selectedCodes = GroupProductionHelper.ParseCodes(processCodes);
+
+            if (selectedCodes.Count > 0)
+                GroupProductionHelper.EnsureShareableCodes(selectedCodes);
+
+            var candidates = await GetCandidatesAsync(
+                productTypeId,
+                null,
+                ct);
 
             var orderIds = candidates
                 .Select(x => x.order_id)
                 .Distinct()
                 .ToList();
 
-            if (orderIds.Count < 2)
+            if (orderIds.Count == 0)
                 return new List<SuggestedGroupProductionDto>();
 
             var rows = await LoadGroupOrderRowsAsync(orderIds, ct);
@@ -546,50 +564,211 @@ namespace AMMS.Application.Services
                     .ToList();
             }
 
-            var suggestions = new List<SuggestedGroupProductionDto>();
+            if (rows.Count == 0)
+                return new List<SuggestedGroupProductionDto>();
 
-            var allPossibleCodes = rows
-                .SelectMany(x => x.RouteCodes)
-                .Where(x => !IsDept1(x))
+            /*
+             * Case 1:
+             * FE truyền processCodes=PHU,CAN.
+             * Khi đó suggestion phải preview đúng plan sẽ tạo:
+             * - GROUP PHU,CAN
+             * - auto SPLIT BE,DUT,DAN từng order
+             */
+            if (selectedCodes.Count > 0)
+            {
+                return BuildSuggestionPreviewFromSelectedCodes(
+                    rows,
+                    selectedCodes);
+            }
+
+            /*
+             * Case 2:
+             * FE không truyền processCodes.
+             * Backend tự suggest các group khả thi,
+             * nhưng chỉ suggest Dept2, không suggest BE/DUT/DAN như group.
+             */
+            return BuildAutoDept2Suggestions(rows);
+        }
+
+        private List<SuggestedGroupProductionDto> BuildSuggestionPreviewFromSelectedCodes(
+    List<GroupOrderRow> rows,
+    List<string> selectedCodes)
+        {
+            var normalizedSelectedCodes = selectedCodes
+                .Select(NormProcessCode)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(x => DepartmentOrder(ResolveDepartmentCode(x)))
-                .ThenBy(x => GetGlobalRouteIndex(rows, x))
+                .OrderBy(FullRouteIndex)
                 .ToList();
 
-            foreach (var processCode in allPossibleCodes)
+            if (normalizedSelectedCodes.Any(IsDept1))
             {
-                var rowsWithProcess = rows
-                    .Where(x => x.RouteCodes.Contains(processCode, StringComparer.OrdinalIgnoreCase))
+                var invalid = normalizedSelectedCodes
+                    .Where(IsDept1)
                     .ToList();
 
-                if (rowsWithProcess.Count < 2)
+                throw new InvalidOperationException(
+                    $"Không được ghép/tách các công đoạn Dept1: {string.Join(",", invalid)}");
+            }
+
+            var plan = BuildDepartmentProductionPlan(
+                rows,
+                normalizedSelectedCodes,
+                out var warnings);
+
+            var groupSegments = plan
+                .Where(x => x.IsGroup)
+                .ToList();
+
+            var splitSegments = plan
+                .Where(x =>
+                    !x.IsGroup &&
+                    string.Equals(x.DepartmentCode, "DEPT_3", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            var result = new List<SuggestedGroupProductionDto>();
+
+            foreach (var group in groupSegments)
+            {
+                var groupOrderIds = group.Members
+                    .Select(x => x.Order.order_id)
+                    .Distinct()
+                    .OrderBy(x => x)
+                    .ToList();
+
+                var autoSplits = splitSegments
+                    .Where(x =>
+                        x.Members.Count == 1 &&
+                        groupOrderIds.Contains(x.Members[0].Order.order_id))
+                    .Select(ToSplitSuggestionDto)
+                    .ToList();
+
+                result.Add(new SuggestedGroupProductionDto
+                {
+                    suggestion_type = autoSplits.Count > 0
+                        ? "GROUP_WITH_AUTO_SPLIT"
+                        : "GROUP",
+
+                    suggest_order = groupOrderIds,
+
+                    suggest_process = group.ProcessCodes
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(FullRouteIndex)
+                        .ToList(),
+
+                    department_code = group.DepartmentCode,
+                    department_name = group.DepartmentName,
+                    material_key = group.MaterialKey,
+
+                    auto_split_productions = autoSplits,
+                    warnings = warnings,
+
+                    reason = autoSplits.Count > 0
+                        ? $"Có thể tạo GROUP {string.Join(",", group.ProcessCodes)}. Hệ thống sẽ tự tách BE/DUT/DAN thành SPLIT riêng từng order."
+                        : $"Có thể tạo GROUP {string.Join(",", group.ProcessCodes)}."
+                });
+            }
+
+            /*
+             * Nếu người dùng chỉ chọn BE/DUT/DAN:
+             * Không tạo group nhiều order, chỉ preview split riêng từng order.
+             */
+            if (result.Count == 0 && splitSegments.Count > 0)
+            {
+                result.Add(new SuggestedGroupProductionDto
+                {
+                    suggestion_type = "SPLIT_ONLY",
+
+                    suggest_order = splitSegments
+                        .SelectMany(x => x.Members)
+                        .Select(x => x.Order.order_id)
+                        .Distinct()
+                        .OrderBy(x => x)
+                        .ToList(),
+
+                    suggest_process = splitSegments
+                        .SelectMany(x => x.ProcessCodes)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(FullRouteIndex)
+                        .ToList(),
+
+                    department_code = "DEPT_3",
+                    department_name = ResolveDepartmentName("DEPT_3"),
+                    material_key = null,
+
+                    auto_split_productions = splitSegments
+                        .Select(ToSplitSuggestionDto)
+                        .ToList(),
+
+                    warnings = warnings,
+
+                    reason = "BE/DUT/DAN không được GROUP nhiều order. Hệ thống chỉ tạo SPLIT riêng từng order."
+                });
+            }
+
+            return result;
+        }
+
+        private List<SuggestedGroupProductionDto> BuildAutoDept2Suggestions(
+    List<GroupOrderRow> rows)
+        {
+            var raw = new List<SuggestedGroupProductionDto>();
+
+            var possibleDept2Codes = rows
+                .SelectMany(x => x.RouteCodes)
+                .Where(IsDept2)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(x => GetGlobalRouteIndex(rows, x))
+                .ToList();
+
+            foreach (var processCode in possibleDept2Codes)
+            {
+                var membersWithProcess = rows
+                    .Where(x => x.RouteCodes.Contains(
+                        processCode,
+                        StringComparer.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (membersWithProcess.Count < 2)
                     continue;
 
                 if (RequiresSameMaterialKey(processCode))
                 {
-                    var materialGroups = rowsWithProcess
+                    var materialGroups = membersWithProcess
                         .GroupBy(x => ResolveMaterialGroupKey(processCode, x))
                         .Where(g => g.Count() >= 2)
                         .ToList();
 
                     foreach (var mg in materialGroups)
                     {
-                        suggestions.Add(new SuggestedGroupProductionDto
+                        raw.Add(new SuggestedGroupProductionDto
                         {
-                            suggest_order = mg.Select(x => x.Order.order_id).Distinct().OrderBy(x => x).ToList(),
+                            suggestion_type = "GROUP",
+
+                            suggest_order = mg
+                                .Select(x => x.Order.order_id)
+                                .Distinct()
+                                .OrderBy(x => x)
+                                .ToList(),
+
                             suggest_process = new List<string> { processCode },
+
                             department_code = ResolveDepartmentCode(processCode),
                             department_name = ResolveDepartmentName(ResolveDepartmentCode(processCode)),
+
                             material_key = mg.Key,
-                            reason = $"Các order cùng công đoạn {processCode} và cùng mã NVL/cấu hình vật tư."
+
+                            reason = $"Các order cùng công đoạn {processCode} và cùng điều kiện vật tư/material_key."
                         });
                     }
                 }
                 else
                 {
-                    suggestions.Add(new SuggestedGroupProductionDto
+                    raw.Add(new SuggestedGroupProductionDto
                     {
-                        suggest_order = rowsWithProcess
+                        suggestion_type = "GROUP",
+
+                        suggest_order = membersWithProcess
                             .Select(x => x.Order.order_id)
                             .Distinct()
                             .OrderBy(x => x)
@@ -607,7 +786,180 @@ namespace AMMS.Application.Services
                 }
             }
 
-            return MergeSuggestions(suggestions);
+            var merged = MergeDept2Suggestions(raw);
+
+            foreach (var item in merged)
+            {
+                var memberRows = rows
+                    .Where(x => item.suggest_order.Contains(x.Order.order_id))
+                    .ToList();
+
+                item.auto_split_productions = BuildAutoSplitSuggestionsForDept2(
+                    memberRows,
+                    item.suggest_process);
+
+                if (item.auto_split_productions.Count > 0)
+                {
+                    item.suggestion_type = "GROUP_WITH_AUTO_SPLIT";
+                    item.reason =
+                        $"{item.reason} Nếu tạo group này, hệ thống sẽ tự tách BE/DUT/DAN thành SPLIT riêng từng order.";
+                }
+            }
+
+            return merged
+                .Where(x => x.suggest_order.Count >= 2)
+                .ToList();
+        }
+
+        private static List<SuggestedGroupProductionDto> MergeDept2Suggestions(
+    List<SuggestedGroupProductionDto> suggestions)
+        {
+            var result = new List<SuggestedGroupProductionDto>();
+
+            foreach (var item in suggestions
+                .OrderBy(x => DepartmentOrder(x.department_code ?? ""))
+                .ThenBy(x => x.suggest_process.Count == 0
+                    ? 999
+                    : FullRouteIndex(x.suggest_process[0])))
+            {
+                var last = result.LastOrDefault();
+
+                if (last != null &&
+                    string.Equals(last.department_code, item.department_code, StringComparison.OrdinalIgnoreCase) &&
+                    SameOrderIds(last.suggest_order, item.suggest_order))
+                {
+                    last.suggest_process = last.suggest_process
+                        .Concat(item.suggest_process)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(FullRouteIndex)
+                        .ToList();
+
+                    last.material_key = CombineMaterialKeys(
+                        last.material_key,
+                        item.material_key);
+
+                    last.reason =
+                        $"Các order có thể sản xuất GROUP chung các công đoạn {string.Join(",", last.suggest_process)}.";
+
+                    continue;
+                }
+
+                result.Add(item);
+            }
+
+            return result;
+        }
+
+        private static bool SameOrderIds(
+            List<int> a,
+            List<int> b)
+        {
+            return a
+                .Distinct()
+                .OrderBy(x => x)
+                .SequenceEqual(
+                    b.Distinct().OrderBy(x => x));
+        }
+
+        private static string? CombineMaterialKeys(
+            string? a,
+            string? b)
+        {
+            var keys = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(a))
+                keys.AddRange(a.Split(" | ", StringSplitOptions.RemoveEmptyEntries));
+
+            if (!string.IsNullOrWhiteSpace(b))
+                keys.AddRange(b.Split(" | ", StringSplitOptions.RemoveEmptyEntries));
+
+            keys = keys
+                .Select(x => x.Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return keys.Count == 0
+                ? null
+                : string.Join(" | ", keys);
+        }
+
+        private List<SuggestedSplitProductionDto> BuildAutoSplitSuggestionsForDept2(
+    List<GroupOrderRow> rows,
+    List<string> selectedProcessCodes)
+        {
+            var selectedDept2Codes = selectedProcessCodes
+                .Select(NormProcessCode)
+                .Where(IsDept2)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (selectedDept2Codes.Count == 0)
+                return new List<SuggestedSplitProductionDto>();
+
+            var result = new List<SuggestedSplitProductionDto>();
+
+            foreach (var row in rows.OrderBy(x => x.Order.order_id))
+            {
+                var lastSelectedDept2Index = row.RouteCodes
+                    .Select((code, index) => new
+                    {
+                        code = NormProcessCode(code),
+                        index
+                    })
+                    .Where(x => selectedDept2Codes.Contains(
+                        x.code,
+                        StringComparer.OrdinalIgnoreCase))
+                    .Select(x => x.index)
+                    .DefaultIfEmpty(-1)
+                    .Max();
+
+                if (lastSelectedDept2Index < 0)
+                    continue;
+
+                var dept3Codes = row.RouteCodes
+                    .Skip(lastSelectedDept2Index + 1)
+                    .Where(IsDept3)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(FullRouteIndex)
+                    .ToList();
+
+                if (dept3Codes.Count == 0)
+                    continue;
+
+                result.Add(new SuggestedSplitProductionDto
+                {
+                    order_id = row.Order.order_id,
+                    order_code = row.Order.code,
+                    single_prod_id = row.SingleProd.prod_id,
+                    department_code = "DEPT_3",
+                    department_name = ResolveDepartmentName("DEPT_3"),
+                    process_codes = dept3Codes,
+                    reason = $"Sau GROUP {string.Join(",", selectedDept2Codes)}, order {row.Order.order_id} sẽ được tách riêng {string.Join(",", dept3Codes)}."
+                });
+            }
+
+            return result;
+        }
+
+        private SuggestedSplitProductionDto ToSplitSuggestionDto(
+            ProductionPlanSegment segment)
+        {
+            var row = segment.Members.First();
+
+            return new SuggestedSplitProductionDto
+            {
+                order_id = row.Order.order_id,
+                order_code = row.Order.code,
+                single_prod_id = row.SingleProd.prod_id,
+                department_code = segment.DepartmentCode,
+                department_name = segment.DepartmentName,
+                process_codes = segment.ProcessCodes
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(FullRouteIndex)
+                    .ToList(),
+                reason = $"Tạo SPLIT riêng cho order {row.Order.order_id}: {string.Join(",", segment.ProcessCodes)}."
+            };
         }
 
         public async Task<GroupProductionTaskContextDto?> GetTaskContextAsync(
@@ -1685,16 +2037,12 @@ namespace AMMS.Application.Services
             warnings = new List<GroupProductionPlanWarningDto>();
 
             var normalizedSelectedCodes = selectedCodes
-                .Select(NormProcessCode)
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(FullRouteIndex)
-                .ToList();
+     .Select(NormProcessCode)
+     .Where(x => !string.IsNullOrWhiteSpace(x))
+     .Distinct(StringComparer.OrdinalIgnoreCase)
+     .OrderBy(FullRouteIndex)
+     .ToList();
 
-            /*
-             * RALO/CAT/IN.
-             * Các công đoạn này nằm ở production SINGLE của từng order.
-             */
             var nonDept1Codes = normalizedSelectedCodes
                 .Where(x => !IsDept1(x))
                 .ToList();
@@ -1777,31 +2125,87 @@ namespace AMMS.Application.Services
             }
 
             /*
-             * 2. BE / DUT / DAN:
-             * Không tạo GROUP giữa nhiều order.
-             * Mỗi order tạo riêng, gom BE/DUT/DAN của order đó vào cùng 1 production nếu có đủ path.
-             */
-            if (privateOrderProcessCodes.Count > 0)
+ * 2. BE / DUT / DAN:
+ *
+ * Rule mới:
+ * - Nếu user chọn trực tiếp BE/DUT/DAN => vẫn tạo SPLIT riêng từng order.
+ * - Nếu user chọn bất kỳ công đoạn Dept2: PHU/CAN/CAN_MANG/BOI
+ *   => tự động tách toàn bộ Dept3 phía sau: BE/DUT/DAN sang SPLIT riêng từng order.
+ *
+ * Mục tiêu:
+ * - SINGLE gốc giữ Dept1: RALO/CAT/IN và shadow task GroupedWaiting của Dept2.
+ * - GROUP giữ Dept2 được chọn: PHU/CAN/BOI...
+ * - SPLIT giữ Dept3: BE/DUT/DAN riêng từng order.
+ */
+            var selectedDept2Codes = normalizedSelectedCodes
+                .Where(IsDept2)
+                .ToList();
+
+            var selectedDept3Codes = normalizedSelectedCodes
+                .Where(IsPrivateOrderProcess)
+                .ToList();
+
+            foreach (var row in rows.OrderBy(x => x.Order.order_id))
             {
-                foreach (var row in rows.OrderBy(x => x.Order.order_id))
+                var privateCodesForOrder = new List<string>();
+
+                /*
+                 * Case A:
+                 * User chọn trực tiếp BE/DUT/DAN.
+                 */
+                privateCodesForOrder.AddRange(
+                    selectedDept3Codes
+                        .Where(code => row.RouteCodes.Contains(code, StringComparer.OrdinalIgnoreCase)));
+
+                /*
+                 * Case B:
+                 * User chọn PHU/CAN/BOI.
+                 * Khi đã ghép/tách Dept2 thì Dept3 phía sau không được nằm chung production
+                 * với RALO/CAT/IN nữa, nên tự động tách BE/DUT/DAN.
+                 */
+                if (selectedDept2Codes.Count > 0)
                 {
-                    var privateCodesForOrder = privateOrderProcessCodes
-                        .Where(code => row.RouteCodes.Contains(code, StringComparer.OrdinalIgnoreCase))
-                        .OrderBy(FullRouteIndex)
-                        .ToList();
+                    var lastSelectedDept2Index = row.RouteCodes
+                        .Select((code, index) => new
+                        {
+                            code = NormProcessCode(code),
+                            index
+                        })
+                        .Where(x => selectedDept2Codes.Contains(
+                            x.code,
+                            StringComparer.OrdinalIgnoreCase))
+                        .Select(x => x.index)
+                        .DefaultIfEmpty(-1)
+                        .Max();
 
-                    if (privateCodesForOrder.Count == 0)
-                        continue;
-
-                    result.Add(new ProductionPlanSegment
+                    if (lastSelectedDept2Index >= 0)
                     {
-                        DepartmentCode = "DEPT_3",
-                        DepartmentName = ResolveDepartmentName("DEPT_3"),
-                        ProcessCodes = privateCodesForOrder,
-                        Members = new List<GroupOrderRow> { row },
-                        MaterialKey = $"ORDER:{row.Order.order_id}"
-                    });
+                        var dept3AfterSelectedDept2 = row.RouteCodes
+                            .Skip(lastSelectedDept2Index + 1)
+                            .Where(IsDept3)
+                            .OrderBy(FullRouteIndex)
+                            .ToList();
+
+                        privateCodesForOrder.AddRange(dept3AfterSelectedDept2);
+                    }
                 }
+
+                privateCodesForOrder = privateCodesForOrder
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(FullRouteIndex)
+                    .ToList();
+
+                if (privateCodesForOrder.Count == 0)
+                    continue;
+
+                result.Add(new ProductionPlanSegment
+                {
+                    DepartmentCode = "DEPT_3",
+                    DepartmentName = ResolveDepartmentName("DEPT_3"),
+                    ProcessCodes = privateCodesForOrder,
+                    Members = new List<GroupOrderRow> { row },
+                    MaterialKey = $"ORDER:{row.Order.order_id}:DEPT_3"
+                });
             }
 
             return MergeAdjacentSegments(result);
@@ -1872,6 +2276,16 @@ namespace AMMS.Application.Services
             return fallback.Length <= 20
                 ? fallback
                 : fallback[..20];
+        }
+
+        private static string ResolveTaskMachineFromProcess(product_type_process step)
+        {
+            var code = NormProcessCode(step.process_code);
+
+            if (!string.IsNullOrWhiteSpace(code))
+                return code;
+
+            return NormProcessCode(step.process_name);
         }
 
         private static List<ProductionPlanSegment> MergeAdjacentSegments(
