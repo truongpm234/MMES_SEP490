@@ -651,27 +651,52 @@ namespace AMMS.Application.Services
         public async Task<List<SuggestedGroupProductionDto>> SuggestAsync(
     int? productTypeId,
     string? processCodes,
+    string? orderIds,
     CancellationToken ct = default)
         {
             var selectedCodes = GroupProductionHelper.ParseCodes(processCodes);
+            var selectedOrderIds = ParseOrderIdsCsv(orderIds);
 
             if (selectedCodes.Count > 0)
                 GroupProductionHelper.EnsureShareableCodes(selectedCodes);
 
-            var candidates = await GetCandidatesAsync(
-                productTypeId,
-                null,
-                ct);
+            List<GroupOrderRow> rows;
 
-            var orderIds = candidates
-                .Select(x => x.order_id)
-                .Distinct()
-                .ToList();
+            if (selectedOrderIds.Count > 0)
+            {
+                rows = await LoadGroupOrderRowsAsync(selectedOrderIds, ct);
 
-            if (orderIds.Count == 0)
-                return new List<SuggestedGroupProductionDto>();
+                if (rows.Count != selectedOrderIds.Count)
+                {
+                    var found = rows
+                        .Select(x => x.Order.order_id)
+                        .ToHashSet();
 
-            var rows = await LoadGroupOrderRowsAsync(orderIds, ct);
+                    var missing = selectedOrderIds
+                        .Where(x => !found.Contains(x))
+                        .ToList();
+
+                    throw new InvalidOperationException(
+                        $"Không tìm thấy đủ order hoặc production đơn để gợi ý.");
+                }
+            }
+            else
+            {
+                var candidates = await GetCandidatesAsync(
+                    productTypeId,
+                    null,
+                    ct);
+
+                var candidateOrderIds = candidates
+                    .Select(x => x.order_id)
+                    .Distinct()
+                    .ToList();
+
+                if (candidateOrderIds.Count == 0)
+                    return new List<SuggestedGroupProductionDto>();
+
+                rows = await LoadGroupOrderRowsAsync(candidateOrderIds, ct);
+            }
 
             if (productTypeId.HasValue)
             {
@@ -689,6 +714,16 @@ namespace AMMS.Application.Services
 
             foreach (var s in suggestions)
             {
+                if (s.suggest_order == null || s.suggest_order.Count < 2)
+                {
+                    s.note =
+                        s.suggestion_type == "SPLIT_ONLY"
+                            ? "Đây là gợi ý riêng từng order, không phải gợi ý nhóm lênh sản xuất nên không tạo preview ghép."
+                            : "Không đủ 2 order để tạo preview ghép.";
+
+                    continue;
+                }
+
                 try
                 {
                     var preview = await PreviewAsync(new CreateGroupProductionRequest
@@ -717,7 +752,28 @@ namespace AMMS.Application.Services
                 }
             }
 
-            return suggestions;
+            return suggestions
+                .OrderByDescending(x =>
+                    x.suggestion_type == "GROUP_WITH_AUTO_SPLIT" ||
+                    x.suggestion_type == "GROUP")
+                .ThenBy(x => x.department_code)
+                .ThenBy(x => string.Join(",", x.suggest_process ?? new List<string>()))
+                .ToList();
+        }
+
+        private static List<int> ParseOrderIdsCsv(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return new List<int>();
+
+            return raw
+                .Split(new[] { ',', ';', '|', '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.Trim())
+                .Where(x => int.TryParse(x, out _))
+                .Select(int.Parse)
+                .Where(x => x > 0)
+                .Distinct()
+                .ToList();
         }
 
         private async Task SyncSingleDept1TaskTimelineAsync(
@@ -845,15 +901,11 @@ namespace AMMS.Application.Services
                     warnings = warnings,
 
                     reason = autoSplits.Count > 0
-                        ? $"Có thể tạo GROUP {string.Join(",", group.ProcessCodes)}. Hệ thống sẽ tự tách BE/DUT/DAN thành SPLIT riêng từng order."
-                        : $"Có thể tạo GROUP {string.Join(",", group.ProcessCodes)}."
+                        ? $"Có thể tạo nhóm {string.Join(",", group.ProcessCodes)}. Hệ thống sẽ tự tách BE/DUT/DAN riêng theo từng order."
+                        : $"Có thể tạo nhóm {string.Join(",", group.ProcessCodes)}."
                 });
             }
 
-            /*
-             * Nếu người dùng chỉ chọn BE/DUT/DAN:
-             * Không tạo group nhiều order, chỉ preview split riêng từng order.
-             */
             if (result.Count == 0 && splitSegments.Count > 0)
             {
                 result.Add(new SuggestedGroupProductionDto
@@ -883,7 +935,7 @@ namespace AMMS.Application.Services
 
                     warnings = warnings,
 
-                    reason = "BE/DUT/DAN không được GROUP nhiều order. Hệ thống chỉ tạo SPLIT riêng từng order."
+                    reason = "BE/DUT/DAN không được nhóm nhiều order do các công đoạn gia công cuối tùy thuộc từng yêu cầu kĩ thuật từng loại sản phẩm."
                 });
             }
 
@@ -939,7 +991,7 @@ namespace AMMS.Application.Services
 
                             material_key = mg.Key,
 
-                            reason = $"Các order cùng công đoạn {processCode} và cùng điều kiện vật tư/material_key."
+                            reason = $"Các order cùng công đoạn {processCode} và cùng điều kiện vật tư."
                         });
                     }
                 }
@@ -983,7 +1035,7 @@ namespace AMMS.Application.Services
                 {
                     item.suggestion_type = "GROUP_WITH_AUTO_SPLIT";
                     item.reason =
-                        $"{item.reason} Nếu tạo group này, hệ thống sẽ tự tách BE/DUT/DAN thành SPLIT riêng từng order.";
+                        $"{item.reason} Nếu tạo nhóm này, hệ thống sẽ tự tách BE/DUT/DAN riêng từng order.";
                 }
             }
 
@@ -1020,7 +1072,7 @@ namespace AMMS.Application.Services
                         item.material_key);
 
                     last.reason =
-                        $"Các order có thể sản xuất GROUP chung các công đoạn {string.Join(",", last.suggest_process)}.";
+                        $"Các order có thể sản xuất chung các công đoạn {string.Join(",", last.suggest_process)}.";
 
                     continue;
                 }
@@ -1139,7 +1191,7 @@ namespace AMMS.Application.Services
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(FullRouteIndex)
                     .ToList(),
-                reason = $"Tạo SPLIT riêng cho order {row.Order.order_id}: {string.Join(",", segment.ProcessCodes)}."
+                reason = $"Tạo lệnh sản xuất riêng riêng cho order {row.Order.order_id}: {string.Join(",", segment.ProcessCodes)}."
             };
         }
 
@@ -1199,32 +1251,6 @@ namespace AMMS.Application.Services
             };
         }
 
-        private static List<SuggestedGroupProductionDto> MergeSuggestions(
-            List<SuggestedGroupProductionDto> suggestions)
-        {
-            var result = new List<SuggestedGroupProductionDto>();
-
-            foreach (var item in suggestions)
-            {
-                var last = result.LastOrDefault();
-
-                if (last != null &&
-                    last.department_code == item.department_code &&
-                    string.Equals(last.material_key, item.material_key, StringComparison.OrdinalIgnoreCase) &&
-                    last.suggest_order.SequenceEqual(item.suggest_order))
-                {
-                    last.suggest_process.AddRange(item.suggest_process);
-                    continue;
-                }
-
-                result.Add(item);
-            }
-
-            return result
-                .Where(x => x.suggest_order.Count >= 2 && x.suggest_process.Count > 0)
-                .ToList();
-        }
-
         public async Task StartAsync(int groupProdId, CancellationToken ct = default)
         {
             var prod = await _db.productions
@@ -1278,7 +1304,7 @@ namespace AMMS.Application.Services
                 return null;
 
             if (!string.Equals(prod.prod_kind, "GROUP", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Production này không phải production ghép.");
+                throw new InvalidOperationException("Lệnh sản xuất này không phải lệnh sản xuất ghép.");
 
             var productTypeName = prod.product_type_id.HasValue
                 ? await _db.product_types.AsNoTracking()
@@ -1435,7 +1461,7 @@ namespace AMMS.Application.Services
                 status = prod.status,
 
                 can_start = canStart,
-                can_start_message = canStart ? "Có thể bắt đầu production." : dep.message,
+                can_start_message = canStart ? "Có thể bắt đầu lệnh sản xuất." : dep.message,
 
                 product_type_id = prod.product_type_id,
                 product_type_name = productTypeName,
@@ -1485,7 +1511,7 @@ namespace AMMS.Application.Services
             }
 
             if (rows.Any(x => !x.Order.layout_confirmed || !x.Order.is_production_ready))
-                throw new InvalidOperationException("Tất cả order phải xác nhận layout và sẵn sàng sản xuất.");
+                throw new InvalidOperationException("Tất cả order phải xác nhận file thiết kế chuẩn và sẵn sàng sản xuất.");
 
             var invalidStatusOrders = rows
                 .Where(x => !string.Equals(x.Order.status, "Scheduled", StringComparison.OrdinalIgnoreCase))
@@ -1493,7 +1519,7 @@ namespace AMMS.Application.Services
                 .ToList();
 
             if (invalidStatusOrders.Count > 0)
-                throw new InvalidOperationException($"Order không ở trạng thái Scheduled: {string.Join(",", invalidStatusOrders)}");
+                throw new InvalidOperationException($"Order không ở trạng thái Đã lập lịch.");
 
             var productTypeIds = rows
                 .Select(x => x.Item.product_type_id)
@@ -1501,7 +1527,7 @@ namespace AMMS.Application.Services
                 .ToList();
 
             if (productTypeIds.Count != 1 || productTypeIds[0] == null)
-                throw new InvalidOperationException("Các order phải cùng product_type.");
+                throw new InvalidOperationException("Các order phải cùng loại sản phẩm.");
 
             var plan = BuildDepartmentProductionPlan(
                 rows,
@@ -1879,10 +1905,6 @@ namespace AMMS.Application.Services
             if (matchedDirect != null)
                 return matchedDirect;
 
-            /*
-             * 2. Fallback: nếu không tìm thấy trong direct task,
-             * tìm qua task_links để biết công đoạn trước nằm ở GROUP production khác.
-             */
             var linkedTasks = await (
                 from tl in _db.task_links.AsNoTracking()
 
@@ -1926,10 +1948,6 @@ namespace AMMS.Application.Services
             if (matchedLinked != null)
                 return matchedLinked;
 
-            /*
-             * 3. Fallback cuối: task_qtys.
-             * Nếu đã có allocation từ GROUP thì coi như công đoạn đó đã Finished.
-             */
             var qtyRow = await _db.task_qtys
                 .AsNoTracking()
                 .Where(x => x.order_id == orderId)

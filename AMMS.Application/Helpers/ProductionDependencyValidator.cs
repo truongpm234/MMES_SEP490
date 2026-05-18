@@ -170,9 +170,7 @@ public static class ProductionDependencyValidator
                     previous_process_code = previousCode,
                     previous_task_id = previous?.task_id,
                     previous_task_status = previous?.status,
-                    message =
-                        $"Order {orderId}: công đoạn {currentProcessCode} chưa được start/finish vì công đoạn trước đó {previousCode} chưa Finished. " +
-                        $"previous_task_id={(previous?.task_id.ToString() ?? "null")}, status={(previous?.status ?? "null")}."
+                    message = $"Order {orderId}: công đoạn {currentProcessCode} chưa được bắt đầu vì công đoạn trước đó {previousCode} chưa Finished."
                 });
             }
         }

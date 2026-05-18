@@ -45,11 +45,17 @@ public class GroupProductionsController : ControllerBase
     public async Task<IActionResult> SuggestByQuery(
     [FromQuery] int? productTypeId,
     [FromQuery] string? processCodes,
+    [FromQuery] string? orderIds,
     CancellationToken ct)
     {
         try
         {
-            var result = await _service.SuggestAsync(productTypeId, processCodes, ct);
+            var result = await _service.SuggestAsync(
+                productTypeId,
+                processCodes,
+                orderIds,
+                ct);
+
             return Ok(result);
         }
         catch (InvalidOperationException ex)
