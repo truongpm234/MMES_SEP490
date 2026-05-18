@@ -58,6 +58,22 @@ public class GroupProductionsController : ControllerBase
         }
     }
 
+    [HttpPost("preview")]
+    public async Task<IActionResult> Preview(
+    [FromBody] CreateGroupProductionRequest req,
+    CancellationToken ct)
+    {
+        try
+        {
+            var result = await _service.PreviewAsync(req, ct);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost]
     public async Task<IActionResult> Create(
         [FromBody] CreateGroupProductionRequest req,

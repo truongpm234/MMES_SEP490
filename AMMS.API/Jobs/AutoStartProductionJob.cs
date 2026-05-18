@@ -27,75 +27,146 @@ namespace AMMS.API.Jobs
         {
             var now = AppTime.NowVnUnspecified();
 
-
-            var dueOrders = await (
+            /*
+             * Sửa quan trọng:
+             * Trước đây job lấy theo order_id và gọi StartProductionAndPromoteFirstTaskAsync(orderId).
+             * Bây giờ phải lấy theo prod_id và gọi StartProductionAndPromoteFirstTaskByProdIdAsync(prodId).
+             *
+             * Lý do:
+             * Một order có thể có nhiều production:
+             * - SINGLE
+             * - GROUP
+             * - SPLIT
+             *
+             * Nếu start bằng order_id thì SINGLE/SPLIT dễ bị start nhầm cùng lúc.
+             */
+            var dueProductions = await (
                 from p in _db.productions.AsNoTracking()
-                join o in _db.orders.AsNoTracking() on p.order_id equals o.order_id
-                where p.order_id != null
-                      && p.end_date == null
+
+                join o0 in _db.orders.AsNoTracking()
+                    on p.order_id equals (int?)o0.order_id into oj
+                from o in oj.DefaultIfEmpty()
+
+                where p.end_date == null
                       && p.actual_start_date == null
                       && p.planned_start_date != null
                       && p.planned_start_date <= now
                       && p.status == "Scheduled"
-                      && o.layout_confirmed == true
-                      && o.is_production_ready == true
+
+                      /*
+                       * SINGLE/SPLIT có order_id:
+                       * phải check order đã confirmed layout và ready.
+                       *
+                       * GROUP không có order_id:
+                       * không join được order trực tiếp.
+                       * Service sẽ tự check member orders trong prod_orders.
+                       */
+                      && (
+                            (
+                                p.order_id != null
+                                && o != null
+                                && o.layout_confirmed == true
+                                && o.is_production_ready == true
+                            )
+                            ||
+                            (
+                                p.order_id == null
+                                && p.prod_kind == "GROUP"
+                            )
+                         )
+
                 orderby p.planned_start_date, p.prod_id
-                select new
+
+                select new DueProductionRow
                 {
-                    OrderId = p.order_id!.Value,
                     ProdId = p.prod_id,
+                    OrderId = p.order_id,
+                    ProdKind = p.prod_kind,
+                    ProductionCode = p.code,
                     PlannedStart = p.planned_start_date,
                     ProductionStatus = p.status,
-                    OrderStatus = o.status
+                    OrderStatus = o != null ? o.status : null,
+                    LayoutConfirmed = o != null ? o.layout_confirmed : null,
+                    IsProductionReady = o != null ? o.is_production_ready : null
                 }
-            )
-            .Distinct()
-            .ToListAsync(ct);
+            ).ToListAsync(ct);
 
-            if (dueOrders.Count == 0)
+            if (dueProductions.Count == 0)
             {
                 _logger.LogInformation(
                     "[AutoStartProductionJob] No due scheduled productions at {Now}",
                     now);
+
                 return;
             }
 
             _logger.LogInformation(
                 "[AutoStartProductionJob] Found {Count} due productions to auto start at {Now}",
-                dueOrders.Count,
+                dueProductions.Count,
                 now);
 
             var successCount = 0;
+            var skippedCount = 0;
             var failCount = 0;
 
-            foreach (var item in dueOrders)
+            foreach (var item in dueProductions)
             {
                 if (ct.IsCancellationRequested)
                     break;
 
                 try
                 {
-                    var prodId = await _productionService.StartProductionAndPromoteFirstTaskAsync(item.OrderId, ct);
+                    /*
+                     * Sửa quan trọng:
+                     * Gọi start bằng ProdId, không gọi bằng OrderId nữa.
+                     */
+                    var startedProdId =
+                        await _productionService.StartProductionAndPromoteFirstTaskByProdIdAsync(
+                            item.ProdId,
+                            ct);
 
-                    if (prodId.HasValue)
+                    if (startedProdId.HasValue)
                     {
                         successCount++;
 
                         _logger.LogInformation(
-                            "[AutoStartProductionJob] Auto started production successfully. OrderId={OrderId}, ProdId={ProdId}, PlannedStart={PlannedStart}",
+                            "[AutoStartProductionJob] Auto started production successfully. ProdId={ProdId}, OrderId={OrderId}, ProdKind={ProdKind}, ProductionCode={ProductionCode}, PlannedStart={PlannedStart}",
+                            startedProdId.Value,
                             item.OrderId,
-                            prodId.Value,
+                            item.ProdKind,
+                            item.ProductionCode,
                             item.PlannedStart);
                     }
                     else
                     {
-                        failCount++;
+                        skippedCount++;
 
                         _logger.LogWarning(
-                            "[AutoStartProductionJob] StartProductionAndPromoteFirstTaskAsync returned null. OrderId={OrderId}, PlannedStart={PlannedStart}",
+                            "[AutoStartProductionJob] StartProductionAndPromoteFirstTaskByProdIdAsync returned null. ProdId={ProdId}, OrderId={OrderId}, ProdKind={ProdKind}, PlannedStart={PlannedStart}",
+                            item.ProdId,
                             item.OrderId,
+                            item.ProdKind,
                             item.PlannedStart);
                     }
+                }
+                catch (InvalidOperationException ex)
+                {
+                    /*
+                     * GROUP/SPLIT có thể tới giờ scheduled nhưng công đoạn trước chưa xong.
+                     * Trường hợp này không nên làm crash job, chỉ skip để lần sau chạy lại.
+                     */
+                    skippedCount++;
+
+                    _logger.LogWarning(
+                        ex,
+                        "[AutoStartProductionJob] Auto start skipped. ProdId={ProdId}, OrderId={OrderId}, ProdKind={ProdKind}, PlannedStart={PlannedStart}, ProductionStatus={ProductionStatus}, OrderStatus={OrderStatus}. Reason={Reason}",
+                        item.ProdId,
+                        item.OrderId,
+                        item.ProdKind,
+                        item.PlannedStart,
+                        item.ProductionStatus,
+                        item.OrderStatus,
+                        ex.Message);
                 }
                 catch (Exception ex)
                 {
@@ -103,9 +174,10 @@ namespace AMMS.API.Jobs
 
                     _logger.LogError(
                         ex,
-                        "[AutoStartProductionJob] Auto start failed. OrderId={OrderId}, ProdId={ProdId}, PlannedStart={PlannedStart}, ProductionStatus={ProductionStatus}, OrderStatus={OrderStatus}",
-                        item.OrderId,
+                        "[AutoStartProductionJob] Auto start failed. ProdId={ProdId}, OrderId={OrderId}, ProdKind={ProdKind}, PlannedStart={PlannedStart}, ProductionStatus={ProductionStatus}, OrderStatus={OrderStatus}",
                         item.ProdId,
+                        item.OrderId,
+                        item.ProdKind,
                         item.PlannedStart,
                         item.ProductionStatus,
                         item.OrderStatus);
@@ -113,9 +185,31 @@ namespace AMMS.API.Jobs
             }
 
             _logger.LogInformation(
-                "[AutoStartProductionJob] Done. Success={SuccessCount}, Failed={FailCount}",
+                "[AutoStartProductionJob] Done. Success={SuccessCount}, Skipped={SkippedCount}, Failed={FailCount}",
                 successCount,
+                skippedCount,
                 failCount);
+        }
+
+        private sealed class DueProductionRow
+        {
+            public int ProdId { get; set; }
+
+            public int? OrderId { get; set; }
+
+            public string? ProdKind { get; set; }
+
+            public string? ProductionCode { get; set; }
+
+            public DateTime? PlannedStart { get; set; }
+
+            public string? ProductionStatus { get; set; }
+
+            public string? OrderStatus { get; set; }
+
+            public bool? LayoutConfirmed { get; set; }
+
+            public bool? IsProductionReady { get; set; }
         }
     }
 }

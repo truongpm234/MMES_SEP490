@@ -242,39 +242,19 @@ namespace AMMS.Application.Services
 
                 await _logRepo.AddAsync(finishLog);
 
-                if (manualMode && isGroupTask)
-                {
-                    await ConsumeManualMaterialsOnFinishAsync(
-                        materialUsageSnapshot,
-                        t,
-                        scannedByUserId,
-                        now,
-                        innerCt);
-                }
-                else
-                {
-                    await ReturnLeftoverMaterialsFromEstimatedFlowAsync(
-                        materialUsageSnapshot,
-                        t,
-                        scannedByUserId,
-                        now,
-                        innerCt);
-                }
-
                 /*
-                 * Save trước để finishLog có log_id.
-                 * Sau đó MirrorGroupFinishToSingleTasksAsync có thể dùng groupLog.log_id
-                 * để lưu task_qtys.task_log_id.
+                 * NVL đã được reserve/trừ ở bước confirm production method.
+                 * Khi finish task, chỉ nhập lại phần dư nếu FE báo quantity_left và is_stock=true.
+                 * Không OUT kho lần nữa.
                  */
+                await ReturnLeftoverMaterialsFromEstimatedFlowAsync(
+                    materialUsageSnapshot,
+                    t,
+                    scannedByUserId,
+                    now,
+                    innerCt);
+
                 await _taskRepo.SaveChangesAsync(innerCt);
-
-                /*
-                 * Nếu task thuộc production GROUP:
-                 * - Mirror kết quả về các single_task tương ứng.
-                 * - Set single_task = Finished.
-                 * - Tạo task_log FinishedByGroup.
-                 * - Gọi TryCloseProductionIfCompletedAsync cho từng single production.
-                 */
                 await MirrorGroupFinishToSingleTasksAsync(
                     t,
                     finishLog,
@@ -551,9 +531,6 @@ namespace AMMS.Application.Services
                 var privateTask = await _db.tasks
                     .FirstOrDefaultAsync(x => x.task_id == link.single_task_id, ct);
 
-                if (privateTask == null)
-                    continue;
-
                 var allocatedOutputs = AllocateOutputsForOrder(groupOutputs, qtyForOrder);
 
                 var allocatedOutputJson = allocatedOutputs.Count == 0
@@ -564,7 +541,7 @@ namespace AMMS.Application.Services
                 {
                     task_log_id = groupLog.log_id == 0 ? null : groupLog.log_id,
                     group_task_id = groupTask.task_id,
-                    single_task_id = privateTask.task_id,
+                    single_task_id = privateTask?.task_id ?? link.single_task_id,
                     order_id = link.order_id,
                     process_code = link.process_code,
                     qty_good = qtyForOrder,
@@ -572,28 +549,30 @@ namespace AMMS.Application.Services
                     created_at = now
                 }, ct);
 
-                privateTask.status = "Finished";
-                privateTask.start_time ??= now;
-                privateTask.end_time = now;
-                privateTask.reason = $"Hoàn thành từ production ghép prod_id={groupProd.prod_id}.";
-
-                await _db.task_logs.AddAsync(new task_log
+                if (privateTask != null)
                 {
-                    task_id = privateTask.task_id,
-                    scanned_code = $"GROUP-{groupProd.prod_id}-TASK-{groupTask.task_id}",
-                    action_type = "FinishedByGroup",
-                    qty_good = qtyForOrder,
-                    log_time = now,
-                    scanned_by_user_id = scannedByUserId,
-                    reason = $"Mirror từ production ghép {groupProd.code}",
-                    material_usage_json = null,
-                    reference_input_json = null,
-                    output_json = allocatedOutputJson,
-                    report_image_url = groupLog.report_image_url
-                }, ct);
+                    privateTask.status = "Finished";
+                    privateTask.start_time ??= now;
+                    privateTask.end_time = now;
+                    privateTask.reason = $"Hoàn thành từ production ghép prod_id={groupProd.prod_id}.";
+
+                    await _db.task_logs.AddAsync(new task_log
+                    {
+                        task_id = privateTask.task_id,
+                        scanned_code = $"GROUP-{groupProd.prod_id}-TASK-{groupTask.task_id}",
+                        action_type = "FinishedByGroup",
+                        qty_good = qtyForOrder,
+                        log_time = now,
+                        scanned_by_user_id = scannedByUserId,
+                        reason = $"Mirror từ production ghép {groupProd.code}",
+                        material_usage_json = null,
+                        reference_input_json = null,
+                        output_json = allocatedOutputJson,
+                        report_image_url = groupLog.report_image_url
+                    }, ct);
+                }
 
                 link.status = "Done";
-
                 affectedSingleProdIds.Add(link.single_prod_id);
             }
 

@@ -16,10 +16,11 @@ namespace AMMS.Application.Interfaces
         Task<PagedResultLite<ProducingOrderCardDto>> GetProducingOrdersAsync(int page, int pageSize, int? roleId, CancellationToken ct = default);
         Task<ProductionDetailDto?> GetProductionDetailByOrderIdAsync(int orderId, CancellationToken ct = default);
         Task<ProductionWasteReportDto?> GetProductionWasteAsync(int prodId, CancellationToken ct = default);
-        Task<bool> StartProductionByOrderIdAsync(int orderId, CancellationToken ct = default);
         Task<bool> SetProductionDeliveryAsync(int orderId, CancellationToken ct = default);
         Task<bool> SetCompletedAsync(int orderId, CancellationToken ct = default);
-        Task<int?> StartProductionAndPromoteFirstTaskAsync(int orderId, CancellationToken ct = default);
+        Task<int?> StartProductionAndPromoteFirstTaskByProdIdAsync(
+            int prodId,
+            CancellationToken ct = default);
         Task<List<MachineScheduleBoardDto>> GetMachineScheduleBoardAsync(DateTime from, DateTime to, CancellationToken ct = default);
         Task<ProductionReadyCheckResponse?> GetProductionReadyAsync(int orderId, CancellationToken ct = default);
         Task<GenerateImportReceiveResponse?> GenerateImportReceiveAsync(int orderId, CancellationToken ct = default);

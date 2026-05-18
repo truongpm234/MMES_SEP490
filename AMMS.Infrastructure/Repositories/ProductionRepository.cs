@@ -65,6 +65,8 @@ namespace AMMS.Infrastructure.Repositories
              * - SINGLE
              * - GROUP
              * - SPLIT
+             *
+             * Sort theo prod_id desc để production mới nhất hiện đầu.
              */
             var baseRows = await (
                 from pr in _db.productions.AsNoTracking()
@@ -73,9 +75,7 @@ namespace AMMS.Infrastructure.Repositories
                     on pr.order_id equals (int?)o0.order_id into oj
                 from o in oj.DefaultIfEmpty()
 
-                orderby
-                    (pr.planned_start_date ?? pr.created_at ?? pr.actual_start_date ?? pr.end_date) descending,
-                    pr.prod_id descending
+                orderby pr.prod_id descending
 
                 select new BaseRow
                 {
@@ -83,10 +83,6 @@ namespace AMMS.Infrastructure.Repositories
 
                     order_id = o != null ? o.order_id : null,
 
-                    /*
-                     * SINGLE/SPLIT vẫn hiển thị mã order ở field code.
-                     * GROUP không có order nên dùng production code.
-                     */
                     code = o != null ? o.code : pr.code,
 
                     delivery_date = o != null ? o.delivery_date : null,
@@ -182,9 +178,6 @@ namespace AMMS.Infrastructure.Repositories
                 .Distinct()
                 .ToList();
 
-            /*
-             * Load customer cho SINGLE/SPLIT.
-             */
             var customerRows = orderIds.Count == 0
                 ? new List<CustomerRow>()
                 : await (
@@ -213,8 +206,7 @@ namespace AMMS.Infrastructure.Repositories
                 .GroupBy(x => x.order_id)
                 .ToDictionary(
                     g => g.Key,
-                    g => g.First().customer_name
-                );
+                    g => g.First().customer_name);
 
             var ordersById = orderIds.Count == 0
                 ? new Dictionary<int, order>()
@@ -223,11 +215,6 @@ namespace AMMS.Infrastructure.Repositories
                     .Where(x => orderIds.Contains(x.order_id))
                     .ToDictionaryAsync(x => x.order_id, ct);
 
-            /*
-             * Load GROUP info:
-             * - GROUP row: lấy members của chính nó.
-             * - SINGLE/SPLIT row: lấy group active liên quan qua order_id.
-             */
             var groupLinkRows = await (
                 from po in _db.prod_orders.AsNoTracking()
 
@@ -276,6 +263,33 @@ namespace AMMS.Infrastructure.Repositories
                 .Distinct()
                 .ToList();
 
+            var groupSummaries = groupProdIds.Count == 0
+                ? new List<GroupSummaryRow>()
+                : await (
+                    from po in _db.prod_orders.AsNoTracking()
+
+                    join o in _db.orders.AsNoTracking()
+                        on po.order_id equals o.order_id
+
+                    where groupProdIds.Contains(po.prod_id)
+                          && po.status == "Active"
+
+                    group new { po, o } by po.prod_id into g
+
+                    select new GroupSummaryRow
+                    {
+                        group_prod_id = g.Key,
+                        earliest_delivery_date = g.Min(x => x.o.delivery_date),
+                        total_qty = g.Sum(x => x.po.qty)
+                    }
+                ).ToListAsync(ct);
+
+            var groupSummaryByGroupProdId = groupSummaries
+                .GroupBy(x => x.group_prod_id)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.First());
+
             var allGroupMembers = groupProdIds.Count == 0
                 ? new List<ProdOrderInfoDto>()
                 : await (
@@ -308,19 +322,17 @@ namespace AMMS.Infrastructure.Repositories
                 .GroupBy(x => x.group_prod_id)
                 .ToDictionary(
                     g => g.Key,
-                    g => g.ToList()
-                );
+                    g => g.ToList());
 
             var groupLinksByOrderId = groupLinkRows
                 .GroupBy(x => x.order_id)
                 .ToDictionary(
                     g => g.Key,
-                    g => g.ToList()
-                );
+                    g => g.ToList());
 
             /*
-             * Load task_links để biết task nào trong SINGLE chỉ là shadow của GROUP.
-             * Những task này không được hiển thị trong card SINGLE nữa.
+             * Với logic mới, task ghép đã bị xóa khỏi SINGLE.
+             * Phần này vẫn giữ để tương thích dữ liệu cũ còn GroupedWaiting/task_link.
              */
             var linkedSingleTaskIds = await _db.task_links
                 .AsNoTracking()
@@ -329,15 +341,8 @@ namespace AMMS.Infrastructure.Repositories
                 .Distinct()
                 .ToListAsync(ct);
 
-            var linkedSingleTaskIdSet = linkedSingleTaskIds
-                .ToHashSet();
+            var linkedSingleTaskIdSet = linkedSingleTaskIds.ToHashSet();
 
-            /*
-             * Load tasks của tất cả production trong page:
-             * - SINGLE
-             * - GROUP
-             * - SPLIT
-             */
             var taskRows = await _db.tasks
                 .AsNoTracking()
                 .Where(t => t.prod_id != null && prodIds.Contains(t.prod_id.Value))
@@ -359,8 +364,10 @@ namespace AMMS.Infrastructure.Repositories
                 .GroupBy(x => x.ProdId)
                 .ToDictionary(
                     g => g.Key,
-                    g => g.OrderBy(x => x.SeqNum ?? int.MaxValue).ToList()
-                );
+                    g => g
+                        .OrderBy(x => x.SeqNum ?? int.MaxValue)
+                        .ThenBy(x => x.TaskId)
+                        .ToList());
 
             var productTypeIds = baseRows
                 .Select(x => x.product_type_id)
@@ -369,30 +376,31 @@ namespace AMMS.Infrastructure.Repositories
                 .Distinct()
                 .ToList();
 
-            var stepRows = await _db.product_type_processes
-                .AsNoTracking()
-                .Where(p =>
-                    productTypeIds.Contains(p.product_type_id) &&
-                    (p.is_active ?? true))
-                .Select(p => new StepRow
-                {
-                    ProductTypeId = p.product_type_id,
-                    ProcessId = p.process_id,
-                    SeqNum = p.seq_num,
-                    ProcessName = p.process_name,
-                    ProcessCode = p.process_code
-                })
-                .ToListAsync(ct);
+            var stepRows = productTypeIds.Count == 0
+                ? new List<StepRow>()
+                : await _db.product_type_processes
+                    .AsNoTracking()
+                    .Where(p =>
+                        productTypeIds.Contains(p.product_type_id) &&
+                        (p.is_active ?? true))
+                    .Select(p => new StepRow
+                    {
+                        ProductTypeId = p.product_type_id,
+                        ProcessId = p.process_id,
+                        SeqNum = p.seq_num,
+                        ProcessName = p.process_name,
+                        ProcessCode = p.process_code
+                    })
+                    .ToListAsync(ct);
 
             var stepsByProductType = stepRows
-    .GroupBy(x => x.ProductTypeId)
-    .ToDictionary(
-        g => g.Key,
-        g => g
-            .OrderBy(x => x.SeqNum ?? int.MaxValue)
-            .ThenBy(x => x.ProcessId)
-            .ToList()
-    );
+                .GroupBy(x => x.ProductTypeId)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g
+                        .OrderBy(x => x.SeqNum ?? int.MaxValue)
+                        .ThenBy(x => x.ProcessId)
+                        .ToList());
 
             var result = new List<ProducingOrderCardDto>();
 
@@ -410,9 +418,7 @@ namespace AMMS.Infrastructure.Repositories
                     "SPLIT",
                     StringComparison.OrdinalIgnoreCase);
 
-                var isSingleRow =
-                    !isGroupRow &&
-                    !isSplitRow;
+                var isSingleRow = !isGroupRow && !isSplitRow;
 
                 tasksByProd.TryGetValue(r.prod_id, out var allTasksOfProd);
                 allTasksOfProd ??= new List<TaskRow>();
@@ -427,39 +433,30 @@ namespace AMMS.Infrastructure.Repositories
                 stepsByProductType.TryGetValue(ptId, out var allStepsOfProductType);
                 allStepsOfProductType ??= new List<StepRow>();
 
-                /*
-                 * GROUP/SPLIT dùng group_process_codes của chính production.
-                 * SINGLE ban đầu dùng route order, nhưng sau đó sẽ filter tiếp bằng actual tasks
-                 * để chỉ còn phần công đoạn thật sự của production SINGLE.
-                 */
                 var routeProcessCsv =
                     isGroupRow || isSplitRow
                         ? r.group_process_codes
                         : r.first_item_production_process;
 
-                var routeSteps = ResolveFixedRoute(
-    allStepsOfProductType
-        .OrderBy(s => s.SeqNum ?? int.MaxValue)
-        .ThenBy(s => s.ProcessId)
-        .ToList(),
-    x => x.ProcessCode,
-    routeProcessCsv
-);
+                var orderedAllSteps = allStepsOfProductType
+                    .OrderBy(s => s.SeqNum ?? int.MaxValue)
+                    .ThenBy(s => s.ProcessId)
+                    .ToList();
+
+                var routeSteps = string.IsNullOrWhiteSpace(routeProcessCsv)
+                    ? orderedAllSteps
+                    : ResolveFixedRoute(
+                        orderedAllSteps,
+                        x => x.ProcessCode,
+                        routeProcessCsv);
 
                 /*
-                 * Điểm sửa quan trọng:
-                 *
-                 * SINGLE:
-                 * - Không hiển thị task đã linked vào GROUP.
-                 * - Không hiển thị task đã chuyển sang SPLIT.
-                 * - Chỉ hiển thị các step có task thật còn nằm trong production SINGLE.
-                 *
-                 * GROUP:
-                 * - Hiển thị đúng group_process_codes.
-                 *
-                 * SPLIT:
-                 * - Hiển thị đúng group_process_codes, ví dụ BE,DUT,DAN.
+                 * Nếu group_process_codes bị null/sai nhưng production vẫn có task,
+                 * fallback về allSteps rồi filter theo task thật.
                  */
+                if (routeSteps.Count == 0 && tasksForCard.Count > 0)
+                    routeSteps = orderedAllSteps;
+
                 var stepsForCard = ResolveStepsForProductionCard(
                     routeSteps,
                     tasksForCard,
@@ -489,12 +486,12 @@ namespace AMMS.Infrastructure.Repositories
                     .Select(step =>
                     {
                         var task = visibleTasks.FirstOrDefault(t =>
-       t.ProcessId.HasValue &&
-       t.ProcessId.Value == step.ProcessId)
-   ?? visibleTasks.FirstOrDefault(t =>
-       t.SeqNum.HasValue &&
-       step.SeqNum.HasValue &&
-       t.SeqNum.Value == step.SeqNum.Value);
+                                       t.ProcessId.HasValue &&
+                                       t.ProcessId.Value == step.ProcessId)
+                                   ?? visibleTasks.FirstOrDefault(t =>
+                                       t.SeqNum.HasValue &&
+                                       step.SeqNum.HasValue &&
+                                       t.SeqNum.Value == step.SeqNum.Value);
 
                         return new ProductionStageStatusDto
                         {
@@ -553,10 +550,11 @@ namespace AMMS.Infrastructure.Repositories
                 }
 
                 var stages = visibleSteps
-    .OrderBy(s => s.SeqNum)
-    .Select(s => s.ProcessName)
-    .Where(s => !string.IsNullOrWhiteSpace(s))
-    .ToList();
+                    .OrderBy(s => s.SeqNum ?? int.MaxValue)
+                    .ThenBy(s => s.ProcessId)
+                    .Select(s => s.ProcessName)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .ToList();
 
                 List<ProductionGroupInfoDto> groupInfos;
 
@@ -663,41 +661,72 @@ namespace AMMS.Infrastructure.Repositories
                     }
                 }
 
+                if (isGroupRow)
+                    customerName = "Production ghép";
+
+                groupSummaryByGroupProdId.TryGetValue(r.prod_id, out var groupSummary);
+
+                var deliveryDate = isGroupRow
+                    ? groupSummary?.earliest_delivery_date
+                    : r.delivery_date;
+
                 var quantity =
-                    isGroupRow || isSplitRow
+                    isGroupRow
                         ? r.group_total_qty > 0
                             ? r.group_total_qty
-                            : r.first_item_quantity ?? 0
-                        : r.first_item_quantity ?? 0;
+                            : groupSummary?.total_qty ?? 0
+                        : isSplitRow
+                            ? r.group_total_qty > 0
+                                ? r.group_total_qty
+                                : r.first_item_quantity ?? 0
+                            : r.first_item_quantity ?? 0;
 
-                var displayStatus =
-                    isGroupRow || isSplitRow
-                        ? r.production_status
-                        : r.order_status;
+                var productName = isGroupRow
+                    ? "Lệnh sản xuất ghép"
+                    : !string.IsNullOrWhiteSpace(r.first_item_product_name)
+                        ? r.first_item_product_name
+                        : r.production_code ?? r.code;
+
+                var displayStatus = r.production_status;
+                bool? canStart = null;
+                string? canStartMessage = null;
+
+                var isProductionReady = isGroupRow
+                    ? groupInfos
+                        .SelectMany(x => x.prod_orders)
+                        .Any() &&
+                      groupInfos
+                        .SelectMany(x => x.prod_orders)
+                        .All(x => string.Equals(x.status, "Active", StringComparison.OrdinalIgnoreCase))
+                    : ord?.is_production_ready;
 
                 result.Add(new ProducingOrderCardDto
                 {
                     prod_id = r.prod_id,
+                    production_id = r.prod_id,
 
                     order_id = r.order_id,
                     code = r.code,
 
                     customer_name = customerName,
-
-                    product_name = isGroupRow
-                        ? "Lệnh sản xuất ghép"
-                        : r.first_item_product_name,
-
+                    product_name = productName,
                     quantity = quantity,
 
-                    delivery_date = r.delivery_date,
+                    delivery_date = deliveryDate,
 
                     progress_percent = progress,
                     current_stage = currentStage,
 
                     status = displayStatus,
                     production_status = r.production_status,
+                    order_status = r.order_status,
                     stage_status = currentStageStatus,
+
+                    created_at = r.created_at,
+                    planned_start_date = r.planned_start_date,
+                    actual_start_date = r.actual_start_date,
+                    start_date = r.actual_start_date,
+                    end_date = r.end_date,
 
                     prod_kind = r.prod_kind,
                     production_code = r.production_code,
@@ -705,9 +734,7 @@ namespace AMMS.Infrastructure.Repositories
                     is_group_production = isGroupRow,
                     is_split_production = isSplitRow,
 
-                    is_production_ready = isGroupRow
-                        ? null
-                        : ord?.is_production_ready,
+                    is_production_ready = isProductionReady,
 
                     production_method = r.production_method,
                     is_full_process = r.is_full_process,
@@ -718,10 +745,6 @@ namespace AMMS.Infrastructure.Repositories
                     gm_note = r.gm_note,
                     mgr_note = r.mgr_note,
 
-                    /*
-                     * GROUP/SPLIT: trả path của chính production.
-                     * SINGLE: trả group active liên quan để FE vẫn biết order có group.
-                     */
                     group_status = isGroupRow || isSplitRow
                         ? r.production_status
                         : activeGroup?.group_status,
@@ -731,11 +754,11 @@ namespace AMMS.Infrastructure.Repositories
                         : activeGroup?.group_process_codes,
 
                     group_total_qty = isGroupRow || isSplitRow
-                        ? r.group_total_qty
+                        ? quantity
                         : activeGroup?.group_total_qty,
 
-                    can_start = null,
-                    can_start_message = null,
+                    can_start = canStart,
+                    can_start_message = canStartMessage,
 
                     stages = stages,
                     stage_statuses = stageStatuses
@@ -751,7 +774,6 @@ namespace AMMS.Infrastructure.Repositories
             };
         }
 
-
         private static List<TaskRow> ResolveTasksForProductionCard(
     List<TaskRow> allTasksOfProd,
     bool isSingleRow,
@@ -760,10 +782,6 @@ namespace AMMS.Infrastructure.Repositories
             if (allTasksOfProd == null || allTasksOfProd.Count == 0)
                 return new List<TaskRow>();
 
-            /*
-             * GROUP/SPLIT:
-             * Hiển thị tất cả task thuộc chính production đó.
-             */
             if (!isSingleRow)
             {
                 return allTasksOfProd
@@ -772,26 +790,9 @@ namespace AMMS.Infrastructure.Repositories
                     .ToList();
             }
 
-            /*
-             * SINGLE:
-             * Loại bỏ task shadow đã ghép vào GROUP.
-             * Những task này vẫn nằm trong SINGLE để mirror kết quả,
-             * nhưng không còn là công đoạn sản xuất riêng của SINGLE.
-             */
-            var ownTasks = allTasksOfProd
+            return allTasksOfProd
                 .Where(x => !linkedSingleTaskIds.Contains(x.TaskId))
                 .Where(x => !string.Equals(x.Status, "GroupedWaiting", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(x => x.SeqNum ?? int.MaxValue)
-                .ThenBy(x => x.TaskId)
-                .ToList();
-
-            /*
-             * Fallback cho production cũ chưa có task_link hoặc dữ liệu chưa chuẩn.
-             */
-            if (ownTasks.Count > 0)
-                return ownTasks;
-
-            return allTasksOfProd
                 .OrderBy(x => x.SeqNum ?? int.MaxValue)
                 .ThenBy(x => x.TaskId)
                 .ToList();
@@ -844,27 +845,6 @@ namespace AMMS.Infrastructure.Repositories
                     .ToList();
             }
 
-            /*
-             * GROUP/SPLIT:
-             * routeSteps đã được filter bằng group_process_codes rồi.
-             */
-            if (!isSingleRow)
-            {
-                return routeSteps
-                    .OrderBy(x => x.SeqNum ?? int.MaxValue)
-                    .ThenBy(x => x.ProcessId)
-                    .ToList();
-            }
-
-            /*
-             * SINGLE:
-             * Chỉ lấy các step còn có task thật trong SINGLE.
-             *
-             * Ví dụ sau khi chọn PHU,CAN:
-             * - SINGLE còn task thật: RALO,CAT,IN
-             * - PHU,CAN là shadow của GROUP => bỏ
-             * - BE,DUT,DAN đã move sang SPLIT => không còn task trong SINGLE => bỏ
-             */
             var processIds = tasksForCard
                 .Where(x => x.ProcessId.HasValue)
                 .Select(x => x.ProcessId!.Value)
@@ -888,12 +868,18 @@ namespace AMMS.Infrastructure.Repositories
                 .ThenBy(x => x.ProcessId)
                 .ToList();
 
-            return filtered.Count > 0
-                ? filtered
-                : routeSteps
-                    .OrderBy(x => x.SeqNum ?? int.MaxValue)
-                    .ThenBy(x => x.ProcessId)
-                    .ToList();
+            if (filtered.Count > 0)
+                return filtered;
+
+            /*
+             * Fallback cuối cùng:
+             * - Nếu routeSteps đã được ResolveFixedRoute đúng thì trả routeSteps.
+             * - Không trả all route khi SINGLE đã bị xóa task ghép.
+             */
+            return routeSteps
+                .OrderBy(x => x.SeqNum ?? int.MaxValue)
+                .ThenBy(x => x.ProcessId)
+                .ToList();
         }
 
         private static decimal ComputeProgressByTaskStatus(
@@ -919,6 +905,15 @@ namespace AMMS.Infrastructure.Repositories
         {
             public int order_id { get; set; }
             public string customer_name { get; set; } = "";
+        }
+
+        private sealed class GroupSummaryRow
+        {
+            public int group_prod_id { get; set; }
+
+            public DateTime? earliest_delivery_date { get; set; }
+
+            public int total_qty { get; set; }
         }
 
         public async Task<ProductionProgressResponse> GetProgressAsync(int prodId)
@@ -1973,7 +1968,10 @@ namespace AMMS.Infrastructure.Repositories
             };
         }
 
-        public async Task<int?> StartProductionByOrderIdOnlyAsync(int orderId, DateTime now, CancellationToken ct = default)
+        public async Task<int?> StartProductionByProdIdOnlyAsync(
+    int prodId,
+    DateTime now,
+    CancellationToken ct = default)
         {
             var strategy = _db.Database.CreateExecutionStrategy();
 
@@ -1982,16 +1980,24 @@ namespace AMMS.Infrastructure.Repositories
                 await using var tx = await _db.Database.BeginTransactionAsync(ct);
 
                 var prod = await _db.productions
-                    .FirstOrDefaultAsync(p => p.order_id == orderId, ct);
+                    .FirstOrDefaultAsync(p => p.prod_id == prodId, ct);
 
                 if (prod == null)
                     return (int?)null;
 
-                var bomIssues = await GetBomMissingMaterialMappingsAsync(orderId, ct);
-                if (bomIssues.Count > 0)
-                    throw new BomValidationException(bomIssues);
+                if (string.Equals(prod.status, "Completed", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(prod.status, "Delivery", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(prod.status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"Không thể bắt đầu production vì production đang ở trạng thái {prod.status}.");
+                }
 
-                await ConsumeMaterialsOnProductionStartAsync(prod, now, ct);
+                if (string.Equals(prod.status, "InProcessing", StringComparison.OrdinalIgnoreCase))
+                {
+                    await tx.CommitAsync(ct);
+                    return prod.prod_id;
+                }
 
                 prod.status = "InProcessing";
                 prod.actual_start_date ??= now;
@@ -2002,13 +2008,17 @@ namespace AMMS.Infrastructure.Repositories
                 if (prod.planned_start_date == null)
                     prod.planned_start_date = now;
 
-                if (prod.order_id.HasValue)
+                if (IsGroupProductionKind(prod.prod_kind))
                 {
-                    var order = await _db.orders
-                        .FirstOrDefaultAsync(o => o.order_id == prod.order_id.Value, ct);
-
-                    if (order != null)
-                        order.status = "InProcessing";
+                    await SyncGroupMemberOrdersToInProcessingAsync(
+                        prod.prod_id,
+                        ct);
+                }
+                else
+                {
+                    await SyncDirectProductionOrderToInProcessingAsync(
+                        prod,
+                        ct);
                 }
 
                 await _db.SaveChangesAsync(ct);
@@ -2018,10 +2028,17 @@ namespace AMMS.Infrastructure.Repositories
             });
         }
 
-        public async Task<bool> StartProductionByOrderIdAsync(int orderId, DateTime now, CancellationToken ct = default)
+        public async Task<bool> StartProductionByProdIdAsync(
+            int prodId,
+            DateTime now,
+            CancellationToken ct = default)
         {
-            var prodId = await StartProductionByOrderIdOnlyAsync(orderId, now, ct);
-            return prodId.HasValue;
+            var startedProdId = await StartProductionByProdIdOnlyAsync(
+                prodId,
+                now,
+                ct);
+
+            return startedProdId.HasValue;
         }
 
         public async Task<bool> TryCloseProductionIfCompletedAsync(
@@ -2784,82 +2801,6 @@ namespace AMMS.Infrastructure.Repositories
                 fallbackOutput,
                 BuildNextOutputRef(fallbackOutput, productionOutputQty, fallbackOutput.actual_quantity));
         }
-
-        private static string ResolveStageOutputUnit(StageQtyMode mode)
-        {
-            return mode switch
-            {
-                StageQtyMode.Plate => "bản",
-                StageQtyMode.Product => "sp",
-                _ => "tờ"
-            };
-        }
-
-        private static decimal ResolveStageEstimatedOutputQty(
-            StageQtyMode mode,
-            StageOutputRef? prevOutput,
-            int sheetsTotal,
-            int nUp,
-            int? numberOfPlates)
-        {
-            decimal cap = mode switch
-            {
-                StageQtyMode.Plate => StageQuantityHelper.GetPlateCap(numberOfPlates ?? 1),
-                StageQtyMode.Product => StageQuantityHelper.GetProductCap(sheetsTotal, nUp),
-                _ => StageQuantityHelper.GetSheetCap(sheetsTotal)
-            };
-
-            if (prevOutput == null)
-                return cap;
-
-            if (mode == StageQtyMode.Plate && IsSameUnit(prevOutput.Unit, "bản"))
-                return Math.Min(cap, prevOutput.EstimatedQuantity);
-
-            if (mode == StageQtyMode.Sheet && IsSameUnit(prevOutput.Unit, "tờ"))
-                return Math.Min(cap, prevOutput.EstimatedQuantity);
-
-            if (mode == StageQtyMode.Product && IsSameUnit(prevOutput.Unit, "sp"))
-                return Math.Min(cap, prevOutput.EstimatedQuantity);
-
-            return cap;
-        }
-
-        private static decimal? ResolveStageActualOutputQty(
-            StageQtyMode mode,
-            StageOutputRef? prevOutput,
-            int qtyGood,
-            int sheetsTotal,
-            int nUp,
-            int? numberOfPlates)
-        {
-            var actual = ProductionSHelper.ToActualQty(qtyGood);
-            if (!actual.HasValue)
-                return null;
-
-            decimal cap = mode switch
-            {
-                StageQtyMode.Plate => StageQuantityHelper.GetPlateCap(numberOfPlates ?? 1),
-                StageQtyMode.Product => StageQuantityHelper.GetProductCap(sheetsTotal, nUp),
-                _ => StageQuantityHelper.GetSheetCap(sheetsTotal)
-            };
-
-            var result = Math.Min(actual.Value, cap);
-
-            if (prevOutput == null || !prevOutput.ActualQuantity.HasValue)
-                return result;
-
-            if (mode == StageQtyMode.Plate && IsSameUnit(prevOutput.Unit, "bản"))
-                return Math.Min(result, prevOutput.ActualQuantity.Value);
-
-            if (mode == StageQtyMode.Sheet && IsSameUnit(prevOutput.Unit, "tờ"))
-                return Math.Min(result, prevOutput.ActualQuantity.Value);
-
-            if (mode == StageQtyMode.Product && IsSameUnit(prevOutput.Unit, "sp"))
-                return Math.Min(result, prevOutput.ActualQuantity.Value);
-
-            return result;
-        }
-
         private static bool IsSameUnit(string? source, string target)
         {
             return string.Equals(
@@ -3150,155 +3091,6 @@ namespace AMMS.Infrastructure.Repositories
             }
         }
 
-        private async Task ConsumeMaterialsOnProductionStartAsync(
-    production prod,
-    DateTime now,
-    CancellationToken ct = default)
-        {
-            if (!prod.order_id.HasValue || prod.order_id.Value <= 0)
-                throw new InvalidOperationException("Production has no order_id");
-
-            var orderId = prod.order_id.Value;
-            var refDoc = $"PROD-START-{prod.prod_id}";
-
-            // Chống trừ lặp nếu API start bị gọi lại
-            var alreadyConsumed = await _db.stock_moves
-                .AsNoTracking()
-                .AnyAsync(x => x.type == "OUT" && x.ref_doc == refDoc, ct);
-
-            if (alreadyConsumed)
-                return;
-
-            var bomLines = await (
-                from oi in _db.order_items.AsNoTracking()
-                join b in _db.boms.AsNoTracking() on oi.item_id equals b.order_item_id
-                where oi.order_id == orderId
-                select new
-                {
-                    oi.item_id,
-                    order_qty = oi.quantity,
-                    b.material_id,
-                    b.material_code,
-                    b.material_name,
-                    b.unit,
-                    b.qty_total,
-                    b.qty_per_product,
-                    b.wastage_percent
-                }
-            ).ToListAsync(ct);
-
-            if (bomLines.Count == 0)
-                throw new InvalidOperationException("No BOM found for this order. Cannot consume materials.");
-
-            if (bomLines.Any(x => !x.material_id.HasValue || x.material_id.Value <= 0))
-                throw new InvalidOperationException("Some BOM lines do not map to a valid material_id.");
-
-            var requiredByMaterial = bomLines
-                .GroupBy(x => x.material_id!.Value)
-                .Select(g =>
-                {
-                    decimal requiredQty = 0m;
-
-                    foreach (var line in g)
-                    {
-                        decimal lineQty;
-
-                        if (line.qty_total > 0m)
-                        {
-                            lineQty = (decimal)line.qty_total;
-                        }
-                        else
-                        {
-                            var orderQty = line.order_qty <= 0 ? 1 : line.order_qty;
-                            var qtyPerProduct = line.qty_per_product ?? 0m;
-                            var wastageFactor = 1m + ((line.wastage_percent ?? 0m) / 100m);
-
-                            lineQty = orderQty * qtyPerProduct * wastageFactor;
-                        }
-
-                        if (lineQty < 0m) lineQty = 0m;
-                        requiredQty += lineQty;
-                    }
-
-                    var first = g.First();
-
-                    return new
-                    {
-                        MaterialId = g.Key,
-                        MaterialCode = first.material_code,
-                        MaterialName = first.material_name,
-                        Unit = first.unit,
-                        RequiredQty = Math.Round(requiredQty, 4)
-                    };
-                })
-                .ToList();
-
-            var materialIds = requiredByMaterial
-                .Select(x => x.MaterialId)
-                .Distinct()
-                .ToList();
-
-            var materials = await _db.materials
-                .Where(x => materialIds.Contains(x.material_id))
-                .ToDictionaryAsync(x => x.material_id, ct);
-
-            foreach (var req in requiredByMaterial)
-            {
-                if (!materials.TryGetValue(req.MaterialId, out var mat))
-                    throw new InvalidOperationException(
-                        $"Material not found. material_id={req.MaterialId}, code={req.MaterialCode}");
-
-                var stockQty = mat.stock_qty ?? 0m;
-
-                if (stockQty < req.RequiredQty)
-                {
-                    throw new InvalidOperationException(
-                        $"Insufficient stock for material '{mat.name}' ({mat.code}). " +
-                        $"Available={stockQty}, Required={req.RequiredQty}");
-                }
-            }
-
-            foreach (var req in requiredByMaterial)
-            {
-                var mat = materials[req.MaterialId];
-                mat.stock_qty = (mat.stock_qty ?? 0m) - req.RequiredQty;
-
-                await _db.stock_moves.AddAsync(new stock_move
-                {
-                    material_id = req.MaterialId,
-                    type = "OUT",
-                    qty = req.RequiredQty,
-                    ref_doc = refDoc,
-                    user_id = prod.manager_id,
-                    move_date = now,
-                    note = $"Consume material when production starts. prod_id={prod.prod_id}, order_id={orderId}"
-                }, ct);
-            }
-        }
-
-        private async Task<List<BomMissingMaterialItem>> GetBomMissingMaterialMappingsAsync(
-    int orderId,
-    CancellationToken ct = default)
-        {
-            return await (
-                from oi in _db.order_items.AsNoTracking()
-                join b in _db.boms.AsNoTracking() on oi.item_id equals b.order_item_id
-                where oi.order_id == orderId
-                      && (!b.material_id.HasValue || b.material_id.Value <= 0)
-                orderby oi.item_id, b.bom_id
-                select new BomMissingMaterialItem
-                {
-                    bom_id = b.bom_id,
-                    order_item_id = oi.item_id,
-                    source_estimate_id = b.source_estimate_id,
-                    material_code = b.material_code,
-                    material_name = b.material_name,
-                    unit = b.unit,
-                    qty_total = b.qty_total ?? 0m
-                }
-            ).ToListAsync(ct);
-        }
-
         public async Task<production?> GetLatestByOrderIdAsync(int orderId, CancellationToken ct = default)
         {
             return await _db.productions
@@ -3383,10 +3175,13 @@ namespace AMMS.Infrastructure.Repositories
                 if (method is not ("NVL" or "SUB" or "BOTH"))
                     throw new InvalidOperationException("production_method must be NVL | SUB | BOTH.");
 
-                // Nếu production trước đó đang dùng bán thành phẩm, thì hoàn lại số lượng đã trừ trước khi đổi phương thức.
-                if (prod.is_full_process == false
-                    && prod.sub_product_id.HasValue
-                    && prod.sub_product_used_qty > 0)
+                /*
+                 * Rollback lựa chọn bán thành phẩm cũ nếu production trước đó đã dùng SUB/BOTH.
+                 * Lưu ý: BOTH có is_full_process = null, nên không được check riêng is_full_process == false.
+                 */
+                if (prod.sub_product_id.HasValue &&
+                    prod.sub_product_id.Value > 0 &&
+                    prod.sub_product_used_qty > 0)
                 {
                     var oldSubProduct = await _db.sub_products
                         .FirstOrDefaultAsync(x => x.id == prod.sub_product_id.Value, ct);
@@ -3400,24 +3195,32 @@ namespace AMMS.Infrastructure.Repositories
                     prod.sub_product_used_qty = 0;
                 }
 
+                /*
+                 * Nếu trước đó SUB đã auto finished một số task bằng bán thành phẩm,
+                 * cần rollback trước rồi nếu manager vẫn chọn SUB thì apply lại.
+                 */
+                await RollbackSubProductFinishedTasksAsync(prod.prod_id, ct);
+
+                prod.mgr_note = string.IsNullOrWhiteSpace(req.mgr_note)
+                    ? null
+                    : req.mgr_note.Trim();
+
+                prod.gm_proposed_method = null;
+
+                order.is_production_ready = true;
+                order.is_enough = true;
+
+                SetProductionMethodResponse response;
+
                 if (method == "NVL")
                 {
-                    await RollbackSubProductFinishedTasksAsync(prod.prod_id, ct);
-
                     prod.prod_method = "NVL";
                     prod.is_full_process = true;
                     prod.sub_product_id = null;
                     prod.sub_product_used_qty = 0;
                     prod.nvl_qty = orderQty;
-                    prod.mgr_note = string.IsNullOrWhiteSpace(req.mgr_note) ? null : req.mgr_note.Trim();
 
-                    order.is_production_ready = true;
-                    order.is_enough = true;
-
-                    await _db.SaveChangesAsync(ct);
-                    await tx.CommitAsync(ct);
-
-                    return new SetProductionMethodResponse
+                    response = new SetProductionMethodResponse
                     {
                         success = true,
                         order_id = order.order_id,
@@ -3433,8 +3236,7 @@ namespace AMMS.Infrastructure.Repositories
                         message = "Đã duyệt sản xuất bằng NVL."
                     };
                 }
-
-                if (method == "SUB")
+                else if (method == "SUB")
                 {
                     if (!req.sub_id.HasValue || req.sub_id.Value <= 0)
                         throw new InvalidOperationException("Vui lòng truyền sub_id khi chọn SUB.");
@@ -3454,10 +3256,6 @@ namespace AMMS.Infrastructure.Repositories
                     prod.sub_product_id = selectedSubProduct.id;
                     prod.sub_product_used_qty = orderQty;
                     prod.nvl_qty = 0;
-                    prod.mgr_note = string.IsNullOrWhiteSpace(req.mgr_note) ? null : req.mgr_note.Trim();
-
-                    order.is_production_ready = true;
-                    order.is_enough = true;
 
                     await ApplySubProductToExistingTasksAsync(
                         prod,
@@ -3465,10 +3263,7 @@ namespace AMMS.Infrastructure.Repositories
                         orderQty,
                         ct);
 
-                    await _db.SaveChangesAsync(ct);
-                    await tx.CommitAsync(ct);
-
-                    return new SetProductionMethodResponse
+                    response = new SetProductionMethodResponse
                     {
                         success = true,
                         order_id = order.order_id,
@@ -3484,65 +3279,654 @@ namespace AMMS.Infrastructure.Repositories
                         message = "Đã duyệt sản xuất bằng bán thành phẩm."
                     };
                 }
+                else if (method == "BOTH")
+                {
+                    if (!req.sub_id.HasValue || req.sub_id.Value <= 0)
+                        throw new InvalidOperationException("Vui lòng truyền sub_id khi chọn BOTH.");
 
-            if (method == "BOTH")
-            {
-                if (!req.sub_id.HasValue || req.sub_id.Value <= 0)
-                    throw new InvalidOperationException("Vui lòng truyền sub_id khi chọn BOTH.");
+                    var selectedSubProduct = await ResolveValidSubProductAsync(
+                        req.sub_id.Value,
+                        prod,
+                        orderReq,
+                        orderQty,
+                        requireEnoughQty: false,
+                        ct);
 
-                var selectedSubProduct = await ResolveValidSubProductAsync(
-                    req.sub_id.Value,
-                    prod,
+                    if (selectedSubProduct.quantity <= 0)
+                        throw new InvalidOperationException("Bán thành phẩm không có số lượng để kết hợp.");
+
+                    var subUseQty = Math.Min(selectedSubProduct.quantity, orderQty);
+                    var nvlQty = orderQty - subUseQty;
+
+                    if (subUseQty <= 0)
+                        throw new InvalidOperationException("Không có số lượng bán thành phẩm hợp lệ để dùng BOTH.");
+
+                    if (nvlQty <= 0)
+                        throw new InvalidOperationException("Số lượng bán thành phẩm đã đủ. Vui lòng chọn SUB thay vì BOTH.");
+
+                    selectedSubProduct.quantity -= subUseQty;
+
+                    prod.prod_method = "BOTH";
+                    prod.is_full_process = null;
+                    prod.sub_product_id = selectedSubProduct.id;
+                    prod.sub_product_used_qty = subUseQty;
+                    prod.nvl_qty = nvlQty;
+
+                    response = new SetProductionMethodResponse
+                    {
+                        success = true,
+                        order_id = order.order_id,
+                        prod_id = prod.prod_id,
+                        is_full_process = null,
+                        production_method = "BOTH",
+                        sub_product_id = selectedSubProduct.id,
+                        sub_product_used_qty = subUseQty,
+                        nvl_qty = nvlQty,
+                        order_quantity = orderQty,
+                        gm_note = prod.gm_note,
+                        mgr_note = prod.mgr_note,
+                        message = $"Đã duyệt sản xuất kết hợp. Dùng {subUseQty} bán thành phẩm, sản xuất thêm {nvlQty} bằng NVL."
+                    };
+                }
+                else
+                {
+                    throw new InvalidOperationException("Unsupported production method.");
+                }
+
+                /*
+                 * A4:
+                 * Reserve/trừ NVL ngay tại bước manager confirm method.
+                 *
+                 * NVL  => reserve/trừ toàn bộ NVL.
+                 * SUB  => không trừ NVL, chỉ trừ sub_product ở trên.
+                 * BOTH => trừ sub_product ở trên, reserve/trừ NVL cho phần còn thiếu.
+                 *
+                 * Phải nằm trong transaction này để nếu thiếu NVL thì rollback luôn cả confirm method.
+                 */
+                var confirmedEstimate = await LoadAcceptedEstimateOrThrowAsync(
                     orderReq,
-                    orderQty,
-                    requireEnoughQty: false,
                     ct);
 
-                if (selectedSubProduct.quantity <= 0)
-                    throw new InvalidOperationException("Bán thành phẩm không có số lượng để kết hợp.");
+                await ReserveMaterialsForConfirmedProductionMethodAsync(
+                    prod,
+                    orderReq,
+                    confirmedEstimate,
+                    prod.prod_method!,
+                    orderQty,
+                    ct);
 
-                var subUseQty = Math.Min(selectedSubProduct.quantity, orderQty);
-                var nvlQty = orderQty - subUseQty;
-
-                if (nvlQty <= 0)
-                    throw new InvalidOperationException("Số lượng bán thành phẩm đã đủ. Vui lòng chọn SUB thay vì BOTH.");
-
-                selectedSubProduct.quantity -= subUseQty;
-
-                prod.prod_method = "BOTH";
-                prod.is_full_process = null;
-                prod.sub_product_id = selectedSubProduct.id;
-                prod.sub_product_used_qty = subUseQty;
-                prod.nvl_qty = nvlQty;
-                prod.mgr_note = string.IsNullOrWhiteSpace(req.mgr_note) ? null : req.mgr_note.Trim();
-
-                order.is_production_ready = true;
-                order.is_enough = true;
-
-                // Task sản xuất phần thiếu nvl_qty.
                 await _db.SaveChangesAsync(ct);
                 await tx.CommitAsync(ct);
 
-                return new SetProductionMethodResponse
-                {
-                    success = true,
-                    order_id = order.order_id,
-                    prod_id = prod.prod_id,
-                    is_full_process = null,
-                    production_method = "BOTH",
-                    sub_product_id = selectedSubProduct.id,
-                    sub_product_used_qty = subUseQty,
-                    nvl_qty = nvlQty,
-                    order_quantity = orderQty,
-                    gm_note = prod.gm_note,
-                    mgr_note = prod.mgr_note,
-                    message = $"Đã duyệt sản xuất kết hợp. Dùng {subUseQty} bán thành phẩm, sản xuất thêm {nvlQty} bằng NVL."
-                };
-            }
-                throw new InvalidOperationException("Unsupported production method.");
+                return response;
             });
         }
 
+        private sealed class ReserveBomItem
+        {
+            public int MaterialId { get; init; }
+
+            public string? MaterialCode { get; init; }
+
+            public string? MaterialName { get; init; }
+
+            public string? MaterialType { get; init; }
+
+            public string? Unit { get; init; }
+
+            public string ProcessCode { get; init; } = "";
+
+            public decimal RequiredQty { get; init; }
+        }
+
+        
+        private static bool IsPlateReserveMaterial(string? materialCode, string? materialName)
+        {
+            var code = NormalizeReserveMaterialCode(materialCode);
+            var name = NormalizeReserveMaterialCode(materialName);
+
+            return code == "PLATE" || name == "PLATE";
+        }
+
+        private async Task ReleasePreviousProductionMaterialReserveAsync(
+            int prodId,
+            CancellationToken ct)
+        {
+            var reserveRefDoc = $"PROD-RESERVE-{prodId}";
+            var releaseRefDoc = $"PROD-RESERVE-RELEASE-{prodId}";
+
+            var moves = await _db.stock_moves
+                .Where(x =>
+                    x.ref_doc == reserveRefDoc ||
+                    x.ref_doc == releaseRefDoc)
+                .ToListAsync(ct);
+
+            if (moves.Count == 0)
+                return;
+
+            var netByMaterial = moves
+                .GroupBy(x => x.material_id)
+                .Select(g => new
+                {
+                    material_id = g.Key,
+                    reserved_qty = g
+                        .Where(x => x.type == "OUT" && x.ref_doc == reserveRefDoc)
+                        .Sum(x => x.qty),
+                    released_qty = g
+                        .Where(x => x.type == "IN" && x.ref_doc == releaseRefDoc)
+                        .Sum(x => x.qty)
+                })
+                .Select(x => new
+                {
+                    x.material_id,
+                    net_qty = x.reserved_qty - x.released_qty
+                })
+                .Where(x => x.net_qty > 0)
+                .ToList();
+
+            if (netByMaterial.Count == 0)
+                return;
+
+            var materialIds = netByMaterial
+                .Select(x => x.material_id)
+                .Distinct()
+                .ToList();
+
+            var materials = await _db.materials
+                .Where(x => materialIds.Contains(x.material_id))
+                .ToDictionaryAsync(x => x.material_id, ct);
+
+            var now = AppTime.NowVnUnspecified();
+
+            foreach (var item in netByMaterial)
+            {
+                if (!materials.TryGetValue((int)item.material_id, out var mat))
+                    continue;
+
+                mat.stock_qty = (mat.stock_qty ?? 0m) + item.net_qty;
+
+                await _db.stock_moves.AddAsync(new stock_move
+                {
+                    material_id = item.material_id,
+                    type = "IN",
+                    qty = item.net_qty,
+                    ref_doc = releaseRefDoc,
+                    user_id = null,
+                    move_date = now,
+                    note = $"Rollback reserve NVL cho production {prodId} trước khi xác nhận lại method."
+                }, ct);
+            }
+        }
+
+        private static string NormReserveText(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return "";
+
+            var s = raw.Trim().ToUpperInvariant();
+
+            s = s.Replace("Đ", "D");
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"[^A-Z0-9]+", "_");
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"_+", "_").Trim('_');
+
+            return s;
+        }
+
+        private static string NormalizeReserveMaterialCode(string? raw)
+        {
+            var s = NormReserveText(raw);
+
+            return s switch
+            {
+                "KEM_THO" => "PLATE",
+                "BAN_KEM_THO" => "PLATE",
+                "BAN_KEM" => "PLATE",
+                "BAN_KEM_IN" => "PLATE",
+                "PLATE_INPUT" => "PLATE",
+
+                "MUC" => "INK",
+                "MUC_IN" => "INK",
+                "MUC_TONG_HOP" => "INK",
+                "INK_TYPES" => "INK",
+
+                "KEO_NUOC" => "KEO_PHU_NUOC",
+                "KEO_PHU_NUOC" => "KEO_PHU_NUOC",
+                "KEO_DAU" => "KEO_PHU_DAU",
+                "KEO_PHU_DAU" => "KEO_PHU_DAU",
+                "UV" => "KEO_PHU_UV",
+                "KEO_UV" => "KEO_PHU_UV",
+                "PHU_UV" => "KEO_PHU_UV",
+                "KEO_PHU_UV" => "KEO_PHU_UV",
+
+                "MANG_12_MIC" => "MANG_12MIC",
+
+                "MOUNTING_GLUE" => "KEO_BOI",
+                "KEO_BOI" => "KEO_BOI",
+
+                _ => s
+            };
+        }
+
+        private static HashSet<string> ParseReserveProcessCodes(string? csv)
+        {
+            if (string.IsNullOrWhiteSpace(csv))
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            return csv
+                .Split(new[] { ',', ';', '|', '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.Trim().ToUpperInvariant().Replace(" ", "_").Replace("-", "_"))
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static bool IsPlateReserveMaterial(
+            string? materialCode,
+            string? materialName,
+            string? materialType)
+        {
+            var code = NormalizeReserveMaterialCode(materialCode);
+            var name = NormalizeReserveMaterialCode(materialName);
+            var type = NormReserveText(materialType);
+
+            return code == "PLATE" ||
+                   name == "PLATE" ||
+                   type == "KEM";
+        }
+
+        private static string ResolveMaterialProcessCodeForReserve(
+            string? materialCode,
+            string? materialName,
+            string? materialType)
+        {
+            var code = NormalizeReserveMaterialCode(materialCode);
+            var name = NormalizeReserveMaterialCode(materialName);
+            var type = NormReserveText(materialType);
+
+            /*
+             * Database hiện có:
+             * - PLATE / type Kẽm
+             * - GIAY_* / type Giấy
+             * - INK, MUC_* / type Mực
+             * - KEO_PHU_* / type Keo phủ
+             * - MANG_* / type Màng
+             * - SONG_* / type Sóng
+             * - KEO_BOI / type Keo bồi
+             * - KEO_DAN / type Keo dán
+             */
+
+            if (code == "PLATE" || type == "KEM")
+                return "RALO";
+
+            if (code.StartsWith("GIAY_") || type == "GIAY")
+                return "CAT";
+
+            if (code == "INK" || code.StartsWith("MUC_") || type == "MUC")
+                return "IN";
+
+            if (code.StartsWith("KEO_PHU_") || type == "KEO_PHU")
+                return "PHU";
+
+            if (code.StartsWith("MANG_") || type == "MANG")
+                return "CAN";
+
+            if (code.StartsWith("SONG_") || type == "SONG")
+                return "BOI";
+
+            if (code == "KEO_BOI" || type == "KEO_BOI")
+                return "BOI";
+
+            if (code == "KEO_DAN" || type == "KEO_DAN")
+                return "DAN";
+
+            /*
+             * Fallback theo tên nếu type/code không chuẩn.
+             */
+            if (name.Contains("GIAY"))
+                return "CAT";
+
+            if (name.Contains("MUC"))
+                return "IN";
+
+            if (name.Contains("MANG"))
+                return "CAN";
+
+            if (name.Contains("SONG") || name.Contains("BOI"))
+                return "BOI";
+
+            if (name.Contains("DAN"))
+                return "DAN";
+
+            return "";
+        }
+
+        private static bool ShouldScaleBomLineForBoth(
+            string materialProcessCode,
+            string? materialCode,
+            string? materialName,
+            string? materialType,
+            HashSet<string> subProcessCodes)
+        {
+            if (string.IsNullOrWhiteSpace(materialProcessCode))
+                return false;
+
+            /*
+             * Kẽm không scale theo số lượng sản phẩm.
+             * Dù BOTH chỉ sản xuất thêm một phần, số bản kẽm vẫn theo thiết kế/số màu.
+             */
+            if (IsPlateReserveMaterial(materialCode, materialName, materialType))
+                return false;
+
+            /*
+             * Chỉ scale NVL nếu NVL đó thuộc công đoạn đã được bán thành phẩm cover.
+             *
+             * Ví dụ:
+             * sub_product_process = RALO,CAT,IN
+             * => giấy/mực scale theo nvl_qty/orderQty.
+             * => keo phủ, màng, sóng, keo bồi không scale vì vẫn chạy cho toàn bộ sản lượng.
+             */
+            return subProcessCodes.Contains(materialProcessCode);
+        }
+
+        private async Task<List<ReserveBomItem>> BuildReserveBomItemsAsync(
+    production prod,
+    string method,
+    int orderQty,
+    CancellationToken ct)
+        {
+            if (!prod.order_id.HasValue || prod.order_id.Value <= 0)
+                throw new InvalidOperationException("Production chưa có order_id.");
+
+            var orderId = prod.order_id.Value;
+            var normalizedMethod = (method ?? "").Trim().ToUpperInvariant();
+
+            if (normalizedMethod == "SUB")
+                return new List<ReserveBomItem>();
+
+            if (orderQty <= 0)
+                throw new InvalidOperationException("Số lượng đơn hàng không hợp lệ khi reserve NVL.");
+
+            decimal nvlRatio = 1m;
+            HashSet<string> subProcessCodes = new(StringComparer.OrdinalIgnoreCase);
+
+            if (normalizedMethod == "BOTH")
+            {
+                if (prod.nvl_qty <= 0)
+                    throw new InvalidOperationException("nvl_qty không hợp lệ khi reserve NVL cho BOTH.");
+
+                nvlRatio = Math.Clamp(prod.nvl_qty / (decimal)orderQty, 0m, 1m);
+
+                if (nvlRatio <= 0m)
+                    return new List<ReserveBomItem>();
+
+                if (prod.sub_product_id.HasValue && prod.sub_product_id.Value > 0)
+                {
+                    var subProcessCsv = await _db.sub_products
+                        .AsNoTracking()
+                        .Where(x => x.id == prod.sub_product_id.Value)
+                        .Select(x => x.product_process)
+                        .FirstOrDefaultAsync(ct);
+
+                    subProcessCodes = ParseReserveProcessCodes(subProcessCsv);
+                }
+
+                if (subProcessCodes.Count == 0)
+                {
+                    throw new InvalidOperationException(
+                        "Không xác định được product_process của bán thành phẩm để reserve NVL cho BOTH.");
+                }
+            }
+
+            var bomLines = await (
+                from oi in _db.order_items.AsNoTracking()
+
+                join b in _db.boms.AsNoTracking()
+                    on oi.item_id equals b.order_item_id
+
+                join m0 in _db.materials.AsNoTracking()
+                    on b.material_id equals (int?)m0.material_id into mj
+                from m in mj.DefaultIfEmpty()
+
+                where oi.order_id == orderId
+
+                select new
+                {
+                    oi.item_id,
+                    order_qty = oi.quantity,
+
+                    b.material_id,
+                    b.material_code,
+                    b.material_name,
+                    b.unit,
+                    b.qty_total,
+                    b.qty_per_product,
+                    b.wastage_percent,
+
+                    resolved_material_id = m != null ? (int?)m.material_id : null,
+                    resolved_material_code = m != null ? m.code : null,
+                    resolved_material_name = m != null ? m.name : null,
+                    resolved_material_type = m != null ? m.type : null,
+                    resolved_material_unit = m != null ? m.unit : null
+                }
+            ).ToListAsync(ct);
+
+            if (bomLines.Count == 0)
+                throw new InvalidOperationException("No BOM found for this order. Cannot reserve materials.");
+
+            var invalidBomLines = bomLines
+                .Where(x =>
+                    !x.material_id.HasValue ||
+                    x.material_id.Value <= 0 ||
+                    !x.resolved_material_id.HasValue)
+                .ToList();
+
+            if (invalidBomLines.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    "Một số BOM line chưa map đúng material_id trong bảng materials. " +
+                    $"item_ids={string.Join(",", invalidBomLines.Select(x => x.item_id).Distinct())}");
+            }
+
+            var result = new List<ReserveBomItem>();
+
+            foreach (var line in bomLines)
+            {
+                var materialCode = line.resolved_material_code ?? line.material_code;
+                var materialName = line.resolved_material_name ?? line.material_name;
+                var materialType = line.resolved_material_type;
+                var materialUnit = line.resolved_material_unit ?? line.unit;
+
+                var processCode = ResolveMaterialProcessCodeForReserve(
+                    materialCode,
+                    materialName,
+                    materialType);
+
+                decimal lineQty;
+
+                if (line.qty_total > 0m)
+                {
+                    lineQty = (decimal)line.qty_total;
+                }
+                else
+                {
+                    var lineOrderQty = line.order_qty <= 0 ? 1 : line.order_qty;
+                    var qtyPerProduct = line.qty_per_product ?? 0m;
+                    var wastageFactor = 1m + ((line.wastage_percent ?? 0m) / 100m);
+
+                    lineQty = lineOrderQty * qtyPerProduct * wastageFactor;
+                }
+
+                if (lineQty <= 0m)
+                    continue;
+
+                if (normalizedMethod == "BOTH" &&
+                    ShouldScaleBomLineForBoth(
+                        processCode,
+                        materialCode,
+                        materialName,
+                        materialType,
+                        subProcessCodes))
+                {
+                    lineQty *= nvlRatio;
+                }
+
+                result.Add(new ReserveBomItem
+                {
+                    MaterialId = line.material_id!.Value,
+                    MaterialCode = materialCode,
+                    MaterialName = materialName,
+                    MaterialType = materialType,
+                    Unit = materialUnit,
+                    ProcessCode = processCode,
+                    RequiredQty = Math.Round(lineQty, 4)
+                });
+            }
+
+            return result
+                .GroupBy(x => x.MaterialId)
+                .Select(g =>
+                {
+                    var first = g.First();
+
+                    return new ReserveBomItem
+                    {
+                        MaterialId = g.Key,
+                        MaterialCode = first.MaterialCode,
+                        MaterialName = first.MaterialName,
+                        MaterialType = first.MaterialType,
+                        Unit = first.Unit,
+                        ProcessCode = string.Join(
+                            ",",
+                            g.Select(x => x.ProcessCode)
+                                .Where(x => !string.IsNullOrWhiteSpace(x))
+                                .Distinct(StringComparer.OrdinalIgnoreCase)),
+                        RequiredQty = Math.Round(g.Sum(x => x.RequiredQty), 4)
+                    };
+                })
+                .Where(x => x.RequiredQty > 0)
+                .ToList();
+        }
+
+        private async Task ReserveMaterialsForConfirmedProductionMethodAsync(
+            production prod,
+            order_request orderReq,
+            cost_estimate confirmedEstimate,
+            string method,
+            int orderQty,
+            CancellationToken ct)
+        {
+            if (prod.prod_id <= 0)
+                throw new InvalidOperationException("Production chưa có prod_id.");
+
+            if (!prod.order_id.HasValue || prod.order_id.Value <= 0)
+                throw new InvalidOperationException("Production chưa có order_id.");
+
+            var normalizedMethod = (method ?? "").Trim().ToUpperInvariant();
+
+            if (normalizedMethod is not ("NVL" or "SUB" or "BOTH"))
+                throw new InvalidOperationException($"Method sản xuất không hợp lệ: {method}");
+
+            /*
+             * Chống reserve trùng hoặc đổi method.
+             * Nếu production trước đó đã reserve NVL thì hoàn lại phần net đang giữ.
+             */
+            await ReleasePreviousProductionMaterialReserveAsync(
+                prod.prod_id,
+                ct);
+
+            /*
+             * SUB chỉ dùng bán thành phẩm, không reserve NVL.
+             */
+            if (normalizedMethod == "SUB")
+                return;
+
+            var reserveItems = await BuildReserveBomItemsAsync(
+                prod,
+                normalizedMethod,
+                orderQty,
+                ct);
+
+            if (reserveItems.Count == 0)
+                return;
+
+            var materialIds = reserveItems
+                .Select(x => x.MaterialId)
+                .Distinct()
+                .ToList();
+
+            var materials = await _db.materials
+                .Where(x => materialIds.Contains(x.material_id))
+                .ToDictionaryAsync(x => x.material_id, ct);
+
+            foreach (var item in reserveItems)
+            {
+                if (!materials.TryGetValue(item.MaterialId, out var mat))
+                {
+                    throw new InvalidOperationException(
+                        $"Material not found. material_id={item.MaterialId}, code={item.MaterialCode}");
+                }
+
+                var stockQty = mat.stock_qty ?? 0m;
+
+                if (stockQty < item.RequiredQty)
+                {
+                    throw new InvalidOperationException(
+                        $"Không đủ tồn kho NVL '{mat.name}' ({mat.code}). " +
+                        $"Tồn={stockQty}, cần reserve={item.RequiredQty} {mat.unit}.");
+                }
+            }
+
+            var now = AppTime.NowVnUnspecified();
+            var refDoc = $"PROD-RESERVE-{prod.prod_id}";
+
+            foreach (var item in reserveItems)
+            {
+                var mat = materials[item.MaterialId];
+
+                mat.stock_qty = (mat.stock_qty ?? 0m) - item.RequiredQty;
+
+                await _db.stock_moves.AddAsync(new stock_move
+                {
+                    material_id = item.MaterialId,
+                    type = "OUT",
+                    qty = item.RequiredQty,
+                    ref_doc = refDoc,
+                    user_id = prod.manager_id,
+                    move_date = now,
+                    note =
+                        $"Reserve NVL khi confirm method {normalizedMethod}. " +
+                        $"prod_id={prod.prod_id}, order_id={prod.order_id}, " +
+                        $"estimate_id={confirmedEstimate.estimate_id}"
+                }, ct);
+            }
+        }
+
+        private async Task<cost_estimate> LoadAcceptedEstimateOrThrowAsync(
+    order_request orderReq,
+    CancellationToken ct)
+        {
+            cost_estimate? estimate = null;
+
+            if (orderReq.accepted_estimate_id.HasValue &&
+                orderReq.accepted_estimate_id.Value > 0)
+            {
+                estimate = await _db.cost_estimates
+                    .FirstOrDefaultAsync(x =>
+                        x.estimate_id == orderReq.accepted_estimate_id.Value &&
+                        x.order_request_id == orderReq.order_request_id,
+                        ct);
+            }
+
+            estimate ??= await _db.cost_estimates
+                .Where(x => x.order_request_id == orderReq.order_request_id)
+                .OrderByDescending(x => x.is_active)
+                .ThenByDescending(x => x.estimate_id)
+                .FirstOrDefaultAsync(ct);
+
+            if (estimate == null)
+                throw new InvalidOperationException("Không tìm thấy cost_estimate để reserve NVL.");
+
+            return estimate;
+        }
         private async Task<sub_product> ResolveValidSubProductAsync(
     int subId,
     production prod,
@@ -4119,6 +4503,97 @@ namespace AMMS.Infrastructure.Repositories
                     est_ink_weight_kg = i.est_ink_weight_kg
                 })
                 .FirstOrDefaultAsync(ct);
+        }
+
+        private static string NormProdKind(string? value)
+        {
+            return (value ?? "")
+                .Trim()
+                .ToUpperInvariant();
+        }
+
+        private static bool IsGroupProductionKind(string? value)
+        {
+            return string.Equals(
+                NormProdKind(value),
+                "GROUP",
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsSplitProductionKind(string? value)
+        {
+            return string.Equals(
+                NormProdKind(value),
+                "SPLIT",
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool ShouldConsumeMaterialsWhenStart(production prod)
+        {
+            /*
+             * SINGLE: giữ logic cũ, start thì xuất NVL theo BOM.
+             *
+             * GROUP: task group đang input_mode MANUAL, NVL được báo cáo/xuất khi finish task group.
+             * SPLIT: BE/DUT/DAN là phần tách sau group, không xuất lại NVL đầu vào của order.
+             *
+             * Nếu để GROUP/SPLIT gọi ConsumeMaterialsOnProductionStartAsync thì:
+             * - GROUP sẽ lỗi vì order_id = null.
+             * - SPLIT có thể xuất NVL trùng với SINGLE.
+             */
+            return !IsGroupProductionKind(prod.prod_kind) &&
+                   !IsSplitProductionKind(prod.prod_kind);
+        }
+
+        private async Task SyncDirectProductionOrderToInProcessingAsync(
+            production prod,
+            CancellationToken ct)
+        {
+            if (!prod.order_id.HasValue)
+                return;
+
+            var order = await _db.orders
+                .FirstOrDefaultAsync(o => o.order_id == prod.order_id.Value, ct);
+
+            if (order == null)
+                return;
+
+            if (!string.Equals(order.status, "Completed", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(order.status, "Delivery", StringComparison.OrdinalIgnoreCase))
+            {
+                order.status = "InProcessing";
+            }
+        }
+
+        private async Task SyncGroupMemberOrdersToInProcessingAsync(
+            int groupProdId,
+            CancellationToken ct)
+        {
+            var orderIds = await _db.prod_orders
+                .AsNoTracking()
+                .Where(x =>
+                    x.prod_id == groupProdId &&
+                    x.status == "Active")
+                .Select(x => x.order_id)
+                .Distinct()
+                .ToListAsync(ct);
+
+            if (orderIds.Count == 0)
+                return;
+
+            var orders = await _db.orders
+                .Where(x => orderIds.Contains(x.order_id))
+                .ToListAsync(ct);
+
+            foreach (var order in orders)
+            {
+                if (string.Equals(order.status, "Completed", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(order.status, "Delivery", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                order.status = "InProcessing";
+            }
         }
 
         private async Task<int?> ResolveGroupRepresentativeOrderIdAsync(

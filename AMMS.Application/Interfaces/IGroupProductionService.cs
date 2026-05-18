@@ -32,5 +32,8 @@ namespace AMMS.Application.Interfaces
         Task<GroupProductionTaskContextDto?> GetTaskContextAsync(
             int taskId,
             CancellationToken ct = default);
+        Task<GroupProductionConfirmPreviewResponse> PreviewAsync(
+    CreateGroupProductionRequest req,
+    CancellationToken ct = default);
     }
 }

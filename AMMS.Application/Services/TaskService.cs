@@ -163,30 +163,51 @@ namespace AMMS.Application.Services
 
             foreach (var link in links)
             {
-                var singleTasks = await _db.tasks
+                var singleProd = await _db.productions
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.prod_id == link.single_prod_id, ct);
+
+                if (singleProd == null)
+                    throw new InvalidOperationException($"Không tìm thấy single production {link.single_prod_id}.");
+
+                var currentCode = GroupProductionHelper.Norm(link.process_code);
+
+                var currentStepSeq = await _db.product_type_processes
+                    .AsNoTracking()
+                    .Where(x =>
+                        x.product_type_id == singleProd.product_type_id &&
+                        x.process_code != null &&
+                        x.process_code.ToUpper() == currentCode)
+                    .Select(x => (int?)x.seq_num)
+                    .FirstOrDefaultAsync(ct);
+
+                if (!currentStepSeq.HasValue)
+                    continue;
+
+                var previousTasks = await _db.tasks
                     .AsNoTracking()
                     .Include(x => x.process)
                     .Where(x => x.prod_id == link.single_prod_id)
+                    .Where(x => x.process != null)
+                    .Where(x =>
+                        _db.product_type_processes.Any(p =>
+                            p.product_type_id == singleProd.product_type_id &&
+                            p.process_id == x.process_id &&
+                            p.seq_num < currentStepSeq.Value))
                     .OrderBy(x => x.seq_num)
                     .ToListAsync(ct);
 
-                var targetTask = singleTasks.FirstOrDefault(x => x.task_id == link.single_task_id);
-
-                if (targetTask == null)
-                    throw new InvalidOperationException($"Không tìm thấy single task {link.single_task_id}.");
-
-                var targetSeq = targetTask.seq_num ?? int.MaxValue;
-
-                var notFinishedBefore = singleTasks
-                    .Where(x => (x.seq_num ?? int.MaxValue) < targetSeq)
-                    .Where(x => !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase))
+                var notFinished = previousTasks
+                    .Where(x =>
+                        !string.Equals(x.status, "Finished", StringComparison.OrdinalIgnoreCase) &&
+                        x.end_time == null)
                     .ToList();
 
-                if (notFinishedBefore.Count > 0)
+                if (notFinished.Count > 0)
                 {
                     throw new InvalidOperationException(
-                        $"Order {link.order_id} chưa hoàn thành công đoạn riêng trước công đoạn ghép. " +
-                        $"Còn thiếu: {string.Join(",", notFinishedBefore.Select(x => x.process?.process_code ?? x.name))}");
+                        $"Order {link.order_id} chưa hoàn thành công đoạn riêng trước công đoạn ghép {currentCode}. " +
+                        $"Còn thiếu: {string.Join(",", notFinished.Select(x => x.process?.process_code ?? x.name))}");
                 }
             }
         }
