@@ -616,24 +616,25 @@ namespace AMMS.Application.Services
             if (orderCode <= 0)
                 return null;
 
-            var payment = await _db.payments
-                .AsNoTracking()
-                .Where(x => x.provider == "PAYOS" && x.order_code == orderCode)
-                .OrderByDescending(x => x.payment_id)
-                .FirstOrDefaultAsync(ct);
-
-            if (payment == null)
-                return null;
-            var receiptStatus = await ResolveReceiptPaymentStatusAsync(
-    payment,
+            var loaded = await LoadTrackedPaymentAndResolveReceiptStatusAsync(
+    orderCode,
     payosRawJson: null,
     forceGenerateWhenPayOsPaid: false,
     ct: ct);
 
+            if (loaded == null)
+                return null;
+
+            var payment = loaded.Value.Payment;
+            var receiptStatus = loaded.Value.ReceiptStatus;
+
             if (!receiptStatus.is_paid)
                 return null;
 
-            payment.status = receiptStatus.status;
+            /*
+             * Đến đây nếu PayOS live trả PAID/SUCCESS,
+             * payment.status trong DB đã được sync thành PAID.
+             */
 
             if (!payment.paid_at.HasValue)
                 payment.paid_at = receiptStatus.paid_at;
@@ -687,7 +688,17 @@ namespace AMMS.Application.Services
                 .ToListAsync(ct);
 
             static DateTime GetSortTime(payment x)
-                => (DateTime)x.paid_at;
+            {
+                DateTime? value = x.paid_at;
+
+                if (!value.HasValue)
+                    value = x.updated_at;
+
+                if (!value.HasValue)
+                    value = x.created_at;
+
+                return value ?? DateTime.MinValue;
+            }
 
             var orderedPaidPayments = paidPayments
                 .OrderBy(GetSortTime)
@@ -745,9 +756,8 @@ namespace AMMS.Application.Services
                 provider = payment.provider,
                 payment_type = payment.payment_type ?? "",
                 payment_type_display = paymentTypeDisplay,
-                payment_status = payment.status,
+                payment_status = receiptStatus.status,
                 currency = payment.currency,
-
                 payos_order_code = payment.order_code,
                 payos_payment_link_id = payment.payos_payment_link_id,
                 payos_transaction_id = payment.payos_transaction_id,
@@ -805,25 +815,26 @@ namespace AMMS.Application.Services
             if (orderCode <= 0)
                 return null;
 
-            var payment = await _db.payments
-                .AsNoTracking()
-                .Where(x => x.provider == "PAYOS" && x.order_code == orderCode)
-                .OrderByDescending(x => x.payment_id)
-                .FirstOrDefaultAsync(ct);
-
-            if (payment == null)
-                return null;
-
-            var receiptStatus = await ResolveReceiptPaymentStatusAsync(
-    payment,
+            var loaded = await LoadTrackedPaymentAndResolveReceiptStatusAsync(
+    orderCode,
     payosRawJson: null,
     forceGenerateWhenPayOsPaid: false,
     ct: ct);
 
+            if (loaded == null)
+                return null;
+
+            var payment = loaded.Value.Payment;
+            var receiptStatus = loaded.Value.ReceiptStatus;
+
             if (!receiptStatus.is_paid)
                 return null;
 
-            payment.status = receiptStatus.status;
+            /*
+             * Sau dòng này:
+             * - Nếu PayOS live trả PAID/SUCCESS thì đã sync payments.status = PAID.
+             * - PDF sẽ được tạo dựa trên trạng thái live PayOS.
+             */
 
             if (!payment.paid_at.HasValue)
                 payment.paid_at = receiptStatus.paid_at;
@@ -1054,20 +1065,17 @@ namespace AMMS.Application.Services
         {
             try
             {
-                var payment = await _db.payments
-                    .AsNoTracking()
-                    .Where(x => x.provider == "PAYOS" && x.order_code == orderCode)
-                    .OrderByDescending(x => x.payment_id)
-                    .FirstOrDefaultAsync(ct);
+                var loaded = await LoadTrackedPaymentAndResolveReceiptStatusAsync(
+    orderCode,
+    payosRawJson,
+    forceGenerateWhenPayOsPaid,
+    ct);
 
-                if (payment == null)
+                if (loaded == null)
                     return;
 
-                var receiptStatus = await ResolveReceiptPaymentStatusAsync(
-                    payment,
-                    payosRawJson,
-                    forceGenerateWhenPayOsPaid,
-                    ct);
+                var payment = loaded.Value.Payment;
+                var receiptStatus = loaded.Value.ReceiptStatus;
 
                 if (!receiptStatus.is_paid)
                     return;
@@ -1145,64 +1153,190 @@ namespace AMMS.Application.Services
         }
 
         private async Task<ReceiptPaymentStatusContext> ResolveReceiptPaymentStatusAsync(
-            payment payment,
-            string? payosRawJson = null,
-            bool forceGenerateWhenPayOsPaid = false,
-            CancellationToken ct = default)
+    payment payment,
+    string? payosRawJson = null,
+    bool forceGenerateWhenPayOsPaid = false,
+    CancellationToken ct = default)
         {
-            var dbPaid = IsSuccessfulPaymentStatus(payment.status);
+            /*
+             * Ưu tiên số 1: gọi live trực tiếp từ PayOS.
+             * Nếu PayOS trả PAID/SUCCESS thì lấy đó làm căn cứ tạo phiếu thu.
+             */
+            PayOsResultDto? liveInfo = null;
+            var liveChecked = false;
+            var livePaid = false;
 
+            try
+            {
+                liveInfo = await _payOs.GetPaymentLinkInformationAsync(
+                    payment.order_code,
+                    ct);
+
+                liveChecked = true;
+                livePaid = IsSuccessfulPaymentStatus(liveInfo?.status);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Cannot verify PayOS live status before receipt generation. OrderCode={OrderCode}",
+                    payment.order_code);
+            }
+
+            /*
+             * Fallback:
+             * - payosRawJson: raw vừa truyền từ webhook/return.
+             * - payment.payos_raw: raw đã lưu trong DB.
+             * - payment.status: status đã lưu trong tbl payments.
+             */
             var rawPaid =
                 forceGenerateWhenPayOsPaid ||
                 PayOsRawIndicatesPaid(payosRawJson) ||
                 PayOsRawIndicatesPaid(payment.payos_raw);
 
-            PayOsResultDto? liveInfo = null;
-            var livePaid = false;
+            var dbPaid = IsSuccessfulPaymentStatus(payment.status);
 
-            if (!dbPaid && !rawPaid)
-            {
-                try
-                {
-                    liveInfo = await _payOs.GetPaymentLinkInformationAsync(payment.order_code, ct);
-                    livePaid = IsSuccessfulPaymentStatus(liveInfo?.status);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(
-                        ex,
-                        "Cannot verify PayOS status before receipt generation. OrderCode={OrderCode}",
-                        payment.order_code);
-                }
-            }
+            /*
+             * Mặc định: ưu tiên live PayOS.
+             * Nếu live PAID => paid.
+             * Nếu live lỗi/chưa có hoặc raw/db đã PAID => vẫn cho tạo phiếu thu để không gãy flow cũ.
+             */
+            var isPaid = livePaid || rawPaid || dbPaid;
 
-            var isPaid = dbPaid || rawPaid || livePaid;
+            /*
+             * Status hiển thị/đồng bộ:
+             * - Nếu live PayOS paid => lấy live status.
+             * - Nếu raw paid => PAID.
+             * - Nếu DB paid => lấy DB status.
+             * - Nếu chưa paid => ưu tiên live status nếu có, không thì DB status.
+             */
+            var liveStatus = liveInfo?.status;
 
             var resolvedStatus =
-                dbPaid ? payment.status :
+                livePaid ? liveStatus ?? "PAID" :
                 rawPaid ? "PAID" :
-                livePaid ? liveInfo?.status ?? "PAID" :
+                dbPaid ? payment.status ?? "PAID" :
+                !string.IsNullOrWhiteSpace(liveStatus) ? liveStatus :
                 payment.status ?? "PENDING";
 
             decimal? resolvedAmount = null;
 
+            /*
+             * Ưu tiên amount trong DB vì đây là amount business thực tế.
+             * PayOS amount có thể là amount gateway/test.
+             */
             if (payment.amount > 0)
                 resolvedAmount = payment.amount;
-            else if (liveInfo?.amount.HasValue == true)
+            else if (liveInfo?.amount.HasValue == true && liveInfo.amount.Value > 0)
                 resolvedAmount = liveInfo.amount.Value;
 
             return new ReceiptPaymentStatusContext
             {
                 is_paid = isPaid,
-                status = resolvedStatus,
+                status = CanonicalReceiptPaidStatus(resolvedStatus),
                 paid_at = ResolveReceiptPaidAt(payment),
                 amount = resolvedAmount,
+
+                /*
+                 * Ưu tiên raw/link/transaction live từ PayOS.
+                 */
                 payos_raw = liveInfo?.raw_json ?? payosRawJson ?? payment.payos_raw,
                 payment_link_id = liveInfo?.payment_link_id ?? payment.payos_payment_link_id,
                 transaction_id = liveInfo?.transaction_id ?? payment.payos_transaction_id
             };
         }
 
+        private static string CanonicalReceiptPaidStatus(string? status)
+        {
+            var st = (status ?? "").Trim().ToUpperInvariant();
+
+            return st switch
+            {
+                "SUCCESS" => "PAID",
+                "PAID" => "PAID",
+                "" => "PENDING",
+                _ => st
+            };
+        }
+
+        private static void SyncTrackedPaymentFromReceiptStatus(
+            payment payment,
+            ReceiptPaymentStatusContext receiptStatus)
+        {
+            if (payment == null || receiptStatus == null)
+                return;
+
+            if (!receiptStatus.is_paid)
+                return;
+
+            payment.status = CanonicalReceiptPaidStatus(receiptStatus.status);
+            payment.paid_at ??= receiptStatus.paid_at;
+            payment.updated_at = AppTime.NowVnUnspecified();
+
+            /*
+             * Không overwrite amount nếu DB đã có amount,
+             * vì DB đang lưu amount thực tế theo hệ thống.
+             * PayOS live amount có thể là gateway amount nếu bạn đang scale/test amount.
+             */
+            if (payment.amount <= 0 && receiptStatus.amount.HasValue && receiptStatus.amount.Value > 0)
+                payment.amount = receiptStatus.amount.Value;
+
+            if (string.IsNullOrWhiteSpace(payment.payos_raw) &&
+                !string.IsNullOrWhiteSpace(receiptStatus.payos_raw))
+            {
+                payment.payos_raw = receiptStatus.payos_raw;
+            }
+
+            if (string.IsNullOrWhiteSpace(payment.payos_payment_link_id) &&
+                !string.IsNullOrWhiteSpace(receiptStatus.payment_link_id))
+            {
+                payment.payos_payment_link_id = receiptStatus.payment_link_id;
+            }
+
+            if (string.IsNullOrWhiteSpace(payment.payos_transaction_id) &&
+                !string.IsNullOrWhiteSpace(receiptStatus.transaction_id))
+            {
+                payment.payos_transaction_id = receiptStatus.transaction_id;
+            }
+        }
+
+        private async Task<(payment Payment, ReceiptPaymentStatusContext ReceiptStatus)?>
+            LoadTrackedPaymentAndResolveReceiptStatusAsync(
+                long orderCode,
+                string? payosRawJson = null,
+                bool forceGenerateWhenPayOsPaid = false,
+                CancellationToken ct = default)
+        {
+            if (orderCode <= 0)
+                return null;
+
+            /*
+             * Không dùng AsNoTracking ở đây.
+             * Vì nếu PayOS live trả PAID thì ta cần sync lại tbl payments.
+             */
+           
+            var payment = await _db.payments
+                .Where(x => x.provider == "PAYOS" && x.order_code == orderCode)
+                .OrderByDescending(x => x.payment_id)
+                .FirstOrDefaultAsync(ct);
+
+            if (payment == null)
+                return null;
+
+            var receiptStatus = await ResolveReceiptPaymentStatusAsync(
+                payment,
+                payosRawJson,
+                forceGenerateWhenPayOsPaid,
+                ct);
+
+            if (receiptStatus.is_paid)
+            {
+                SyncTrackedPaymentFromReceiptStatus(payment, receiptStatus);
+                await _db.SaveChangesAsync(ct);
+            }
+
+            return (payment, receiptStatus);
+        }
         private sealed class ReceiptPaymentStatusContext
         {
             public bool is_paid { get; init; }
