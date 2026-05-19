@@ -20,13 +20,20 @@ namespace AMMS.Infrastructure.Interfaces
         Task<ProductionDetailDto?> GetProductionDetailByOrderIdAsync(int orderId, CancellationToken ct = default);
         Task<ProductionWasteReportDto?> GetProductionWasteAsync(int prodId, CancellationToken ct = default);
         Task<bool> TryCloseProductionIfCompletedAsync(int prodId, DateTime now, CancellationToken ct = default);
-        Task<bool> StartProductionByOrderIdAsync(int orderId, DateTime now, CancellationToken ct = default);
+        Task<int?> StartProductionByProdIdOnlyAsync(
+            int prodId,
+            DateTime now,
+            CancellationToken ct = default);
+
+        Task<bool> StartProductionByProdIdAsync(
+            int prodId,
+            DateTime now,
+            CancellationToken ct = default);
         Task<bool> SetProductionDeliveryByOrderIdAsync(int orderId, CancellationToken ct = default);
         Task SaveChangesAsync(CancellationToken ct = default);
         Task<List<MachineScheduleBoardDto>> GetMachineScheduleBoardAsync(DateTime from, DateTime to, CancellationToken ct = default);
         Task<bool> SetCompletedByOrderIdAsync(int orderId, CancellationToken ct = default);
         Task<production?> GetLatestByOrderIdAsync(int orderId, CancellationToken ct = default);
-        Task<int?> StartProductionByOrderIdOnlyAsync(int orderId, DateTime now, CancellationToken ct = default);
         Task<ImportReceiveSourceDto?> GetImportReceiveSourceByOrderIdAsync(int orderId, CancellationToken ct = default);
         Task<bool> SaveImportReceivePathAsync(int prodId, string path, CancellationToken ct = default);
         Task<SetProductionMethodResponse?> SetProductionMethodAsync(SetProductionMethodRequest req, CancellationToken ct = default);

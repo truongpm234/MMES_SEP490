@@ -35,6 +35,13 @@
         public string? group_status { get; set; }
         public string? group_process_codes { get; set; }
         public int? group_total_qty { get; set; }
-        //public List<int> group_prod_ids { get; set; } = new();
+        public int production_id { get; set; }
+        public DateTime? created_at { get; set; }
+
+        public DateTime? start_date { get; set; }
+
+        public DateTime? end_date { get; set; }
+
+        public string? order_status { get; set; }
     }
 }

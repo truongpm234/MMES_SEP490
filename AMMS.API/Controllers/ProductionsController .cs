@@ -195,56 +195,105 @@ namespace AMMS.API.Controllers
 
                 var state = await _service.GetProductionReadyAsync(orderId, ct);
 
-                if (state?.is_production_ready == true &&
-                    string.Equals(state.production_method, "NVL", StringComparison.OrdinalIgnoreCase))
+                /*
+                 * Case 4:
+                 * GM hủy trạng thái ready.
+                 */
+                if (!req.is_production_ready)
                 {
-                    await _hub.Clients.Group(RealtimeGroups.ByRole("production manager"))
-                        .SendAsync("approved-production", new
-                        {
-                            message = $"Đơn {orderId} đã được tự động duyệt sản xuất bằng NVL"
-                        }, ct);
-
-                    await _noti.CreateNotfi(
-                        6,
-                        $"Đơn {orderId} đã được tự động duyệt sản xuất bằng NVL",
-                        null,
+                    await PublishProductionReadyCancelledAsync(
                         orderId,
-                        "Scheduled");
+                        state,
+                        ct);
 
                     return Ok(new
                     {
                         order_id = orderId,
-                        is_production_ready = true,
-                        production_method = "NVL",
+                        is_production_ready = false,
                         need_manager_approval = false,
-                        gm_proposed_method = state.gm_proposed_method,
-                        proposed_production_method = state.proposed_production_method,
-                        message = "Auto confirmed production by NVL and scheduled tasks."
+                        event_type = "READY_CANCELLED",
+                        message = "Production ready was cancelled."
                     });
                 }
 
-                await _hub.Clients.Group(RealtimeGroups.ByRole("manager"))
-                    .SendAsync("approve-production", new
-                    {
-                        message = $"Có đơn {orderId} cần duyệt phương thức sản xuất"
-                    }, ct);
+                var approvedMethod = NormalizeMethodForNotify(state?.production_method);
 
-                await _noti.CreateNotfi(
-                    3,
-                    $"Có đơn {orderId} cần duyệt phương thức sản xuất",
-                    null,
+                /*
+                 * Case 1:
+                 * Chỉ có 1 method khả dụng.
+                 * Service đã auto duyệt NVL/SUB/BOTH.
+                 */
+                if (state?.is_production_ready == true &&
+                    approvedMethod is "NVL" or "SUB" or "BOTH")
+                {
+                    await PublishAutoApprovedProductionAsync(
+                        orderId,
+                        state,
+                        ct);
+
+                    return Ok(new
+                    {
+                        order_id = orderId,
+                        production_id = state.production_id,
+                        prod_id = state.production_id,
+
+                        is_production_ready = true,
+                        production_method = approvedMethod,
+                        need_manager_approval = false,
+
+                        event_type = "AUTO_APPROVED",
+                        approval_flow = "AUTO_SINGLE_OPTION",
+
+                        gm_note = req.gm_note,
+                        gm_proposed_method = state.gm_proposed_method,
+                        proposed_production_method = state.proposed_production_method,
+
+                        selected_sub_product_id = state.selected_sub_product_id,
+                        sub_product_used_qty = state.sub_product_used_qty,
+                        nvl_qty = state.nvl_qty,
+
+                        can_use_nvl = state.can_use_nvl,
+                        can_use_sub = state.can_use_sub,
+                        can_use_both = state.can_use_both,
+
+                        message = $"Auto confirmed production by {approvedMethod} and scheduled tasks."
+                    });
+                }
+
+                /*
+                 * Case 2:
+                 * Có từ 2 method khả dụng.
+                 * GM có thể đã gợi ý, nhưng vẫn phải chờ manager duyệt.
+                 */
+                await PublishWaitingManagerApprovalAsync(
                     orderId,
-                    "Scheduled");
+                    state,
+                    req,
+                    ct);
 
                 return Ok(new
                 {
                     order_id = orderId,
+                    production_id = state?.production_id,
+                    prod_id = state?.production_id,
+
                     is_production_ready = false,
                     need_manager_approval = true,
+
+                    event_type = "WAITING_MANAGER_APPROVAL",
+                    approval_flow = "MANUAL_MULTI_OPTION",
 
                     gm_note = req.gm_note,
                     gm_proposed_method = state?.gm_proposed_method,
                     proposed_production_method = state?.proposed_production_method,
+
+                    can_use_nvl = state?.can_use_nvl,
+                    can_use_sub = state?.can_use_sub,
+                    can_use_both = state?.can_use_both,
+
+                    selected_sub_product_id = state?.selected_sub_product_id,
+                    sub_product_used_qty = state?.sub_product_used_qty,
+                    nvl_qty = state?.nvl_qty,
 
                     message = "Sent production method approval request to manager."
                 });
@@ -294,20 +343,19 @@ namespace AMMS.API.Controllers
                     });
                 }
 
-                var prodId = await _service.ScheduleTasksAfterMethodAsync(req.order_id, ct);
-
-                await _hub.Clients.Group(RealtimeGroups.ByRole("production manager"))
-                    .SendAsync("approved-production", new
-                    {
-                        message = $"Đơn {req.order_id} đã được duyệt lệnh sản xuất"
-                    }, ct);
-
-                await _noti.CreateNotfi(
-                    6,
-                    $"Đơn {req.order_id} đã được duyệt lệnh sản xuất",
-                    null,
+                var prodId = await _service.ScheduleTasksAfterMethodAsync(
                     req.order_id,
-                    "Scheduled");
+                    ct);
+
+                /*
+                 * Case 3:
+                 * Manager đã duyệt method khi có nhiều option.
+                 */
+                await PublishManagerApprovedProductionAsync(
+                    req.order_id,
+                    prodId,
+                    result,
+                    ct);
 
                 return Ok(new
                 {
@@ -315,6 +363,10 @@ namespace AMMS.API.Controllers
                     result.order_id,
                     result.prod_id,
                     scheduled_prod_id = prodId,
+
+                    event_type = "MANAGER_APPROVED",
+                    approval_flow = "MANUAL_MULTI_OPTION",
+
                     result.is_full_process,
                     result.production_method,
                     result.sub_product_id,
@@ -348,30 +400,42 @@ namespace AMMS.API.Controllers
             }
         }
 
-        [HttpPost("start/{orderId:int}")]
-        public async Task<IActionResult> StartProduction(int orderId, CancellationToken ct)
+        [HttpPost("start/{prodId:int}")]
+        public async Task<IActionResult> StartProductionByProdId(
+    int prodId,
+    CancellationToken ct)
         {
             try
             {
-                var prodId = await _service.StartProductionAndPromoteFirstTaskAsync(orderId, ct);
+                var startedProdId = await _service.StartProductionAndPromoteFirstTaskByProdIdAsync(
+                    prodId,
+                    ct);
 
-                if (!prodId.HasValue)
-                    return NotFound(new { message = "Production not found for this orderId" });
+                if (!startedProdId.HasValue)
+                {
+                    return NotFound(new
+                    {
+                        message = "Production not found for this prodId.",
+                        prod_id = prodId
+                    });
+                }
 
                 return Ok(new
                 {
-                    message = "Production started successfully",
-                    prod_id = prodId.Value,
+                    message = "Production started successfully.",
+                    prod_id = startedProdId.Value,
+                    production_id = startedProdId.Value,
+                    production_status = "InProcessing",
                     first_task_status = "Unassigned",
-                    start_mode = "ManualReady"
+                    start_mode = "ManualReadyByProdId"
                 });
             }
             catch (BomValidationException ex)
             {
                 return BadRequest(new
                 {
-                    message = "Không thể bắt đầu sản xuất vì BOM còn dòng chưa map với id cùa nvl.",
-                    order_id = orderId,
+                    message = "Không thể bắt đầu sản xuất vì BOM còn dòng chưa map với id của NVL.",
+                    prod_id = prodId,
                     missing_bom_lines = ex.Items
                 });
             }
@@ -380,7 +444,7 @@ namespace AMMS.API.Controllers
                 return BadRequest(new
                 {
                     message = ex.Message,
-                    order_id = orderId
+                    prod_id = prodId
                 });
             }
             catch (Exception ex)
@@ -389,7 +453,7 @@ namespace AMMS.API.Controllers
                 {
                     message = "Start production failed",
                     detail = ex.Message,
-                    order_id = orderId
+                    prod_id = prodId
                 });
             }
         }
@@ -524,6 +588,262 @@ namespace AMMS.API.Controllers
                     orderId = req.order_id
                 });
             }
+        }
+
+        private static string? NormalizeMethodForNotify(string? method)
+        {
+            if (string.IsNullOrWhiteSpace(method))
+                return null;
+
+            var value = method.Trim().ToUpperInvariant();
+
+            return value is "NVL" or "SUB" or "BOTH"
+                ? value
+                : null;
+        }
+
+        private static string BuildMethodDisplayName(string? method)
+        {
+            var value = NormalizeMethodForNotify(method);
+
+            return value switch
+            {
+                "NVL" => "NVL",
+                "SUB" => "bán thành phẩm",
+                "BOTH" => "kết hợp bán thành phẩm và NVL",
+                _ => "không xác định"
+            };
+        }
+
+        private async Task PublishAutoApprovedProductionAsync(
+            int orderId,
+            ProductionReadyCheckResponse state,
+            CancellationToken ct)
+        {
+            var method = NormalizeMethodForNotify(state.production_method)
+                ?? "UNKNOWN";
+
+            var methodName = BuildMethodDisplayName(method);
+
+            var message =
+                $"Đơn {orderId} đã được tự động duyệt sản xuất bằng {methodName}.";
+
+            var payload = new
+            {
+                event_type = "AUTO_APPROVED",
+                approval_flow = "AUTO_SINGLE_OPTION",
+
+                order_id = orderId,
+                production_id = state.production_id,
+                prod_id = state.production_id,
+
+                production_method = method,
+                is_production_ready = true,
+                need_manager_approval = false,
+
+                can_use_nvl = state.can_use_nvl,
+                can_use_sub = state.can_use_sub,
+                can_use_both = state.can_use_both,
+
+                selected_sub_product_id = state.selected_sub_product_id,
+                sub_product_used_qty = state.sub_product_used_qty,
+                nvl_qty = state.nvl_qty,
+
+                message
+            };
+
+            await _hub.Clients.Group(RealtimeGroups.ByRole("production manager"))
+                .SendAsync("approved-production", payload, ct);
+
+            await _hub.Clients.All.SendAsync(
+                "update-ui",
+                new
+                {
+                    event_type = "AUTO_APPROVED",
+                    order_id = orderId,
+                    production_id = state.production_id,
+                    message
+                },
+                ct);
+
+            await _noti.CreateNotfi(
+                6,
+                message,
+                null,
+                orderId,
+                "Scheduled");
+        }
+
+        private async Task PublishWaitingManagerApprovalAsync(
+            int orderId,
+            ProductionReadyCheckResponse? state,
+            ConfirmProductionReadyRequest req,
+            CancellationToken ct)
+        {
+            var proposedMethod = NormalizeMethodForNotify(
+                state?.gm_proposed_method
+                ?? state?.proposed_production_method
+                ?? req.GetProposedMethod());
+
+            var message = proposedMethod == null
+                ? $"Có đơn {orderId} cần duyệt phương thức sản xuất."
+                : $"Có đơn {orderId} cần duyệt phương thức sản xuất. GM đề xuất: {proposedMethod}.";
+
+            var payload = new
+            {
+                event_type = "WAITING_MANAGER_APPROVAL",
+                approval_flow = "MANUAL_MULTI_OPTION",
+
+                order_id = orderId,
+                production_id = state?.production_id,
+                prod_id = state?.production_id,
+
+                is_production_ready = false,
+                need_manager_approval = true,
+
+                gm_note = req.gm_note,
+                gm_proposed_method = proposedMethod,
+                proposed_production_method = proposedMethod,
+
+                can_use_nvl = state?.can_use_nvl,
+                can_use_sub = state?.can_use_sub,
+                can_use_both = state?.can_use_both,
+
+                order_quantity = state?.order_quantity,
+                selected_sub_product_id = state?.selected_sub_product_id,
+                sub_product_used_qty = state?.sub_product_used_qty,
+                nvl_qty = state?.nvl_qty,
+
+                message
+            };
+
+            await _hub.Clients.Group(RealtimeGroups.ByRole("manager"))
+                .SendAsync("approve-production", payload, ct);
+
+            await _hub.Clients.All.SendAsync(
+                "update-ui",
+                new
+                {
+                    event_type = "WAITING_MANAGER_APPROVAL",
+                    order_id = orderId,
+                    production_id = state?.production_id,
+                    message
+                },
+                ct);
+
+            await _noti.CreateNotfi(
+                3,
+                message,
+                null,
+                orderId,
+                "Scheduled");
+        }
+
+        private async Task PublishProductionReadyCancelledAsync(
+            int orderId,
+            ProductionReadyCheckResponse? state,
+            CancellationToken ct)
+        {
+            var message =
+                $"Đơn {orderId} đã bị hủy trạng thái sẵn sàng sản xuất.";
+
+            var payload = new
+            {
+                event_type = "READY_CANCELLED",
+                approval_flow = "CANCELLED",
+
+                order_id = orderId,
+                production_id = state?.production_id,
+                prod_id = state?.production_id,
+
+                is_production_ready = false,
+                need_manager_approval = false,
+
+                message
+            };
+
+            await _hub.Clients.Group(RealtimeGroups.ByRole("production manager"))
+                .SendAsync("production-ready-cancelled", payload, ct);
+
+            await _hub.Clients.Group(RealtimeGroups.ByRole("manager"))
+                .SendAsync("production-ready-cancelled", payload, ct);
+
+            await _hub.Clients.All.SendAsync(
+                "update-ui",
+                new
+                {
+                    event_type = "READY_CANCELLED",
+                    order_id = orderId,
+                    production_id = state?.production_id,
+                    message
+                },
+                ct);
+        }
+
+        private async Task PublishManagerApprovedProductionAsync(
+    int orderId,
+    int? scheduledProdId,
+    SetProductionMethodResponse result,
+    CancellationToken ct)
+        {
+            var method = NormalizeMethodForNotify(result.production_method)
+                ?? "UNKNOWN";
+
+            var methodName = BuildMethodDisplayName(method);
+
+            var productionId = scheduledProdId ?? result.prod_id;
+
+            var message =
+                $"Đơn {orderId} đã được manager duyệt sản xuất bằng {methodName}.";
+
+            var payload = new
+            {
+                event_type = "MANAGER_APPROVED",
+                approval_flow = "MANUAL_MULTI_OPTION",
+
+                order_id = orderId,
+                production_id = productionId,
+                prod_id = productionId,
+
+                production_method = method,
+                is_production_ready = true,
+                need_manager_approval = false,
+
+                is_full_process = result.is_full_process,
+                sub_product_id = result.sub_product_id,
+                sub_product_used_qty = result.sub_product_used_qty,
+                nvl_qty = result.nvl_qty,
+                order_quantity = result.order_quantity,
+
+                gm_note = result.gm_note,
+                mgr_note = result.mgr_note,
+
+                message
+            };
+
+            await _hub.Clients.Group(RealtimeGroups.ByRole("production manager"))
+                .SendAsync("approved-production", payload, ct);
+
+            await _hub.Clients.Group(RealtimeGroups.ByRole("general manager"))
+                .SendAsync("production-method-approved", payload, ct);
+
+            await _hub.Clients.All.SendAsync(
+                "update-ui",
+                new
+                {
+                    event_type = "MANAGER_APPROVED",
+                    order_id = orderId,
+                    production_id = productionId,
+                    message
+                },
+                ct);
+
+            await _noti.CreateNotfi(
+                6,
+                message,
+                null,
+                orderId,
+                "Scheduled");
         }
     }
 }
